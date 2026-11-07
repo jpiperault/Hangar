@@ -1,0 +1,6 @@
+// Sécurité Debian uniquement. Docker et Caddy restent manuels (via la console).
+Unattended-Upgrade::Origins-Pattern {
+        "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+};
+Unattended-Upgrade::Package-Blacklist { "docker-ce"; "docker-ce-cli"; "containerd.io"; "caddy"; "cloudflared"; };
+Unattended-Upgrade::Automatic-Reboot "false";

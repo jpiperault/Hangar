@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connexion · Hangar</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="login">
+  <form class="panel" method="post" action="/login">
+    <div class="brand" style="padding:0"><b></b>Hangar</div>
+    <p class="hint">Console d'administration de {{ s.hub }}.{{ s.base_domain }}</p>
+    {% if flash %}<div class="flash {{ flash.kind }}" role="status">{{ flash.msg }}</div>{% endif %}
+    <div class="field"><label for="username">Identifiant</label><input id="username" name="username" value="admin" autocomplete="username" required></div>
+    <div class="field"><label for="password">Mot de passe</label><input id="password" name="password" type="password" autocomplete="current-password" required autofocus></div>
+    <button class="btn primary" type="submit">Se connecter</button>
+  </form>
+</div>
+</body>
+</html>

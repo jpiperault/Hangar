@@ -1,0 +1,334 @@
+{% extends "base.html" %}
+{% block main %}
+<style>
+/* Générateur de prompt : formulaire à gauche, prompt collant à droite */
+.gen-grid{display:grid;grid-template-columns:minmax(0,440px) minmax(0,1fr);gap:20px;align-items:start}
+.gen-grid form{display:flex;flex-direction:column;gap:14px;min-width:0}
+.gen-grid fieldset{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:14px 18px 16px;margin:0;display:flex;flex-direction:column;gap:12px;min-width:0}
+.gen-grid legend{padding:0 6px;font-weight:700;font-size:.95rem}
+.gen-grid label{font-weight:600}
+.gen-grid .check span{font-weight:500}
+.gen-grid input.bad{border-color:var(--warn)}
+.out{position:sticky;top:16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.outbar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.gen-label{display:block;font-family:var(--mono);font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.stats{font-family:var(--mono);font-size:.75rem;color:var(--muted)}
+.btns{display:flex;gap:8px}
+.btn.ghost{background:var(--surface)}
+.btn#copy{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+pre#prompt{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px;font-family:var(--mono);font-size:.78rem;line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:calc(100vh - 120px);overflow:auto}
+.warns{display:flex;flex-direction:column;gap:6px}
+.warn{background:var(--warn-soft);border-left:3px solid var(--warn);padding:6px 10px;border-radius:0 6px 6px 0;font-size:.82rem}
+.toast{font-size:.85rem;color:var(--ok);font-weight:600;min-height:1.2em}
+.gen-intro{color:var(--muted);max-width:75ch}
+@media (max-width:1000px){.gen-grid{grid-template-columns:1fr}.out{position:static}pre#prompt{max-height:none}}
+</style>
+<div class="bar">
+  <div>{% if app %}<div class="crumb"><a href="/">Applications</a> / <a href="/apps/{{ app.slug }}">{{ app.name }}</a> /</div>{% endif %}
+  <h1>Prompt de déploiement</h1></div>
+  {% if apps %}
+  <form method="get" action="/prompt" style="display:flex;gap:8px;align-items:center">
+    <label for="appsel" class="hint">Préremplir avec</label>
+    <select id="appsel" name="app" onchange="this.form.submit()">
+      <option value="">Nouvelle appli (exemple)</option>
+      {% for x in apps %}<option value="{{ x.slug }}" {{ 'selected' if app and x.slug == app.slug }}>{{ x.name }}</option>{% endfor %}
+    </select>
+    <noscript><button class="btn sm">OK</button></noscript>
+  </form>
+  {% endif %}
+</div>
+<p class="gen-intro">Décris l'application, copie le prompt, puis colle-le dans Claude, dans le projet de l'appli. Claude prépare le Dockerfile, le healthcheck, le test local, la publication sur ghcr.io, le client Android et DEPLOY.md, avec les valeurs à saisir ici. {% if app %}Le formulaire reprend la fiche de {{ app.name }}.{% else %}Le formulaire est prérempli avec un exemple.{% endif %} Le domaine et le mode d'exposition viennent des réglages de la console.</p>
+<div class="gen-grid">
+<form id="f" autocomplete="off">
+  <fieldset>
+    <legend>Application</legend>
+    <div class="row2">
+      <div class="field"><label for="name">Nom</label><input type="text" id="name" value="Cuisine"></div>
+      <div class="field"><label for="slug">Identifiant</label><input type="text" id="slug" value="cuisine" spellcheck="false"><span class="hint">Minuscules, chiffres, tirets.</span></div>
+    </div>
+    <div class="field"><label for="pkg">Package Android</label><input type="text" id="pkg" value="fr.piperault.cuisine" spellcheck="false"></div>
+    <div class="field"><span class="lbl">Adresse publique</span>
+      <div class="seg" role="radiogroup" aria-label="Adresse publique">
+        <label><input type="radio" name="expose" value="sub" checked><span>Sous-domaine</span></label>
+        <label><input type="radio" name="expose" value="path"><span>Chemin</span></label>
+      </div>
+    </div>
+    <div class="field" id="subwrap"><label for="sub">Sous-domaine</label><div class="suffix"><input type="text" id="sub" value="cuisine" spellcheck="false"><span id="subsuffix">.piperault.fr</span></div></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Backend</legend>
+    <div class="field"><label for="stack">Stack</label>
+      <select id="stack">
+        <option value="detect">À détecter dans le dépôt</option>
+        <option value="ktor" selected>Kotlin + Ktor</option>
+        <option value="spring">Kotlin/Java + Spring Boot</option>
+        <option value="node">Node.js (Express, Fastify, NestJS…)</option>
+        <option value="python">Python (FastAPI, Django, Flask…)</option>
+        <option value="go">Go</option>
+        <option value="php">PHP (Laravel, Symfony…)</option>
+      </select></div>
+    <div class="row2">
+      <div class="field"><label for="port">Port interne</label><input type="number" id="port" value="8080" min="1" max="65535"></div>
+      <div class="field"><label for="mem">RAM max (Mo)</label><input type="number" id="mem" value="384" min="32" max="4096"><span class="hint" id="memhint"></span></div>
+    </div>
+    <div class="field"><label for="repo">Où est le backend dans le dépôt</label><input type="text" id="repo" value="server/" spellcheck="false"><span class="hint">Laisse vide si le backend est à la racine ou si tu ne sais pas.</span></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Données</legend>
+    <label class="check"><input type="checkbox" id="db" checked><span>Base PostgreSQL dédiée</span></label>
+    <label class="check"><input type="checkbox" id="files" checked><span>Fichiers envoyés par les utilisateurs (stockés dans /data)</span></label>
+    <div class="field" id="fileswrap"><label for="filesdesc">Quels fichiers</label><input type="text" id="filesdesc" value="photos des recettes" ></div>
+    <label class="check"><input type="checkbox" id="export" checked><span>Export et import des données par l'utilisateur (sauvegarde personnelle)</span></label>
+    <div class="field"><label for="env">Autres variables d'environnement</label><textarea id="env" spellcheck="false">JWT_SECRET : signature des jetons de connexion
+ADMIN_EMAIL : adresse de l'administrateur</textarea><span class="hint">Une par ligne, au format « CLE : rôle ». Jamais de valeur secrète ici.</span></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Clients</legend>
+    <label class="check"><input type="checkbox" id="web" checked><span>Version web servie par le même conteneur</span></label>
+    <div class="field" id="webwrap"><label for="webfw">Front web</label>
+      <select id="webfw">
+        <option value="detect">À détecter dans le dépôt</option>
+        <option value="react" selected>React (Vite)</option>
+        <option value="vue">Vue (Vite)</option>
+        <option value="svelte">Svelte / SvelteKit statique</option>
+        <option value="angular">Angular</option>
+        <option value="kmp">Compose Multiplatform (Wasm)</option>
+        <option value="none">À créer : page simple sans framework</option>
+      </select>
+      <input type="text" id="webdir" value="web/" spellcheck="false" aria-label="Dossier du front" style="margin-top:6px"><span class="hint">Dossier du front dans le dépôt.</span></div>
+    <label class="check"><input type="checkbox" id="android" checked><span>Adapter l'appli Android (lecture de apps.json)</span></label>
+    <div class="field" id="androidwrap"><label for="androiddir">Dossier de l'appli Android</label><input type="text" id="androiddir" value="app/" spellcheck="false"><span class="hint">Laisse vide si elle est dans un autre dépôt.</span></div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Publication</legend>
+    <div class="field"><label for="gh">Compte ou organisation GitHub</label><input type="text" id="gh" value="piperault" spellcheck="false"></div>
+    <label class="check"><input type="checkbox" id="ci" checked><span>Créer l'Action GitHub qui publie l'image sur ghcr.io</span></label>
+    <label class="check"><input type="checkbox" id="private" checked><span>Image privée</span></label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Plateforme</legend>
+    <div class="row2">
+      <div class="field"><label for="base">Domaine de base</label><input type="text" id="base" value="piperault.fr" spellcheck="false"></div>
+      <div class="field"><label for="hub">Hôte des routes par chemin</label><input type="text" id="hub" value="apps" spellcheck="false"></div>
+    </div>
+    <div class="field"><span class="lbl">Exposition</span>
+      <div class="seg" role="radiogroup" aria-label="Exposition">
+        <label><input type="radio" name="mode" value="tunnel" checked><span>Tunnel Cloudflare</span></label>
+        <label><input type="radio" name="mode" value="direct"><span>Direct</span></label>
+      </div></div>
+    <label class="check"><input type="checkbox" id="root"><span>Garder le conteneur en root</span></label>
+    <span class="hint">Décoché (recommandé) : l'image déclare un USER numérique non-root et Hangar lui attribue /data à chaque déploiement.</span>
+  </fieldset>
+</form>
+
+<section class="out" aria-label="Prompt généré">
+  <div class="outbar">
+    <div><span class="gen-label">Prompt généré</span><span class="stats" id="stats"></span></div>
+    <div class="btns"><button class="btn ghost" type="button" id="reset">Remettre l'exemple</button><button class="btn" type="button" id="copy">Copier le prompt</button></div>
+  </div>
+  <span class="toast" id="toast" role="status" aria-live="polite"></span>
+  <div class="warns" id="warns"></div>
+  <pre id="prompt" tabindex="0"></pre>
+</section>
+</div>
+
+<script>window.HANGAR = {{ hangar | tojson }};</script>
+<script>{% raw %}
+(function(){
+  var KEY='hangar-console-prompt-v1';
+  var f=document.getElementById('f');
+  var $=function(id){return document.getElementById(id)};
+  var defaults={};
+  Array.prototype.forEach.call(f.elements,function(el){ if(!el.id&&el.type!=='radio')return; defaults[el.type==='radio'?el.name+'='+el.value:el.id]=(el.type==='checkbox'||el.type==='radio')?el.checked:el.value; });
+
+  function radio(n){var r=f.querySelector('input[name='+n+']:checked');return r?r.value:''}
+  function v(id){return ($(id).value||'').trim()}
+  function c(id){return $(id).checked}
+
+  var STACK={
+    detect:{label:'à détecter dans le dépôt',tips:[]},
+    ktor:{label:'Kotlin + Ktor',jvm:true,tips:['Construis un fat jar (plugin Ktor `buildFatJar` ou Shadow) dans une étape `gradle:8-jdk21`, et exécute-le sur `eclipse-temurin:21-jre`.','Moteur Netty ou CIO lié à `0.0.0.0`.','Fichiers statiques du web avec `staticResources` ou `staticFiles`, repli sur `index.html`.','Migrations avec Flyway au démarrage.']},
+    spring:{label:'Kotlin/Java + Spring Boot',jvm:true,tips:['Build avec `./gradlew bootJar` ou `mvn package`, exécution sur `eclipse-temurin:21-jre`.','`server.address=0.0.0.0`, `server.port` fixe, `server.forward-headers-strategy=framework` pour tenir compte de X-Forwarded-*.','Spring Boot Actuator sur `/health` (mappé depuis `/actuator/health`) ou un contrôleur dédié.','Migrations avec Flyway au démarrage. Si possible, désactive les modules inutiles pour réduire la mémoire.']},
+    node:{label:'Node.js',tips:['Image `node:22-slim`, `npm ci --omit=dev` dans l\'étape finale, lancement direct avec `node` (pas `npm start`) pour recevoir SIGTERM.','Si l\'appli utilise Express, active `app.set("trust proxy", true)`.','Migrations au démarrage (Prisma migrate deploy, Knex, Drizzle…).']},
+    python:{label:'Python',tips:['Image `python:3.13-slim`, dépendances installées dans une étape séparée.','FastAPI : `uvicorn --host 0.0.0.0 --proxy-headers --forwarded-allow-ips="*"`, un seul worker. Django : gunicorn, 2 workers maximum.','Migrations au démarrage (Alembic, `manage.py migrate`).']},
+    go:{label:'Go',tips:['Build statique (`CGO_ENABLED=0`) puis image finale `gcr.io/distroless/static` ou `alpine`.','Fichiers du web intégrés avec `embed` ou copiés dans l\'image.','Migrations au démarrage (golang-migrate, goose).']},
+    php:{label:'PHP',tips:['Image FrankenPHP ou php-fpm + Caddy dans le même conteneur, écoute HTTP sur le port déclaré.','Laravel : `TrustProxies` pour tous les proxys, migrations `php artisan migrate --force` au démarrage.']}
+  };
+  var WEB={detect:'à détecter dans le dépôt',react:'React (Vite)',vue:'Vue (Vite)',svelte:'Svelte / SvelteKit (adaptateur statique)',angular:'Angular',kmp:'Compose Multiplatform (cible Wasm)',none:'à créer : une page simple sans framework'};
+
+  function build(){
+    var d={name:v('name')||'Mon appli',slug:(v('slug')||'monappli').toLowerCase(),pkg:v('pkg'),expose:radio('expose'),sub:(v('sub')||v('slug')).toLowerCase(),
+      stack:$('stack').value,port:parseInt(v('port'),10)||8080,mem:parseInt(v('mem'),10)||256,repo:v('repo'),
+      db:c('db'),files:c('files'),filesdesc:v('filesdesc')||'fichiers envoyés par les utilisateurs',exp:c('export'),
+      web:c('web'),webfw:$('webfw').value,webdir:v('webdir'),android:c('android'),androiddir:v('androiddir'),
+      gh:(v('gh')||'<compte-github>').toLowerCase(),ci:c('ci'),priv:c('private'),base:v('base')||'piperault.fr',hub:v('hub')||'apps',mode:radio('mode'),root:c('root')};
+    var st=STACK[d.stack];
+    var url=d.expose==='sub'?'https://'+d.sub+'.'+d.base+'/':'https://'+d.hub+'.'+d.base+'/'+d.slug+'/';
+    var image='ghcr.io/'+d.gh+'/'+d.slug;
+    var manifest='https://'+d.hub+'.'+d.base+'/.well-known/apps.json';
+    var env=v('env').split('\n').map(function(l){return l.trim()}).filter(Boolean).map(function(l){var p=l.split(/\s*[:=]\s*/);return {k:p[0].toUpperCase().replace(/[^A-Z0-9_]/g,'_'),r:p.slice(1).join(' : ')||'à préciser'}});
+    var L=[];var P=function(s){L.push(s===undefined?'':s)};
+
+    P('# Préparer « '+d.name+' » pour le serveur Hangar');P();
+    P('Rends ce projet déployable sur mon serveur d\'applications Hangar. Commence par lire le dépôt pour comprendre la stack et la structure existantes, fais les modifications décrites ci-dessous, vérifie-les, puis donne-moi un récapitulatif. Si une information manque et change la solution, pose-moi la question avant de coder. Pour le reste, choisis l\'option la plus simple et dis-moi ce que tu as choisi. Ne casse rien de ce qui fonctionne déjà.');P();
+    P('## Mon application');P();
+    P('- Nom : '+d.name);
+    if(d.pkg)P('- Package Android : `'+d.pkg+'`');
+    P('- Identifiant dans Hangar : `'+d.slug+'`');
+    P('- Adresse publique : '+url+(d.expose==='sub'?' (sous-domaine)':' (par chemin)'));
+    P('- Backend : '+st.label+(d.repo?', dossier `'+d.repo+'`':''));
+    P('- Image Docker : `'+image+'`'+(d.priv?' (privée)':' (publique)'));
+    P('- Base de données : '+(d.db?'PostgreSQL dédiée':'aucune'));
+    P('- Fichiers persistants : '+(d.files?d.filesdesc+', dans `/data`':'aucun'));
+    P('- Version web : '+(d.web?WEB[d.webfw]+(d.webdir?', dossier `'+d.webdir+'`':'')+', servie par le même conteneur':'non'));
+    P('- Appli Android : '+(d.android?(d.androiddir?'dossier `'+d.androiddir+'` de ce dépôt':'dans un autre dépôt'):'non concernée'));
+    P();
+    P('## Fonctionnement du serveur (à respecter, ne pas modifier)');P();
+    P('- Chaque backend tourne dans **un conteneur Docker** créé par la console Hangar à partir d\'une **image publiée sur ghcr.io** et d\'un **tag de version précis**.');
+    P('- Le serveur est en **linux/amd64** (x86_64). L\'image doit être construite pour cette architecture, même depuis un Mac ARM.');
+    if(d.mode==='tunnel')P('- Chemin du trafic : Internet → Cloudflare (HTTPS) → tunnel cloudflared → Caddy → conteneur, **en HTTP simple**. Le conteneur ne gère jamais le TLS.');
+    else P('- Chemin du trafic : Internet → Caddy (HTTPS, Let\'s Encrypt) → conteneur, **en HTTP simple**. Le conteneur ne gère jamais le TLS.');
+    if(d.expose==='sub')P('- L\'appli est exposée en sous-domaine : `'+url+'` arrive tel quel à la racine `/` du conteneur.');
+    else P('- L\'appli est exposée par chemin : `'+url+'…` arrive au conteneur **sans le préfixe** `/'+d.slug+'`, qui est transmis dans l\'en-tête `X-Forwarded-Prefix`. Les URL générées et les liens du front doivent en tenir compte (chemins relatifs ou préfixe lu dans l\'en-tête).');
+    P('- En-têtes reçus par le conteneur : `Host`, `X-Forwarded-Proto: https`, `X-Forwarded-For`, `X-Real-IP` (IP réelle du visiteur).');
+    P('- Variables d\'environnement fournies par la console :');
+    if(d.db)P('  - `DATABASE_URL=postgresql://<user>:<mdp>@postgres:5432/<base>` (URI libpq).'+(st.jvm?' **Pour la JVM, convertis-la** en `jdbc:postgresql://postgres:5432/<base>` et passe l\'utilisateur et le mot de passe séparément.':(d.stack==='detect'?' Pour la JVM, il faut la convertir au format JDBC.':'')));
+    P('  - les variables listées plus bas, saisies dans la console.');
+    P('  - `PORT` n\'est **pas** fourni : le port d\'écoute est fixe ('+d.port+') et déclaré dans la console.');
+    P('- **Seul `/data` est persistant** : c\'est un dossier de l\'hôte monté dans le conteneur. Tout le reste est effacé à chaque déploiement.'+(d.root?' Le processus tourne en root dans le conteneur (choix volontaire pour ce projet).':' Le processus tourne avec un **utilisateur non-root**, déclaré dans le Dockerfile par un `USER` **numérique** (par exemple `USER 10001:10001`). À chaque déploiement, Hangar attribue `/data` à cet utilisateur. Un `USER` donné par son nom fonctionne aussi si l\'image contient la commande `id` ; sinon, l\'UID se saisit dans la console (champ « Propriétaire de /data »).'));
+    P('- Limite mémoire : **'+d.mem+' Mo** (mem_limit Docker). Le processus doit tenir dans cette limite.');
+    P('- Au déploiement, la console démarre le conteneur, puis interroge `/health` toutes les 2 s, avec 3 s maximum par requête, pendant 90 s au plus. Une réponse **inférieure à 500** valide le déploiement. Sinon, ou si le conteneur s\'arrête, **la version précédente est remise en ligne**.');
+    P('- À l\'arrêt, le conteneur reçoit `SIGTERM`, puis il est tué au bout de 10 s. Les logs sont lus sur la **sortie standard**.');
+    P('- Des anciennes versions de l\'appli Android restent installées chez les utilisateurs : **l\'API doit rester compatible** avec elles.');
+    if(d.mode==='tunnel')P('- Limites Cloudflare : 100 Mo maximum par requête et réponse en moins de 100 s.'+(d.files?' Les envois de fichiers doivent rester sous cette taille ; compresse ou redimensionne les images côté client.':''));
+    P('- Manifeste public : `'+manifest+'` retourne `{ "'+(d.pkg||'<package>')+'": "'+url+'" }`.');
+    P();
+    P('## Ce que tu dois produire');P();
+    P('### 1. Backend');P();
+    P('- Écoute HTTP sur **`0.0.0.0:'+d.port+'`**.');
+    P('- Route **`GET /health`** : répond `200 ok` en moins d\'une seconde, sans authentification.'+(d.db?' Elle vérifie la connexion à la base et répond 503 si la base est inaccessible.':''));
+    P('- **Toute la configuration vient de variables d\'environnement** : aucun secret, domaine ou URL de serveur dans le code ni dans l\'image. Si une variable obligatoire manque, le démarrage échoue avec un message clair qui la nomme.');
+    if(d.db){P('- Migrations de base **au démarrage**, idempotentes et **uniquement additives** : nouvelles tables, colonnes nullables ou avec une valeur par défaut. On ne supprime ni ne renomme rien qu\'une ancienne version de l\'appli utilise encore.');}
+    P('- API versionnée sous **`/api/v1/`**.');
+    if(d.files)P('- '+d.filesdesc.charAt(0).toUpperCase()+d.filesdesc.slice(1)+' : stockage sous `/data/…` (un sous-dossier par type), jamais dans la base ni ailleurs dans le conteneur. Taille maximale et types acceptés vérifiés côté serveur.');
+    P('- Les URL absolues générées se construisent à partir de `X-Forwarded-Proto` et `Host`. Pas de domaine en dur.');
+    P('- Logs sur stdout, une ligne par événement, sans données personnelles ni secrets. Arrêt propre sur `SIGTERM`.');
+    if(d.exp)P('- **Export et import utilisateur** : `GET /api/v1/export` renvoie une archive zip qui contient les données de l\'utilisateur connecté en JSON'+(d.files?' et ses fichiers':'')+'. `POST /api/v1/import` restaure cette archive après validation complète, sans écraser les données d\'un autre utilisateur. Le format est versionné (`"formatVersion": 1`).');
+    if(st.tips.length){P('- Conseils pour cette stack :');st.tips.forEach(function(t){P('  - '+t)});}
+    if(d.web){P();P('### 2. Version web');P();
+      P('- Front : '+WEB[d.webfw]+(d.webdir?', dans `'+d.webdir+'`':'')+'. Le build du front se fait **dans le Dockerfile**.');
+      P('- Le **même conteneur** sert les fichiers construits du front à la racine `/`, avec un repli sur `index.html` pour les routes du front. L\'API reste sous `/api/v1/`. Même origine, donc pas de CORS.');
+      P('- Le front appelle l\'API avec des chemins relatifs (`/api/v1/…`), sans domaine en dur.');
+      P('- Fichiers avec un hash dans le nom : `Cache-Control: public, max-age=31536000, immutable`. `index.html` : `no-cache`.');
+      if(d.expose==='path')P('- Exposition par chemin : configure le `base` du front sur `./` ou sur `/'+d.slug+'/`. Le sous-domaine serait plus simple pour une version web.');}
+    var n=d.web?3:2;
+    P();P('### '+(n++)+'. Image Docker');P();
+    P('- `Dockerfile` **multi-étapes** : build'+(d.web?' du front et':'')+' du backend, puis une image d\'exécution minimale.');
+    if(st.jvm)P('- JVM : `-XX:MaxRAMPercentage=75`, sans `-Xmx` fixe, pour respecter la limite de '+d.mem+' Mo.');
+    P('- `EXPOSE '+d.port+'`. Aucun secret, aucun `.env`, aucune donnée dans l\'image.');
+    if(!d.root)P('- `USER 10001:10001` (numérique) dans l\'étape finale. Les fichiers de l\'appli doivent être lisibles par cet utilisateur, qui n\'a besoin d\'écrire que dans `/data` et `/tmp`.');
+    P('- `.dockerignore` : `.git`, builds locaux, `node_modules`, `.gradle`, `.env*`'+(d.android&&d.androiddir?', `'+d.androiddir+'`':'')+'.');
+    P('- Démarrage en moins de 60 s, image la plus petite possible.');
+    P();P('### '+(n++)+'. Test local qui reproduit le serveur');P();
+    P('- `docker-compose.local.yml` : le backend construit depuis le Dockerfile'+(d.db?', un `postgres:17`, `DATABASE_URL` au même format que sur le serveur (hôte `postgres`)':'')+', un volume `./.data:/data`, `mem_limit: '+d.mem+'m`, le port publié sur `127.0.0.1:'+d.port+'` uniquement. Ajoute `.data/` au `.gitignore`.');
+    P('- Les variables d\'environnement nécessaires, avec des valeurs factices de développement.');
+    if(d.ci){P();P('### '+(n++)+'. Publication automatique');P();
+      P('- `.github/workflows/docker.yml` : déclenché sur un tag Git `v*` (par exemple `v1.2.0`). Il construit l\'image pour `linux/amd64` (buildx, avec le cache GitHub Actions) et la pousse sur `'+image+':1.2.0`, c\'est-à-dire le tag sans le `v`.');
+      P('- Authentification avec `GITHUB_TOKEN`, permissions `packages: write` et `contents: read`. Ne publie jamais `latest` seul : chaque version garde son tag précis, pour que le retour arrière fonctionne.');}
+    if(d.android){P();P('### '+(n++)+'. Appli Android');P();
+      P('- Plus aucune URL de serveur en dur dans le code. `BuildConfig.DEFAULT_BASE_URL = "'+url+'"` sert uniquement de valeur de secours.');
+      P('- Au démarrage, en arrière-plan : lire `'+manifest+'` avec un timeout de 5 s, y prendre l\'entrée `BuildConfig.APPLICATION_ID` et la mémoriser (DataStore). En cas d\'échec, utiliser la dernière valeur mémorisée, sinon `DEFAULT_BASE_URL`. Le démarrage de l\'appli ne doit jamais attendre ce fichier.');
+      P('- Le client HTTP (Retrofit ou client Ktor) utilise `baseUrl + "api/v1/"`, construit à partir de cette valeur.');
+      if(d.exp)P('- Un écran ou une option qui permet d\'exporter et d\'importer ses données avec les routes `/api/v1/export` et `/api/v1/import`, via le sélecteur de fichiers Android (Storage Access Framework).');
+      if(!d.androiddir)P('- L\'appli Android est dans un autre dépôt : écris ces consignes dans `DEPLOY.md`, avec un exemple de code Kotlin prêt à copier.');}
+    P();P('### '+(n++)+'. DEPLOY.md');P();
+    P('Un document court qui contient :');
+    P('- **Les valeurs à saisir dans Hangar** (Nouvelle application) :');P();
+    P('| Champ | Valeur |');P('|---|---|');
+    P('| Nom | '+d.name+' |');P('| Package Android | '+(d.pkg||'—')+' |');
+    P('| Adresse | '+(d.expose==='sub'?'Sous-domaine `'+d.sub+'`':'Chemin, identifiant `'+d.slug+'`')+' |');
+    P('| Identifiant | '+d.slug+' |');P('| Source | Image Docker `'+image+'` |');P('| Version | tag publié, par exemple `1.0.0` |');
+    P('| Port interne | '+d.port+' |');P('| Healthcheck | `/health` |');P('| RAM max (Mo) | '+d.mem+' |');P('| Base PostgreSQL | '+(d.db?'oui':'non')+' |');
+    P('| Propriétaire de /data | vide (automatique : USER de l\'image) |');
+    P('| Variables | voir la liste ci-dessous |');P();
+    P('- **Les variables d\'environnement** : chaque clé avec son rôle, si elle est obligatoire, et comment générer chaque secret (`openssl rand -hex 32`, par exemple), sans valeur réelle.'+(env.length?' Clés déjà prévues :':''));
+    env.forEach(function(e){P('  - `'+e.k+'` : '+e.r)});
+    if(d.db)P('  - `DATABASE_URL` est injectée par Hangar : ne pas la saisir.');
+    P('- **La procédure de mise à jour** : '+(d.ci?'`git tag v1.2.0 && git push --tags`, attendre la fin de l\'Action GitHub, puis':'construire et pousser l\'image `'+image+':1.2.0`, puis')+' dans Hangar, bloc Version, saisir `1.2.0` et cliquer sur Déployer. En cas de problème, utiliser « Revenir à… ».');
+    if(d.priv)P('- **Image privée** : la commande à lancer une seule fois sur le serveur, `docker login ghcr.io -u '+d.gh+'`, avec un token GitHub ayant la permission `read:packages`.');
+    P('- **Sauvegardes** : la base est sauvegardée chaque nuit par le serveur.'+(d.files?' Décris le contenu de `/data` et ce qui doit être sauvegardé en plus.':''));
+    P();P('## Vérifications à faire avant de me rendre la main');P();
+    var V=['`docker build --platform linux/amd64 .` réussit. Donne la taille de l\'image.',
+      '`docker compose -f docker-compose.local.yml up` démarre, et `curl -i http://127.0.0.1:'+d.port+'/health` répond 200 en moins d\'une seconde.'];
+    if(d.db)V.push('Base arrêtée : `/health` répond 503, et le conteneur ne plante pas. Base relancée : tout repart sans redémarrer le backend.');
+    V.push('Sans une variable obligatoire, le démarrage échoue avec un message clair.');
+    if(d.db)V.push('Les migrations passent sur une base vide, puis une deuxième fois sans erreur.');
+    if(d.files)V.push('Un fichier envoyé survit à `docker compose down` puis `up` (dossier `/data`).');
+    V.push('`docker stats` : mémoire après démarrage et sous charge légère, sous '+d.mem+' Mo.');
+    V.push('`docker compose stop` arrête le backend proprement en moins de 10 s.');
+    if(d.web)V.push('`/` affiche le site, une route du front rechargée directement fonctionne, et `/api/v1/…` répond.');
+    if(d.exp)V.push('Un export puis un import sur un compte vide redonnent les mêmes données.');
+    if(d.android&&d.androiddir)V.push('L\'appli Android compile, et le repli sur `DEFAULT_BASE_URL` fonctionne sans réseau (test unitaire du résolveur d\'URL).');
+    V.push('Les tests existants du projet passent toujours.');
+    V.forEach(function(t,i){P((i+1)+'. '+t)});
+    P();P('Termine par un récapitulatif : les fichiers créés ou modifiés, le tableau Hangar rempli, les secrets à générer, et ce que tu n\'as pas pu vérifier.');
+
+    // avertissements
+    var W=[];
+    if(!/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/.test(d.slug))W.push('Identifiant : lettres minuscules, chiffres et tirets uniquement, 32 caractères au plus.');
+    if(d.expose==='sub'&&!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(d.sub))W.push('Sous-domaine invalide.');
+    if(d.expose==='sub'&&d.sub===d.hub)W.push('Le sous-domaine « '+d.hub+' » est réservé aux routes par chemin.');
+    if(d.pkg&&!/^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$/.test(d.pkg))W.push('Package Android au format fr.piperault.monappli.');
+    if(st.jvm&&d.mem<320)W.push('Une appli JVM tient difficilement sous 320 Mo. Prévois 384 Mo ou plus.');
+    if(d.web&&d.expose==='path')W.push('Une version web est plus simple en sous-domaine : en mode chemin, le front doit gérer le préfixe /'+d.slug+'/.');
+    $('memhint').textContent=st.jvm?'JVM : 384 Mo conseillés.':'';
+    $('subwrap').hidden=d.expose!=='sub';
+    $('subsuffix').textContent='.'+d.base;
+    $('fileswrap').hidden=!d.files;
+    $('webwrap').hidden=!d.web;
+    $('androidwrap').hidden=!d.android;
+    var w=$('warns');w.textContent='';W.forEach(function(t){var e=document.createElement('div');e.className='warn';e.textContent=t;w.appendChild(e)});
+    var text=L.join('\n');
+    $('prompt').textContent=text;
+    $('stats').textContent=text.split('\n').length+' lignes · '+text.length.toLocaleString('fr-FR')+' caractères';
+    return text;
+  }
+
+  function save(){var o={};Array.prototype.forEach.call(f.elements,function(el){if(el.type==='radio'){o[el.name+'='+el.value]=el.checked}else if(el.id){o[el.id]=el.type==='checkbox'?el.checked:el.value}});try{localStorage.setItem(KEY,JSON.stringify(o))}catch(e){}}
+  function load(o){Array.prototype.forEach.call(f.elements,function(el){var k=el.type==='radio'?el.name+'='+el.value:el.id;if(!k||!(k in o))return;if(el.type==='checkbox'||el.type==='radio')el.checked=!!o[k];else el.value=o[k]})}
+  try{var saved=JSON.parse(localStorage.getItem(KEY)||'null');if(saved)load(saved)}catch(e){}
+
+  var H=window.HANGAR||{};
+  function setVal(id,val){var el=$(id);if(!el||val===undefined||val===null)return;if(el.type==='checkbox')el.checked=!!val;else el.value=val}
+  function setRadio(n,val){var r=f.querySelector('input[name='+n+'][value="'+val+'"]');if(r)r.checked=true}
+  function applyServer(){
+    if(H.platform){setVal('base',H.platform.base);setVal('hub',H.platform.hub);setRadio('mode',H.platform.mode)}
+    var a=H.app;if(!a)return;
+    setVal('name',a.name);setVal('slug',a.slug);setVal('pkg',a.pkg);setRadio('expose',a.expose==='path'?'path':'sub');
+    setVal('sub',a.sub||a.slug);setVal('port',a.port);setVal('mem',a.mem);setVal('db',a.db);if(a.gh)setVal('gh',a.gh);
+    $('sub').dataset.touched='1';
+  }
+  applyServer();
+  var toastT;function toast(m){$('toast').textContent=m;clearTimeout(toastT);toastT=setTimeout(function(){$('toast').textContent=''},2500)}
+  f.addEventListener('input',function(){build();save()});
+  f.addEventListener('change',function(){build();save()});
+  f.addEventListener('submit',function(e){e.preventDefault()});
+  $('slug').addEventListener('input',function(){ /* le sous-domaine suit l'identifiant tant qu'on ne l'a pas changé à la main */
+    if(!$('sub').dataset.touched){$('sub').value=$('slug').value;build();save()} });
+  $('sub').addEventListener('input',function(){$('sub').dataset.touched='1'});
+  $('reset').addEventListener('click',function(){load(defaults);delete $('sub').dataset.touched;applyServer();try{localStorage.removeItem(KEY)}catch(e){}build();toast(H.app?'Formulaire remis aux valeurs de '+H.app.name+'.':'Exemple restauré.')});
+  $('copy').addEventListener('click',function(){
+    var text=build();
+    function fallback(){var r=document.createRange();r.selectNodeContents($('prompt'));var s=window.getSelection();s.removeAllRanges();s.addRange(r);var ok=false;try{ok=document.execCommand('copy')}catch(e){}toast(ok?'Prompt copié. Colle-le dans Claude, dans le projet de l\'appli.':'Texte sélectionné : fais Ctrl+C (ou Cmd+C).')}
+    if(!navigator.clipboard||!window.isSecureContext){fallback();return}
+    try{navigator.clipboard.writeText(text).then(function(){toast('Prompt copié. Colle-le dans Claude, dans le projet de l\'appli.')},fallback)}catch(e){fallback()}
+  });
+  build();
+})();
+{% endraw %}</script>
+{% endblock %}

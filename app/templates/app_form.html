@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% macro err(k) %}{% if errors.get(k) %}<span class="err">{{ errors[k] }}</span>{% endif %}{% endmacro %}
+{% block main %}
+<div class="bar">
+  <div>
+    <div class="crumb"><a href="/">Applications</a> /</div>
+    <h1>{{ 'Nouvelle application' if new else a.name }}</h1>
+  </div>
+  {% if not new %}<span class="pill s-{{ a.status }}">{{ LABELS[a.status] }}</span>{% endif %}
+</div>
+
+<div class="cols">
+<form class="panel" method="post" action="{{ '/apps/new' if new else '/apps/' ~ a.slug }}" id="appform" novalidate>
+  <div class="group">
+    <span class="lbl">Application</span>
+    <div class="row2">
+      <div class="field {{ 'bad' if errors.name }}"><label for="name">Nom</label><input id="name" name="name" value="{{ a.name }}" required>{{ err('name') }}</div>
+      <div class="field {{ 'bad' if errors.pkg }}"><label for="pkg">Package Android</label><input id="pkg" name="pkg" value="{{ a.pkg }}" spellcheck="false">{{ err('pkg') }}<span class="hint">Clé de l'appli dans /.well-known/apps.json.</span></div>
+    </div>
+  </div>
+
+  <div class="group">
+    <span class="lbl">Adresse publique</span>
+    <div class="seg" role="radiogroup" aria-label="Exposition">
+      {% for v, l in [('path', 'Chemin'), ('sub', 'Sous-domaine'), ('both', 'Les deux')] %}
+      <label><input type="radio" name="expose" value="{{ v }}" {{ 'checked' if a.expose == v }}><span>{{ l }}</span></label>
+      {% endfor %}
+    </div>
+    <div class="row2">
+      <div class="field {{ 'bad' if errors.slug }}"><label for="slug">Identifiant</label>
+        <input id="slug" name="slug" value="{{ a.slug }}" spellcheck="false" {{ 'readonly' if not new }} placeholder="courses">
+        {{ err('slug') }}<span class="hint">{{ "Sert aussi de chemin. Ne peut plus changer après la création." if new else "Fixé à la création." }}</span></div>
+      <div class="field {{ 'bad' if errors.sub }}" id="subfield"><label for="sub">Sous-domaine</label>
+        <div class="suffix"><input id="sub" name="sub" value="{{ a.sub }}" spellcheck="false" placeholder="app1"><span>.{{ s.base_domain }}</span></div>{{ err('sub') }}</div>
+    </div>
+    <div class="preview" id="preview" aria-live="polite"></div>
+  </div>
+
+  <div class="group">
+    <span class="lbl">Source</span>
+    <div class="seg" role="radiogroup" aria-label="Source">
+      <label><input type="radio" name="source" value="image" {{ 'checked' if a.source == 'image' }}><span>Image Docker</span></label>
+      <label><input type="radio" name="source" value="git" {{ 'checked' if a.source == 'git' }}><span>Dépôt Git (build ici)</span></label>
+    </div>
+    <div class="{{ 'row2' if new else '' }}">
+      <div class="field {{ 'bad' if errors.image }}"><label for="image" id="imagelbl">Image</label><input id="image" name="image" value="{{ a.image }}" spellcheck="false" placeholder="ghcr.io/piperault/courses-api">{{ err('image') }}</div>
+      {% if new %}
+      <div class="field {{ 'bad' if errors.version }}"><label for="version" id="versionlbl">Version (tag)</label><input id="version" name="version" value="{{ a.version }}" spellcheck="false" placeholder="latest">{{ err('version') }}</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="group">
+    <span class="lbl">Exécution</span>
+    <div class="row3">
+      <div class="field {{ 'bad' if errors.port }}"><label for="port">Port interne</label><input id="port" name="port" type="number" min="1" max="65535" value="{{ a.port }}">{{ err('port') }}</div>
+      <div class="field {{ 'bad' if errors.health_path }}"><label for="health_path">Healthcheck</label><input id="health_path" name="health_path" value="{{ a.health_path }}" spellcheck="false">{{ err('health_path') }}</div>
+      <div class="field {{ 'bad' if errors.mem_mb }}"><label for="mem_mb">RAM max (Mo)</label><input id="mem_mb" name="mem_mb" type="number" min="32" max="4096" value="{{ a.mem_mb }}">{{ err('mem_mb') }}</div>
+    </div>
+    <div class="field {{ 'bad' if errors.env }}"><label for="env">Variables d'environnement</label>
+      <textarea id="env" name="env" spellcheck="false" placeholder="JWT_SECRET=...&#10;PUSH_ENABLED=true">{{ a.env if new else mask_env(a.env) }}</textarea>
+      {{ err('env') }}<span class="hint">Une par ligne, CLE=valeur. Les valeurs des clés finissant par SECRET, KEY, TOKEN ou PASSWORD sont masquées : laisse ••••••  pour ne pas les changer.</span></div>
+    <label class="check"><input type="checkbox" name="db" {{ 'checked' if a.db }}><span>Base PostgreSQL dédiée, injectée dans <code>DATABASE_URL</code></span></label>
+    <div class="field {{ 'bad' if errors.data_user }}"><label for="data_user">Propriétaire de /data</label>
+      <input id="data_user" name="data_user" value="{{ a.data_user or '' }}" spellcheck="false" placeholder="automatique : utilisateur de l'image">
+      {{ err('data_user') }}<span class="hint">Les fichiers persistants vont dans <code>/data</code> du conteneur (dossier <code>/srv/apps/{{ a.slug or '&lt;id&gt;' }}/data</code>). À chaque déploiement, ce dossier est attribué à l'utilisateur défini par <code>USER</code> dans l'image. Indique un UID (<code>1000</code> ou <code>1000:1000</code>) seulement si la détection échoue.</span></div>
+  </div>
+
+  <div class="bar" style="justify-content:flex-end">
+    <a class="btn" href="{{ '/' if new else '/apps/' ~ a.slug }}">Annuler</a>
+    <button class="btn primary" type="submit">{{ 'Créer et déployer' if new else 'Enregistrer' }}</button>
+  </div>
+</form>
+
+{% if not new %}
+<div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+  <section class="panel">
+    <h2>État</h2>
+    <dl class="facts">
+      <dt>Conteneur</dt><dd>{{ a.container or 'absent' }}</dd>
+      <dt>RAM</dt><dd>{{ a.ram }} Mo / {{ a.mem_mb }} Mo</dd>
+      <dt>Port local</dt><dd>127.0.0.1:{{ a.host_port }}</dd>
+      <dt>/data</dt><dd>{{ ('propriétaire ' ~ a.data_owner) if a.data_owner else '—' }}</dd>
+      <dt>Déployée</dt><dd>{{ a.deployed_at | when }}</dd>
+    </dl>
+    {% if a.status != 'deploying' %}
+    <div class="acts" style="justify-content:flex-start;flex-wrap:wrap">
+      {% if a.status == 'running' %}
+        <form class="inline" method="post" action="/apps/{{ a.slug }}/restart"><button class="btn sm">Redémarrer</button></form>
+        <form class="inline" method="post" action="/apps/{{ a.slug }}/stop"><button class="btn sm">Arrêter</button></form>
+      {% else %}
+        <form class="inline" method="post" action="/apps/{{ a.slug }}/start"><button class="btn sm">Démarrer</button></form>
+      {% endif %}
+      <a class="btn sm" href="/apps/{{ a.slug }}/logs">Logs</a>
+    </div>
+    {% endif %}
+    <a class="btn sm" href="/prompt?app={{ a.slug }}" style="align-self:flex-start">Prompt de déploiement pour Claude</a>
+  </section>
+
+  <section class="panel">
+    <h2>Version</h2>
+    <dl class="facts">
+      <dt>Déployée</dt><dd>{{ a.version }}</dd>
+      <dt>Précédente</dt><dd>{{ a.prev_version or '—' }}</dd>
+    </dl>
+    <form method="post" action="/apps/{{ a.slug }}/version" style="display:flex;gap:8px">
+      <label class="sr" for="newversion" hidden>Nouvelle version</label>
+      <input id="newversion" name="version" placeholder="{{ 'tag, ex. 1.5.0' if a.source == 'image' else 'branche ou commit' }}" spellcheck="false" required aria-label="Nouvelle version">
+      <button class="btn primary sm" {{ 'disabled' if a.status == 'deploying' }}>Déployer</button>
+    </form>
+    {% if a.prev_version %}
+    <form method="post" action="/apps/{{ a.slug }}/rollback"><button class="btn warn sm" {{ 'disabled' if a.status == 'deploying' }}>Revenir à {{ a.prev_version }}</button></form>
+    {% endif %}
+    <span class="hint">Avant de basculer, la console attend que {{ a.health_path }} réponde. En cas d'échec, la version actuelle est remise en ligne.</span>
+  </section>
+
+  {% if events %}
+  <section class="panel">
+    <div class="bar"><h2>Derniers événements</h2><a class="btn sm link" href="/journal?app={{ a.slug }}">Tout voir</a></div>
+    <ul class="events">
+      {% for e in events %}<li><time>{{ e.ts | when }}</time><span class="lv-{{ e.level }}">{{ e.msg }}</span></li>{% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  <form class="panel danger" id="supprimer" method="post" action="/apps/{{ a.slug }}/delete">
+    <h2>Supprimer l'application</h2>
+    <p class="hint">Le conteneur et les adresses sont supprimés. Le dossier data/ et un dump de la base sont gardés dans /srv/backups/deleted.</p>
+    <div class="field"><label for="confirm">Tape <code>{{ a.slug }}</code> pour confirmer</label><input id="confirm" name="confirm" autocomplete="off" spellcheck="false"></div>
+    <button class="btn danger sm" id="delbtn" disabled>Supprimer définitivement</button>
+  </form>
+</div>
+{% endif %}
+</div>
+
+<script>
+(function () {
+  var base = {{ s.base_domain | tojson }}, hub = {{ s.hub | tojson }};
+  var f = document.getElementById('appform');
+  function val(n) { var el = f.querySelector('[name=' + n + ']:checked') || f.elements[n]; return el ? el.value : ''; }
+  function clean(v) { return (v || '').toLowerCase().replace(/[^a-z0-9-]/g, ''); }
+  function update() {
+    var ex = val('expose'), slug = clean(f.elements.slug.value) || '…', sub = clean(f.elements.sub.value) || '…';
+    document.getElementById('subfield').hidden = ex === 'path';
+    var u = [];
+    if (ex !== 'sub') u.push('https://' + hub + '.' + base + '/' + slug + '/');
+    if (ex !== 'path') u.push('https://' + sub + '.' + base + '/');
+    var p = document.getElementById('preview'); p.textContent = '';
+    u.forEach(function (x) { var s = document.createElement('span'); s.textContent = x; p.appendChild(s); });
+    var git = val('source') === 'git';
+    document.getElementById('imagelbl').textContent = git ? 'URL du dépôt' : 'Image (sans tag)';
+    f.elements.image.placeholder = git ? 'https://github.com/piperault/meteo-backend.git' : 'ghcr.io/piperault/courses-api';
+    var vl = document.getElementById('versionlbl');
+    if (vl) { vl.textContent = git ? 'Branche ou commit' : 'Version (tag)'; f.elements.version.placeholder = git ? 'main' : 'latest'; }
+  }
+  f.addEventListener('input', update); f.addEventListener('change', update); update();
+  var c = document.getElementById('confirm');
+  if (c) c.addEventListener('input', function () { document.getElementById('delbtn').disabled = c.value !== {{ (a.slug or '') | tojson }}; });
+})();
+</script>
+{% endblock %}

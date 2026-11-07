@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }} · Hangar</title>
+{% if refresh %}<meta http-equiv="refresh" content="3">{% endif %}
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app">
+  <nav class="side" aria-label="Console">
+    <div class="brand"><b></b>Hangar</div>
+    <a class="nav {{ 'on' if nav == 'apps' }}" href="/">Applications <span class="count">{{ app_count }}</span></a>
+    <a class="nav {{ 'on' if nav == 'prompt' }}" href="/prompt">Prompt de déploiement</a>
+    <a class="nav {{ 'on' if nav == 'settings' }}" href="/settings">Domaine et accès</a>
+    <a class="nav {{ 'on' if nav == 'journal' }}" href="/journal">Journal</a>
+    <div class="foot">
+      <span class="lanpill">LAN uniquement</span>
+      <span class="mono">{{ s.hub }}.{{ s.base_domain }}</span>
+      <form method="post" action="/logout"><button class="btn sm link" type="submit">Se déconnecter ({{ user }})</button></form>
+    </div>
+  </nav>
+  <main class="main">
+    {% if flash %}<div class="flash {{ flash.kind }}" role="status">{{ flash.msg }}</div>{% endif %}
+    {% block main %}{% endblock %}
+  </main>
+</div>
+</body>
+</html>

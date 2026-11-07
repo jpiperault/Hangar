@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="bar"><h1>Applications</h1><a class="btn primary" href="/apps/new">Nouvelle application</a></div>
+<div class="kpis">
+  <span class="kpi"><strong>{{ apps | selectattr('status', 'equalto', 'running') | list | length }}</strong> en ligne</span>
+  <span class="kpi"><strong>{{ apps | selectattr('status', 'equalto', 'error') | list | length }}</strong> en erreur</span>
+  <span class="kpi"><strong>{{ ram_total }}</strong> Mo de RAM utilisés par les applis</span>
+  <span class="kpi">Domaine <strong>{{ s.base_domain }}</strong></span>
+</div>
+<div class="tablebox">
+  <table>
+    <thead><tr><th>Application</th><th>Adresses publiques</th><th>État</th><th>Version</th><th>RAM</th><th></th></tr></thead>
+    <tbody>
+    {% for a in apps %}
+      <tr>
+        <td><div class="nm"><a href="/apps/{{ a.slug }}">{{ a.name }}</a></div><div class="pk">{{ a.pkg or a.slug }}</div></td>
+        <td><div class="urls">{% for k, u in a.urls %}<span class="route"><i>{{ k }}</i><a href="{{ u }}" target="_blank" rel="noopener">{{ u }}</a></span>{% endfor %}</div></td>
+        <td><span class="pill s-{{ a.status }}">{{ LABELS[a.status] }}</span></td>
+        <td><div class="mono">{{ a.version }}</div><div class="pk">{{ a.deployed_at | when }}</div></td>
+        <td class="ram">{{ a.ram ~ ' Mo' if a.status == 'running' else '—' }}</td>
+        <td><div class="acts">
+          {% if a.status != 'deploying' %}
+          <form class="inline" method="post" action="/apps/{{ a.slug }}/{{ 'stop' if a.status == 'running' else 'start' }}">
+            <input type="hidden" name="back" value="/">
+            <button class="btn sm" type="submit">{{ 'Arrêter' if a.status == 'running' else 'Démarrer' }}</button>
+          </form>
+          {% endif %}
+          <a class="btn sm" href="/apps/{{ a.slug }}">Modifier</a>
+        </div></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="empty">Aucune application pour l'instant. Prépare d'abord ton projet avec le <a href="/prompt">prompt de déploiement</a>, puis clique sur « Nouvelle application ».</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

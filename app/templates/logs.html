@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="bar">
+  <div><div class="crumb"><a href="/">Applications</a> / <a href="/apps/{{ a.slug }}">{{ a.name }}</a> /</div><h1>Logs</h1></div>
+  <a class="btn sm" href="/apps/{{ a.slug }}/logs">Rafraîchir</a>
+</div>
+<p class="hint">300 dernières lignes du conteneur <code>app-{{ a.slug }}-app-1</code>.</p>
+<pre class="log">{{ logs }}</pre>
+{% endblock %}

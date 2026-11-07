@@ -1,0 +1,15 @@
+[Unit]
+Description=Console d'administration Hangar
+After=network-online.target docker.service caddy.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+EnvironmentFile=/srv/platform/.env
+WorkingDirectory=/opt/hangar
+ExecStart=/opt/hangar/venv/bin/python -m app
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

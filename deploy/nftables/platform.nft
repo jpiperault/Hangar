@@ -1,0 +1,20 @@
+# Pare-feu de la plateforme. Table dédiée : ne touche pas aux règles de Docker.
+# Ne pas utiliser "flush ruleset" ici, cela effacerait les règles Docker.
+table inet platform
+delete table inet platform
+table inet platform {
+	set lan { type ipv4_addr; flags interval; elements = { 192.168.91.0/24 } }
+
+	chain input {
+		type filter hook input priority 0; policy drop;
+		iif lo accept
+		ct state established,related accept
+		ct state invalid drop
+		meta l4proto { icmp, ipv6-icmp } accept
+		iifname { "docker0", "br-*" } accept
+		tcp dport { 80, 443 } accept
+		udp dport 443 accept
+		ip saddr @lan tcp dport { 22, 8443 } accept
+		ip6 saddr fe80::/10 tcp dport 22 accept
+	}
+}

@@ -1,0 +1,2 @@
+# Caddy lit la configuration de la plateforme
+import /srv/platform/Caddyfile

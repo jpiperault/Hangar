@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block main %}
+<h1>Domaine et accès</h1>
+<div class="cols">
+<div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+  <form class="panel" method="post" action="/settings">
+    <h2>Exposition sur Internet</h2>
+    <div class="seg" role="radiogroup" aria-label="Mode d'exposition">
+      <label><input type="radio" name="mode" value="tunnel" {{ 'checked' if s.mode == 'tunnel' }}><span>Tunnel Cloudflare</span></label>
+      <label><input type="radio" name="mode" value="direct" {{ 'checked' if s.mode == 'direct' }}><span>Direct (serveur dédié)</span></label>
+    </div>
+    <span class="hint">{% if s.mode == 'tunnel' %}Caddy écoute en HTTP sur {{ s.tunnel_bind }} uniquement. cloudflared reçoit le trafic de Cloudflare, qui gère le HTTPS, et le transmet à Caddy. Aucun port n'est ouvert sur la box.{% else %}Caddy écoute sur les ports 80 et 443 et obtient lui-même les certificats Let's Encrypt. Les ports doivent arriver jusqu'à cette machine.{% endif %}</span>
+
+    <h2 style="margin-top:8px">Domaine</h2>
+    <div class="row2">
+      <div class="field"><label for="base_domain">Domaine de base</label><input id="base_domain" name="base_domain" value="{{ s.base_domain }}" spellcheck="false" required></div>
+      <div class="field"><label for="hub">Hôte des routes par chemin</label><div class="suffix"><input id="hub" name="hub" value="{{ s.hub }}" spellcheck="false" required><span>.{{ s.base_domain }}</span></div></div>
+    </div>
+    <span class="hint">Les sous-domaines des applis et l'adresse annoncée dans /.well-known/apps.json sont construits à partir du domaine de base.</span>
+    <div class="field"><label for="aliases">Anciens domaines servis en parallèle</label>
+      <textarea id="aliases" name="aliases" spellcheck="false" style="min-height:70px" placeholder="ancien-domaine.fr">{{ s.aliases | join('\n') }}</textarea>
+      <span class="hint">Un par ligne. En changeant de domaine de base, l'ancien est ajouté ici automatiquement. Retire-le quand plus aucune version installée de tes applis ne l'utilise.</span></div>
+    <div><button class="btn primary">Appliquer et recharger Caddy</button></div>
+  </form>
+
+  {% if s.mode == 'tunnel' %}
+  <section class="panel">
+    <h2>Tunnel Cloudflare à configurer</h2>
+    <p class="hint">Dans Cloudflare Zero Trust, onglet Networks › Tunnels, ajoute ces noms d'hôte publics au tunnel, tous vers le même service. Ne publie jamais l'adresse de la console ({{ s.admin_bind }}).</p>
+    {% for d in [s.base_domain] + s.aliases %}
+    <div class="cert"><span class="mono">{{ s.hub }}.{{ d }}</span><span class="mono">→ http://{{ s.tunnel_bind }}</span></div>
+    <div class="cert"><span class="mono">*.{{ d }}</span><span class="mono">→ http://{{ s.tunnel_bind }}</span></div>
+    {% endfor %}
+    <p class="hint">Le joker <code>*</code> sert aux applis en sous-domaine : une nouvelle appli fonctionne dès sa création dans la console. Cloudflare crée l'enregistrement DNS du nom simple. Pour le joker, ajoute à la main un CNAME <code>*</code> vers <code>&lt;id-du-tunnel&gt;.cfargotunnel.com</code>, en mode proxy (nuage orange). Les noms déjà déclarés chez Cloudflare, comme <code>www</code>, gardent leur propre enregistrement.</p>
+  </section>
+  {% else %}
+  <section class="panel">
+    <h2>DNS attendu</h2>
+    <p class="hint">Enregistrements A vers l'IP publique du serveur. Chez Cloudflare, commence en « DNS only » pour que Caddy obtienne ses certificats.</p>
+    {% for d in [s.base_domain] + s.aliases %}
+    <div class="cert"><span class="mono">{{ s.hub }}.{{ d }}</span><span class="mono">A</span></div>
+    <div class="cert"><span class="mono">*.{{ d }}</span><span class="mono">A</span></div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  <section class="panel">
+    <h2>Noms servis par Caddy</h2>
+    <p class="hint">{{ "Le certificat HTTPS est fourni par Cloudflare. Son certificat universel couvre un niveau de sous-domaine : app1.piperault.fr fonctionne, pas x.app1.piperault.fr." if s.mode == 'tunnel' else "Caddy obtient et renouvelle seul un certificat Let's Encrypt pour chacun de ces noms." }}</p>
+    {% for d in [s.base_domain] + s.aliases %}
+      <div class="cert"><span class="mono">{{ s.hub }}.{{ d }}</span><span class="hint">routes par chemin</span></div>
+      {% for a in sub_apps %}<div class="cert"><span class="mono">{{ a.sub }}.{{ d }}</span><span class="hint">{{ a.name }}</span></div>{% endfor %}
+    {% endfor %}
+  </section>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+  <section class="panel">
+    <h2>Accès à la console</h2>
+    <dl class="facts">
+      <dt>Écoute</dt><dd>{{ s.admin_bind }}</dd>
+      <dt>Réseau autorisé</dt><dd>{{ s.lan_cidr }}</dd>
+    </dl>
+    <span class="hint">Modifiable dans /srv/platform/.env et le pare-feu (/etc/nftables.d/platform.nft). La console n'est jamais servie sur un domaine public.</span>
+  </section>
+  {% if s.mode == 'tunnel' %}
+  <section class="panel">
+    <h2>cloudflared</h2>
+    <dl class="facts">
+      <dt>Service</dt><dd><span class="pill {{ 's-running' if tunnel.active else 's-error' }}">{{ 'Connecté' if tunnel.active else tunnel.state }}</span></dd>
+      <dt>Cible</dt><dd>http://{{ s.tunnel_bind }}</dd>
+    </dl>
+    {% if not tunnel.active %}<span class="hint">Pour relier la machine au tunnel : <code>cloudflared service install &lt;jeton&gt;</code>. Le jeton s'affiche dans Zero Trust à la création du tunnel.</span>{% endif %}
+  </section>
+  {% endif %}
+  <section class="panel">
+    <h2>Système</h2>
+    <dl class="facts">
+      <dt>OS</dt><dd>{{ info.debian }}</dd>
+      <dt>Docker</dt><dd>{{ info.docker }} · compose {{ info.compose }}</dd>
+      <dt>Caddy</dt><dd>{{ info.caddy }}</dd>
+      <dt>PostgreSQL</dt><dd>{{ info.postgres }}</dd>
+      <dt>RAM</dt><dd>{{ info.mem_used }} / {{ info.mem_total }} Mo</dd>
+      <dt>Disque</dt><dd>{{ info.disk_used }} / {{ info.disk_total }} Go</dd>
+    </dl>
+  </section>
+</div>
+</div>
+{% endblock %}

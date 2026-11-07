@@ -1,0 +1,7 @@
+[Unit]
+Description=Dump PostgreSQL de la plateforme
+Requires=docker.service
+After=docker.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/platform-backup

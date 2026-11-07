@@ -1,0 +1,6 @@
+#!/bin/sh
+# Dump quotidien de toutes les bases PostgreSQL, conservation 14 jours
+set -e
+f=/srv/backups/postgres/all-$(date +%F).sql.gz
+docker exec platform-postgres-1 pg_dumpall -U platform | gzip > "$f.tmp" && mv "$f.tmp" "$f"
+find /srv/backups/postgres -name 'all-*.sql.gz' -mtime +14 -delete
