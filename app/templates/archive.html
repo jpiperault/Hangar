@@ -22,7 +22,7 @@
       <tr>
         <td><input type="checkbox" name="app_{{ a.slug }}" id="app_{{ a.slug }}" aria-label="Restaurer {{ a.name }}"></td>
         <td><label for="app_{{ a.slug }}"><span class="nm">{{ a.name }}</span></label><div class="pk">{{ a.slug }} · {{ a.image }}</div></td>
-        <td>{% if a.exists %}<span class="pill s-running">existe</span>{% else %}<span class="pill s-deploying">sera recréée</span>{% endif %}</td>
+        <td>{% if a.exists %}<span class="pill s-running">existe</span>{% else %}<span class="pill s-deploying">sera recréée</span>{% endif %}<div class="pk">nœud {{ a.target }}{% if a.node and a.node != a.target %} (origine {{ a.node }} absent){% endif %}</div></td>
         <td class="mono">{{ a.version }}</td>
         <td>{% if a.has_data %}<label class="check"><input type="checkbox" name="data_{{ a.slug }}" checked><span>restaurer</span></label>{% else %}<span class="hint">vide</span>{% endif %}</td>
         <td>{% if a.has_db %}<label class="check"><input type="checkbox" name="db_{{ a.slug }}" checked><span>restaurer</span></label>{% else %}<span class="hint">{{ 'absente' if a.db else 'pas de base' }}</span>{% endif %}</td>

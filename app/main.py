@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import alerts, backup, db, dbadmin, monitor, nodes, stats, system
+from . import alerts, backup, db, dbadmin, monitor, move, nodes, stats, system
 from . import platform as P
 
 HERE = os.path.dirname(__file__)
@@ -328,9 +328,11 @@ async def show_app(request: Request, slug: str):
     rng = request.query_params.get("r") if request.query_params.get("r") in stats.RANGES else "24h"
     st = stats.app_charts(stats.series(slug, rng), a["mem_mb"])
     dbi = await asyncio.to_thread(dbadmin.info, slug) if a["db"] and a["status"] != "deploying" else None
+    others = [c for c in node_choices() if c["id"] != a["node"]]
+    dsize = await asyncio.to_thread(P.dir_size, a["node"], f"{P.app_dir(slug)}/data") if others else None
     return render(request, "app_form.html", title=a["name"], nav="apps", a=a, new=False, errors={},
                   events=events, names=names, refresh=a["status"] == "deploying", registries=P.registry_logins(),
-                  st=st, dbi=dbi, ranges=list(stats.RANGES))
+                  st=st, dbi=dbi, ranges=list(stats.RANGES), others=others, dsize=dsize)
 
 
 @app.post("/apps/{slug}")
@@ -913,6 +915,22 @@ async def versions_check(request: Request, slug: str):
         flash(request, f"Version {a['latest_version']} disponible.")
     else:
         flash(request, f"{a['version']} est la version la plus récente.")
+    return go(f"/apps/{slug}")
+
+
+@app.post("/apps/{slug}/node/move")
+async def app_move(request: Request, slug: str):
+    a = get_app_or_404(slug)
+    target = (await request.form()).get("target") or ""
+    if a["state"] == "deploying":
+        flash(request, "Une opération est en cours sur cette appli.", "error")
+    elif target == a["node"] or target not in {c["id"] for c in node_choices()}:
+        flash(request, "Choisis un autre nœud, en ligne.", "error")
+    else:
+        db.update_app(slug, state="deploying")
+        P.spawn(move.move, slug, target)
+        flash(request, f"Déplacement vers {target} lancé. L'appli reste en ligne pendant la copie, puis est coupée "
+                       "quelques secondes ; si la cible ne répond pas, elle redémarre sur son nœud actuel.")
     return go(f"/apps/{slug}")
 
 

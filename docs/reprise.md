@@ -118,10 +118,19 @@ La commande affiche l'état final de chaque appli. Elle se termine en erreur si 
 - **Alertes** : abonne-toi au nouveau sujet ntfy (page Système et alertes), ou remets l'ancien.
 - **Sauvegardes** : vérifie que Drive et/ou le NAS sont connectés, puis lance une sauvegarde.
 
+## Plusieurs nœuds
+
+Les sauvegardes et les archives contiennent les applis de **tous** les nœuds. Chaque appli garde la trace de son nœud.
+
+- **Reprise de la console seule**, alors que les nœuds tournent toujours : installe la console, puis ajoute à nouveau chaque nœud dans **Nœuds** avec **le même identifiant**. La réinstallation est sans danger, rien n'est effacé sur la machine. Restaure ensuite l'archive : chaque appli retourne sur son nœud.
+- **Nœud perdu** : ses applis sont recréées sur la console s'il n'existe plus. Ajoute un nouveau nœud, puis utilise **Déplacer** depuis la fiche de chaque appli.
+- **Avant une restauration**, ajoute les nœuds : une appli n'est recréée sur son nœud d'origine que s'il est déjà en ligne.
+
 ## Ce qui n'est pas sauvegardé
 
 Ces éléments sont à refaire à la main :
 - les jetons des registres d'images ;
 - le jeton du tunnel ;
 - les accès Drive et NAS ;
+- la clé SSH de la console pour les nœuds (une nouvelle est créée : recolle sa ligne d'autorisation sur chaque nœud) ;
 - le compte administrateur de la console.

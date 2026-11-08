@@ -176,6 +176,21 @@
   </section>
   {% endif %}
 
+  {% if others %}
+  <form class="panel" method="post" action="/apps/{{ a.slug }}/node/move"
+        onsubmit="return confirm('Déplacer {{ a.name }} ? Coupure de quelques secondes pendant la bascule.')">
+    <h2>Nœud</h2>
+    <dl class="facts"><dt>Actuel</dt><dd><a href="/nodes/{{ a.node }}">{{ a.node }}</a></dd>
+      <dt>Données</dt><dd>{{ dsize | size if dsize is not none else '?' }}{{ ' + base' if a.db }}</dd></dl>
+    <div style="display:flex;gap:8px">
+      <label class="sr" for="target" hidden>Nœud cible</label>
+      <select id="target" name="target" aria-label="Nœud cible">{% for c in others %}<option value="{{ c.id }}">{{ c.name }} · {{ '%.0f' % c.free }} Mo libres</option>{% endfor %}</select>
+      <button class="btn sm" {{ 'disabled' if a.status == 'deploying' }}>Déplacer</button>
+    </div>
+    <span class="hint">L'appli reste en ligne pendant la copie de data/, puis est coupée le temps de la copie finale, de l'export de la base et du démarrage sur la cible. Si la cible ne répond pas, elle redémarre ici. Une copie de sécurité reste dans /srv/backups/avant-deplacement.</span>
+  </form>
+  {% endif %}
+
   {% if events %}
   <section class="panel">
     <div class="bar"><h2>Derniers événements</h2><a class="btn sm link" href="/journal?app={{ a.slug }}">Tout voir</a></div>
@@ -195,9 +210,6 @@
 {% endif %}
 </div>
 
-{% if not new and a.node != 'local' %}
-<p class="flash warn" style="margin-top:20px">Cette appli tourne sur le nœud {{ a.node }}. Sa base est exportée chaque nuit avec les autres, mais son dossier data/ n'est pas encore sauvegardé, et sa restauration depuis une sauvegarde n'est pas encore possible : cela arrive avec les sauvegardes multi-nœuds.</p>
-{% endif %}
 {% if not new %}
 <section class="panel" id="stats" style="margin-top:20px">
   <div class="bar">

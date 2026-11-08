@@ -409,6 +409,37 @@ def _dump_apps():
             os.remove(f"{STAGING}/db/{f}")
 
 
+MIRROR = f"{STAGING}/nodes"
+
+
+def data_source(slug, node, root=""):
+    """Où trouver le data/ d'une appli dans une arborescence de sauvegarde (root = dossier d'extraction)."""
+    local, mirror = f"{root}{P.app_dir(slug)}/data", f"{root}{MIRROR}/{slug}/data"
+    if P.is_local(node):
+        return local if os.path.isdir(local) else mirror
+    return mirror if os.path.isdir(mirror) else local
+
+
+def _mirror_remote():
+    """Recopie (incrémentale) le data/ des applis des nœuds distants sous staging/nodes/<appli>/data, pour qu'il parte
+    dans les sauvegardes et les archives. Un nœud injoignable garde sa dernière copie (signalée)."""
+    os.makedirs(MIRROR, mode=0o700, exist_ok=True)
+    keep, warn = set(), []
+    for a in db.apps():
+        if P.is_local(a["node"]):
+            continue
+        keep.add(a["slug"])
+        try:
+            P.pull_dir(a["node"], f"{P.app_dir(a['slug'])}/data", f"{MIRROR}/{a['slug']}/data")
+        except RuntimeError as e:
+            warn.append(f"{a['slug']} ({a['node']})")
+            P.log("warn", a["slug"], f"data/ du nœud non recopié, dernière copie conservée : {e}")
+    for d in os.listdir(MIRROR):
+        if d not in keep:
+            shutil.rmtree(f"{MIRROR}/{d}", ignore_errors=True)
+    return warn
+
+
 def _copy_registry():
     """Copie cohérente du registre SQLite (API de sauvegarde), même pendant une écriture."""
     import sqlite3
@@ -471,8 +502,9 @@ def run_backup(trigger="planifiée"):
             _dump_all_local()
             _dump_apps()
             _copy_registry()
+            stale = _mirror_remote()
         except Exception as e:
-            msg = f"exports des bases impossibles : {str(e)[:1200]}"
+            msg = f"préparation impossible (exports des bases, copie des nœuds) : {str(e)[:1200]}"
             db.x("INSERT INTO backups(ts, duration, ok, remote, trigger, msg) VALUES(?, ?, 0, 0, ?, ?)",
                  (t0, time.time() - t0, trigger, msg))
             P.log("error", "sauvegarde", f"sauvegarde en échec : {msg}")
@@ -489,6 +521,8 @@ def run_backup(trigger="planifiée"):
             t1 = time.time()
             try:
                 ok, msg, added, total, snap = _send(d, trigger)
+                if ok and stale:
+                    msg += f" ; data/ non à jour pour {', '.join(stale)} (nœud injoignable)"
             except Exception as e:
                 ok, msg, added, total, snap = False, f"{d['name']} : {e}", None, None, None
             db.x("INSERT INTO backups(ts, duration, ok, remote, added, total, snapshot, trigger, msg, dest) "
@@ -556,7 +590,7 @@ def _pg_restore(slug, dump_path):
     with open(dump_path, "rb") as f:
         p = subprocess.run(["docker", "exec", "-i", P.PG, "pg_restore", "-U", "platform", "--clean", "--if-exists",
                             "--no-owner", "--no-acl", f"--role={name}", "-d", name],
-                           stdin=f, capture_output=True, timeout=3600)
+                           stdin=f, capture_output=True, timeout=3600, env=P.denv(P.app_node(slug)))
     if p.returncode:
         errs = [l for l in p.stderr.decode(errors="replace").splitlines() if "error" in l.lower()]
         if errs:
@@ -565,10 +599,7 @@ def _pg_restore(slug, dump_path):
 
 def _apply(a, src_data, src_dump, parts, label):
     """Remplace data/ et/ou la base d'une appli existante. Appelant : tient P.op_lock."""
-    slug = a["slug"]
-    if not P.is_local(a["node"]):
-        raise RuntimeError(f"appli sur le nœud {a['node']} : la restauration sur un nœud distant arrive avec les "
-                           "sauvegardes multi-nœuds. Déplace-la d'abord sur ce serveur, ou restaure-la ici depuis une archive.")
+    slug, node = a["slug"], a["node"]
     d = P.app_dir(slug)
     safe = f"{SAFETY}/{slug}-{time.strftime('%Y%m%d-%H%M%S')}"
     if "data" in parts and not (src_data and os.path.isdir(src_data)):
@@ -576,20 +607,24 @@ def _apply(a, src_data, src_dump, parts, label):
     if "db" in parts and not (src_dump and os.path.exists(src_dump)):
         raise RuntimeError("cette sauvegarde ne contient pas de base pour cette appli")
     os.makedirs(safe, mode=0o700, exist_ok=True)
-    P.run(["docker", "compose", "stop"], cwd=d, timeout=120)
+    P.dk(node, "compose", "stop", cwd=d, timeout=120)
     try:
         if "db" in parts:
             P.ensure_db(a)
-            P.dump_db(slug, f"{safe}/base-avant.sql.gz")
+            P.dump_db(slug, f"{safe}/base-avant.sql.gz", node)
             _pg_restore(slug, src_dump)
         if "data" in parts:
-            if os.path.exists(f"{d}/data"):
-                shutil.move(f"{d}/data", f"{safe}/data")
-            shutil.move(src_data, f"{d}/data")
+            if P.is_local(node):
+                if os.path.exists(f"{d}/data"):
+                    shutil.move(f"{d}/data", f"{safe}/data")
+                shutil.move(src_data, f"{d}/data")
+            else:   # état actuel rapatrié en copie de sécurité, puis data/ restauré poussé sur le nœud
+                P.pull_dir(node, f"{d}/data", f"{safe}/data")
+                P.push_dir(node, src_data, f"{d}/data")
     finally:
         if a["desired"] == "running":
             P.prepare_data(a, a["version"])
-            P.run(["docker", "compose", "up", "-d", "--no-build"], cwd=d, timeout=300)
+            P.dk(node, "compose", "up", "-d", "--no-build", cwd=d, timeout=300)
     ok, detail = P.wait_health(a) if a["desired"] == "running" else (True, "appli arrêtée, non redémarrée")
     db.update_app(slug, state="ok" if ok else "error")
     P.log("ok" if ok else "error", slug, f"restauration terminée depuis {label} ({detail}). "
@@ -612,13 +647,13 @@ def restore_app(slug, dest_id, snap, parts):
         try:
             inc = []
             if "data" in parts:
-                inc += ["--include", f"{P.app_dir(slug)}/data"]
+                inc += ["--include", f"{P.app_dir(slug)}/data", "--include", f"{MIRROR}/{slug}/data"]
             if "db" in parts:
                 inc += ["--include", f"{STAGING}/db/{slug}.dump"]
             rc, out, err = restic("restore", snap, "--target", tmp, *inc, timeout=6 * 3600, d=d)
             if rc:
                 raise RuntimeError("restic restore : " + P.tail(err, 3))
-            _apply(a, f"{tmp}{P.app_dir(slug)}/data", f"{tmp}{STAGING}/db/{slug}.dump", parts,
+            _apply(a, data_source(slug, a["node"], tmp), f"{tmp}{STAGING}/db/{slug}.dump", parts,
                    f"{d['name']} ({snap})")
         except Exception as e:
             db.update_app(slug, state="error")
@@ -680,12 +715,13 @@ def create_archive(trigger="manuelle"):
     part = f"{ARCHIVES}/.{name}.part"
     try:
         _dump_apps()
+        stale = _mirror_remote()
         apps = db.apps()
         s = db.settings()
         rc, head = P.run(["git", "-C", "/opt/hangar", "log", "-1", "--format=%h"], timeout=10)
         manifest = {"format": 1, "created": time.time(), "hangar": head.strip(),
                     "settings": {k: s.get(k) for k in ("base_domain", "hub", "aliases", "mode")},
-                    "apps": [{"slug": a["slug"], **{k: a[k] for k in APP_KEYS}} for a in apps]}
+                    "apps": [{"slug": a["slug"], "node": a["node"], **{k: a[k] for k in APP_KEYS}} for a in apps]}
         fdp = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fdp, "wb") as raw, tarfile.open(fileobj=raw, mode="w:gz", compresslevel=6) as tar:
             data = json.dumps(manifest, ensure_ascii=False, indent=1).encode()
@@ -696,14 +732,15 @@ def create_archive(trigger="manuelle"):
                 dump = f"{STAGING}/db/{a['slug']}.dump"
                 if a["db"] and os.path.exists(dump):
                     tar.add(dump, arcname=f"db/{a['slug']}.dump")
-                ddir = f"{P.app_dir(a['slug'])}/data"
+                ddir = data_source(a["slug"], a["node"])
                 if os.path.isdir(ddir):
                     tar.add(ddir, arcname=f"apps/{a['slug']}/data")
         os.replace(part, f"{ARCHIVES}/{name}")
         size = os.path.getsize(f"{ARCHIVES}/{name}")
         for old in [x for x in archives() if not x["imported"]][ARCHIVE_KEEP:]:
             os.remove(f"{ARCHIVES}/{old['name']}")
-        msg = f"archive {name} créée : {len(apps)} appli(s), {_h(size)}"
+        msg = f"archive {name} créée : {len(apps)} appli(s), {_h(size)}" + (
+            f" ; data/ non à jour pour {', '.join(stale)} (nœud injoignable)" if stale else "")
         db.x("INSERT INTO backups(ts, duration, ok, remote, total, trigger, msg, dest) VALUES(?, ?, 1, 0, ?, ?, ?, 'archive')",
              (t0, time.time() - t0, size, trigger, msg))
         P.log("ok", "sauvegarde", msg)
@@ -755,7 +792,9 @@ def read_manifest(path):
         raise ValueError("ce fichier n'est pas une archive Hangar (manifest.json absent ou inconnu)")
     for a in manifest["apps"]:
         a["has_db"], a["has_data"] = a.get("slug") in has_db, a.get("slug") in has_data
-        a["exists"] = bool(db.app(a.get("slug", "")))
+        cur = db.app(a.get("slug", ""))
+        a["exists"] = bool(cur)
+        a["target"] = cur["node"] if cur else target_node(a)
     return manifest
 
 
@@ -803,6 +842,14 @@ def restore_archive(name, choices):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def target_node(e):
+    """Nœud où recréer une appli absente : son nœud d'origine s'il existe ici et est en ligne, sinon la console."""
+    n = e.get("node") or "local"
+    if n != "local" and not db.one("SELECT 1 FROM nodes WHERE id = ? AND state = 'ok'", (n,)):
+        return "local"
+    return n
+
+
 def _recreate_app(e, src_data, src_dump, parts, name):
     slug = e["slug"]
     s = db.settings()
@@ -815,16 +862,20 @@ def _recreate_app(e, src_data, src_dump, parts, name):
         data["pkg"] = ""
     if data["db"] and not data.get("db_password"):
         data["db_password"] = os.urandom(16).hex()
-    data.update(host_port=P.next_host_port(), state="deploying", desired="running", created_at=time.time())
+    node = target_node(e)
+    data.update(host_port=P.next_host_port(), state="deploying", desired="running", created_at=time.time(), node=node)
     db.insert_app(slug, data)
     a = db.app(slug)
-    P.log("info", slug, f"appli recréée depuis l'archive {name}")
+    P.log("info", slug, f"appli recréée depuis l'archive {name}" + ("" if P.is_local(node) else f" sur le nœud {node}"))
     os.makedirs(P.app_dir(slug), mode=0o700, exist_ok=True)
     if "db" in parts and a["db"] and os.path.exists(src_dump):
         P.ensure_db(a)
         _pg_restore(slug, src_dump)
     if "data" in parts and os.path.isdir(src_data):
-        shutil.move(src_data, f"{P.app_dir(slug)}/data")
+        if P.is_local(node):
+            shutil.move(src_data, f"{P.app_dir(slug)}/data")
+        else:
+            P.push_dir(node, src_data, f"{P.app_dir(slug)}/data")
     P.deploy(slug, a["version"], "create")   # pull, /data, démarrage, healthcheck, routes
 
 
@@ -860,7 +911,8 @@ def snapshot_to_archive(dest_id, snap):
         manifest = {"format": 1, "created": time.time(), "hangar": f"instantané {snap} ({d['name']})",
                     "settings": {"base_domain": sett.get("base_domain"), "hub": sett.get("hub"),
                                  "aliases": aliases, "mode": sett.get("mode")},
-                    "apps": [{"slug": a["slug"], **{k: a.get(k) for k in APP_KEYS}} for a in apps]}
+                    "apps": [{"slug": a["slug"], "node": a.get("node") or "local",
+                              **{k: a.get(k) for k in APP_KEYS}} for a in apps]}
         os.makedirs(ARCHIVES, mode=0o700, exist_ok=True)
         name = save_upload_name()
         part = f"{ARCHIVES}/.{name}.part"
@@ -874,7 +926,7 @@ def snapshot_to_archive(dest_id, snap):
                 dump = f"{tmp}{STAGING}/db/{a['slug']}.dump"
                 if os.path.exists(dump):
                     tar.add(dump, arcname=f"db/{a['slug']}.dump")
-                ddir = f"{tmp}{P.APPS_DIR}/{a['slug']}/data"
+                ddir = data_source(a["slug"], a.get("node") or "local", tmp)
                 if os.path.isdir(ddir):
                     tar.add(ddir, arcname=f"apps/{a['slug']}/data")
         os.replace(part, f"{ARCHIVES}/{name}")

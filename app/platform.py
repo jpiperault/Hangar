@@ -109,6 +109,39 @@ def nsh(node_id, cmd, timeout=120, input=None):
     return run(["ssh", "-F", NODE_SSH, f"root@{node_wg(node_id)}", cmd], timeout=timeout, input=input)
 
 
+def _rsync(src, dst, delete=True, timeout=6 * 3600):
+    args = ["rsync", "-a", "--numeric-ids", "-e", f"ssh -F {NODE_SSH}"] + (["--delete"] if delete else [])
+    return run(args + [src, dst], timeout=timeout)
+
+
+def pull_dir(node, remote_dir, local_dir, delete=True):
+    """Copie (incrémentale) d'un dossier d'un nœud vers la console. Propriétaires conservés (numériques)."""
+    os.makedirs(local_dir, mode=0o700, exist_ok=True)
+    src = f"{remote_dir.rstrip('/')}/" if is_local(node) else f"root@{node_wg(node)}:{remote_dir.rstrip('/')}/"
+    rc, out = _rsync(src, f"{local_dir.rstrip('/')}/", delete)
+    if rc:
+        raise RuntimeError(f"copie depuis {node} impossible : " + tail(out, 2))
+
+
+def push_dir(node, local_dir, remote_dir, delete=True):
+    """Copie d'un dossier de la console vers un nœud (créé au besoin)."""
+    rc, out = nsh(node, f"install -d {remote_dir}", timeout=60)
+    if rc:
+        raise RuntimeError(f"nœud {node} injoignable : " + tail(out, 2))
+    dst = f"{remote_dir.rstrip('/')}/" if is_local(node) else f"root@{node_wg(node)}:{remote_dir.rstrip('/')}/"
+    rc, out = _rsync(f"{local_dir.rstrip('/')}/", dst, delete)
+    if rc:
+        raise RuntimeError(f"copie vers {node} impossible : " + tail(out, 2))
+
+
+def dir_size(node, path):
+    rc, out = nsh(node, f"du -sb {path} 2>/dev/null | cut -f1", timeout=120)
+    try:
+        return int(out.split()[0]) if rc == 0 else None
+    except (ValueError, IndexError):
+        return None
+
+
 def app_host(a):
     """Adresse à laquelle la console joint le port d'une appli."""
     return "127.0.0.1" if is_local(a.get("node")) else node_wg(a["node"])
