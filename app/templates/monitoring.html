@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% macro meter(v, total, warn=0.85) -%}
+{%- set pct = (v / total * 100) if total else 0 -%}
+<span class="meter {{ 'hot' if pct >= warn * 100 }}" role="meter" aria-valuenow="{{ '%.0f' % pct }}" aria-valuemin="0" aria-valuemax="100"><i style="width:{{ [pct, 100] | min }}%"></i></span>
+{%- endmacro %}
+{% block main %}
+<div class="bar">
+  <div><h1>Supervision</h1><span class="hint">Mise à jour chaque minute · page rechargée automatiquement</span></div>
+  <nav class="seg" aria-label="Période">{% for r in ranges %}<a class="segbtn {{ 'on' if rng == r }}" href="?r={{ r }}">{{ r }}</a>{% endfor %}</nav>
+</div>
+
+<section class="svcgrid" aria-label="Services">
+  {% for x in svc %}
+  <div class="svc"><span class="dotst {{ 'ok' if x.ok else ('off' if x.ok is none else 'bad') }}" aria-hidden="true"></span>
+    <span><span class="nm">{{ x.name }}</span><span class="hint">{{ '✓ ' if x.ok else ('' if x.ok is none else '✕ ') }}{{ x.state }}</span></span></div>
+  {% endfor %}
+</section>
+
+<section class="tiles" aria-label="Serveur maintenant">
+  <div class="tile"><span class="tl">Processeur</span><span class="tv">{{ '%.0f' % host.cpu if host.cpu is not none else '—' }} %</span>
+    <span class="hint">charge {{ host.load | map('round', 2) | join(' · ') }} ({{ host.cores }} cœur{{ 's' if host.cores > 1 }})</span>{% if host.cpu is not none %}{{ meter(host.cpu, 100) }}{% endif %}</div>
+  <div class="tile"><span class="tl">Mémoire</span><span class="tv">{{ '%.0f' % host.mem }} <small>/ {{ '%.0f' % host.mem_total }} Mo</small></span>
+    <span class="hint">swap {{ '%.0f' % host.swap }} / {{ '%.0f' % host.swap_total }} Mo</span>{{ meter(host.mem, host.mem_total) }}</div>
+  <div class="tile"><span class="tl">Disque</span><span class="tv">{{ '%.1f' % host.disk }} <small>/ {{ '%.0f' % host.disk_total }} Go</small></span>
+    <span class="hint">{{ '%.0f' % (host.disk_total - host.disk) }} Go libres</span>{{ meter(host.disk, host.disk_total) }}</div>
+  <div class="tile"><span class="tl">Réseau</span><span class="tv">{{ '%.1f' % ((host.rx or 0) / 1024) }} <small>Ko/s reçus</small></span>
+    <span class="hint">{{ '%.1f' % ((host.tx or 0) / 1024) }} Ko/s envoyés (dernière minute)</span></div>
+  <div class="tile"><span class="tl">Allumé depuis</span><span class="tv">{{ host.uptime | dur }}</span>
+    <span class="hint">conteneur LXC</span></div>
+</section>
+
+<section class="panel" style="margin-top:20px">
+  <h2>Serveur</h2>
+  <div class="charts" id="charts"></div>
+  <details><summary class="hint">Voir les données en tableau</summary><div class="tablebox" id="stattable"></div></details>
+</section>
+<script id="stdata" type="application/json">{{ hs | tojson }}</script>
+<script src="/static/charts.js" defer></script>
+
+<section class="panel" style="margin-top:20px">
+  <h2>Applications</h2>
+  <div class="tablebox"><table class="mon">
+    <thead><tr><th>Application</th><th>État</th><th>Healthcheck</th><th>Requêtes 24 h</th><th>Erreurs 5xx</th><th>p95 24 h</th><th>Mémoire</th><th>CPU 24 h</th><th>Conteneur</th></tr></thead>
+    <tbody>
+    {% for a in rows %}
+      <tr>
+        <td><div class="nm"><a href="/apps/{{ a.slug }}#stats">{{ a.name }}</a></div><div class="pk">{{ a.version }}</div></td>
+        <td><span class="pill s-{{ a.status }}">{{ LABELS[a.status] }}</span></td>
+        <td>{% if a.h %}<span class="{{ 'lv-ok' if a.h.ok else 'lv-error' }}">{{ '✓' if a.h.ok else '✕' }} {{ '%.0f ms' % a.h.ms if a.h.ok else a.h.why }}</span><div class="pk">{{ a.h.ts | ago }}</div>{% else %}<span class="hint">—</span>{% endif %}</td>
+        <td><div class="sparkcell"><span class="num">{{ '{:,}'.format(a.r.n).replace(',', ' ') if a.r else 0 }}</span>
+          <svg class="spark" viewBox="0 0 96 24" width="96" height="24" role="img" aria-label="Requêtes par heure sur 24 h, maximum {{ a.spark_max }}"><path d="{{ a.spark }}"/></svg></div></td>
+        <td>{% if a.r and a.r.e5 %}<span class="lv-error">{{ a.r.e5 }} · {{ '%.1f' % (a.r.e5 / a.r.n * 100) }} %</span>{% else %}0{% endif %}</td>
+        <td class="ram">{{ '%.0f ms' % (a.r.p95 * 1000) if a.r else '—' }}</td>
+        <td><span class="ram">{{ a.ram ~ ' / ' ~ a.mem_mb ~ ' Mo' if a.status == 'running' else '—' }}</span>{% if a.status == 'running' %}{{ meter(a.ram, a.mem_mb) }}{% endif %}</td>
+        <td class="ram">{{ '%.1f %%' % a.cpu24 if a.cpu24 is not none else '—' }}</td>
+        <td><span class="ram">{{ ('depuis ' ~ (now - a.c.started) | dur) if a.c.started and a.status == 'running' else '—' }}</span>
+          {% if a.c.restarts %}<div class="lv-warn pk">{{ a.c.restarts }} redémarrage{{ 's' if a.c.restarts > 1 }}</div>{% endif %}
+          {% if a.c.oom %}<div class="lv-error pk">tué faute de mémoire</div>{% endif %}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="9" class="empty">Aucune application déployée.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <span class="hint">Healthcheck : sondé chaque minute par la console. Les requêtes sont celles vues par Caddy ; le sondage n'y est pas compté.</span>
+</section>
+
+<div class="cols" style="margin-top:20px">
+  <section class="panel">
+    <div class="bar"><h2>Incidents des dernières 24 h</h2><a class="btn sm link" href="/journal">Journal complet</a></div>
+    {% if incidents %}
+    <ul class="events">{% for e in incidents %}<li><time>{{ e.ts | when }}</time><span class="lv-{{ e.level }}"><b>{{ e.app }}</b> · {{ e.msg }}</span></li>{% endfor %}</ul>
+    {% else %}<p class="hint">Aucun avertissement ni erreur.</p>{% endif %}
+  </section>
+  <section class="panel">
+    <h2>PostgreSQL</h2>
+    <dl class="facts">
+      <dt>Taille totale</dt><dd>{{ pg.total | size }}</dd>
+      <dt>Connexions</dt><dd>{{ pg.conn }} / {{ pg.max }}</dd>
+    </dl>
+    {% for d in pg.dbs %}<div class="cert"><span class="mono">{{ d.name }}</span><span class="hint">{{ d.size | size }}</span></div>{% endfor %}
+  </section>
+</div>
+{% endblock %}

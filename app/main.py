@@ -1,5 +1,6 @@
 """Console Hangar : routes web."""
 import asyncio
+import calendar
 import ipaddress
 import json
 import os
@@ -42,6 +43,15 @@ tpl.env.filters["when"] = lambda ts: time.strftime("%d/%m %H:%M", time.localtime
 tpl.env.filters["clock"] = lambda ts: time.strftime("%d/%m %H:%M:%S", time.localtime(ts))
 tpl.env.filters["size"] = backup.human
 tpl.env.filters["ago"] = lambda ts: _ago(ts)
+tpl.env.filters["dur"] = lambda sec: _dur(sec)
+
+
+def _dur(sec):
+    if sec is None:
+        return "—"
+    sec = int(sec)
+    d, h, m = sec // 86400, sec % 86400 // 3600, sec % 3600 // 60
+    return f"{d} j {h} h" if d else f"{h} h {m:02d}" if h else f"{m} min"
 
 
 def _ago(ts):
@@ -291,7 +301,7 @@ async def show_app(request: Request, slug: str):
     events = db.q("SELECT * FROM events WHERE app = ? ORDER BY id DESC LIMIT 8", (slug,))
     names = await asyncio.to_thread(P.app_public_names, a, db.settings())
     rng = request.query_params.get("r") if request.query_params.get("r") in stats.RANGES else "24h"
-    st = stats.series(slug, rng)
+    st = stats.app_charts(stats.series(slug, rng), a["mem_mb"])
     dbi = await asyncio.to_thread(dbadmin.info, slug) if a["db"] and a["status"] != "deploying" else None
     return render(request, "app_form.html", title=a["name"], nav="apps", a=a, new=False, errors={},
                   events=events, names=names, refresh=a["status"] == "deploying", registries=P.registry_logins(),
@@ -759,3 +769,86 @@ async def db_reset(request: Request, slug: str):
         flash(request, "Remise à zéro en cours. Une copie de la base actuelle est faite avant.")
         return go(f"/apps/{slug}")
     return go(f"/apps/{slug}#base")
+
+
+# ---------------------------------------------------------------- supervision
+
+def _services():
+    def active(u):
+        return P.run(["systemctl", "is-active", u], timeout=10)[1].strip()
+    s = db.settings()
+    out = []
+    caddy = active("caddy")
+    out.append({"name": "Serveur web (Caddy)", "ok": caddy == "active", "state": "en ligne" if caddy == "active" else caddy})
+    if s.get("mode") == "tunnel":
+        t = P.tunnel_status()
+        out.append({"name": "Tunnel Cloudflare", "ok": t["active"], "state": "connecté" if t["active"] else t["state"]})
+    dk = active("docker")
+    out.append({"name": "Docker", "ok": dk == "active", "state": "en ligne" if dk == "active" else dk})
+    pg = P.run(["docker", "inspect", "-f", "{{.State.Health.Status}}", P.PG], timeout=10)[1].strip()
+    out.append({"name": "PostgreSQL", "ok": pg == "healthy", "state": {"healthy": "en ligne"}.get(pg, pg or "absent")})
+    fw = P.run(["nft", "list", "table", "inet", "platform"], timeout=10)[0] == 0
+    out.append({"name": "Pare-feu", "ok": fw, "state": "actif" if fw else "règles absentes"})
+    last = backup.last_ok()
+    if backup.configured():
+        fresh = bool(last and time.time() - last["ts"] < 36 * 3600)
+        out.append({"name": "Sauvegardes", "ok": fresh, "state": ("dernière " + _ago(last["ts"])) if last else "aucune réussie"})
+    else:
+        out.append({"name": "Sauvegardes", "ok": None, "state": "Drive non connecté"})
+    out.append({"name": "Alertes", "ok": True if s.get("alerts_on") == "1" else None,
+                "state": "actives" if s.get("alerts_on") == "1" else "désactivées"})
+    return out
+
+
+def _containers():
+    rc, out = P.run(["docker", "ps", "-a", "--filter", "label=fr.hangar.app", "--format", "{{.ID}}"], timeout=20)
+    ids = out.split()
+    if not ids:
+        return {}
+    rc, out = P.run(["docker", "inspect", "-f", '{{index .Config.Labels "fr.hangar.app"}}\t{{.RestartCount}}\t{{.State.StartedAt}}\t{{.State.OOMKilled}}', *ids], timeout=20)
+    res = {}
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) == 4:
+            started = parts[2][:19]
+            try:
+                ts = calendar.timegm(time.strptime(started, "%Y-%m-%dT%H:%M:%S"))   # Docker donne l'heure UTC
+            except ValueError:
+                ts = None
+            res[parts[0]] = {"restarts": int(parts[1] or 0), "started": ts, "oom": parts[3] == "true"}
+    return res
+
+
+def _postgres():
+    q = ("SELECT datname, pg_database_size(datname) FROM pg_database WHERE datname NOT IN ('template0','template1') "
+         "ORDER BY 2 DESC;")
+    rc, out = P._psql(q)
+    dbs = [{"name": l.split("|")[0], "size": int(l.split("|")[1])} for l in out.splitlines() if "|" in l] if rc == 0 else []
+    rc, conn = P._psql("SELECT count(*) FROM pg_stat_activity WHERE backend_type = 'client backend';")
+    rc2, mx = P._psql("SHOW max_connections;")
+    return {"dbs": dbs, "total": sum(d["size"] for d in dbs), "conn": conn.strip() if rc == 0 else "?",
+            "max": mx.strip() if rc2 == 0 else "?"}
+
+
+@app.get("/monitoring")
+async def monitoring(request: Request):
+    rng = request.query_params.get("r") if request.query_params.get("r") in stats.RANGES else "24h"
+    host = stats.host_now()
+    hs = stats.host_charts(stats.host_series(rng), host["mem_total"])
+    rows = await asyncio.to_thread(P.apps_with_status)
+    req, spark, res24 = stats.apps_overview()
+    cont = await asyncio.to_thread(_containers)
+    svc = await asyncio.to_thread(_services)
+    pg = await asyncio.to_thread(_postgres)
+    for a in rows:
+        a["h"] = monitor.health.get(a["slug"])
+        a["r"] = req.get(a["slug"])
+        a["c"] = cont.get(a["slug"], {})
+        a["cpu24"] = (res24.get(a["slug"]) or {}).get("cpu")
+        a["spark"] = stats.spark_path(spark.get(a["slug"], [0] * 24))
+        a["spark_max"] = max(spark.get(a["slug"], [0]))
+    incidents = db.q("SELECT * FROM events WHERE level IN ('error', 'warn') AND ts > ? ORDER BY id DESC LIMIT 15",
+                     (time.time() - 86400,))
+    return render(request, "monitoring.html", title="Supervision", nav="monitoring", host=host, hs=hs, rng=rng,
+                  ranges=list(stats.RANGES), rows=rows, svc=svc, pg=pg, incidents=incidents, auto_refresh=60,
+                  now=time.time())

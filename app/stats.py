@@ -87,8 +87,113 @@ def collect_resources():
         db.x("INSERT OR REPLACE INTO stats_res(app, t, cpu, mem) VALUES(?, ?, ?, ?)", (slug, t, cpu, _mem_mb(parts[2])))
 
 
+_prev = {}
+
+
+def _cpu_times():
+    f = open("/proc/stat").readline().split()[1:9]   # user nice system idle iowait irq softirq steal
+    v = [int(x) for x in f]
+    return sum(v), v[3] + v[4]
+
+
+def _net(iface="eth0"):
+    for line in open("/proc/net/dev"):
+        if line.strip().startswith(iface + ":"):
+            f = line.split(":", 1)[1].split()
+            return int(f[0]), int(f[8])
+    return 0, 0
+
+
+def collect_host():
+    """CPU (delta /proc/stat), mémoire, swap, disque, charge, débit réseau d'eth0 — vus depuis le conteneur."""
+    import shutil
+    now = time.time()
+    total, idle = _cpu_times()
+    rx, tx = _net()
+    prev = _prev.get("s")
+    _prev["s"] = (now, total, idle, rx, tx)
+    if not prev:
+        return
+    dt = max(1.0, now - prev[0])
+    dtot = total - prev[1]
+    cpu = (1 - (idle - prev[2]) / dtot) * 100 if dtot > 0 else 0
+    m = {l.split(":")[0]: int(l.split()[1]) for l in open("/proc/meminfo")}
+    du = shutil.disk_usage("/")
+    load1 = float(open("/proc/loadavg").read().split()[0])
+    db.x("INSERT OR REPLACE INTO stats_host(t, cpu, mem, mem_total, swap, disk, disk_total, load1, rx, tx) "
+         "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         (int(now // 60 * 60), round(max(0, min(100, cpu)), 1), (m["MemTotal"] - m["MemAvailable"]) / 1024,
+          m["MemTotal"] / 1024, (m.get("SwapTotal", 0) - m.get("SwapFree", 0)) / 1024, du.used / 1e9, du.total / 1e9,
+          load1, max(0, rx - prev[3]) / dt, max(0, tx - prev[4]) / dt))
+
+
+def host_now():
+    m = {l.split(":")[0]: int(l.split()[1]) for l in open("/proc/meminfo")}
+    import shutil
+    du = shutil.disk_usage("/")
+    up = float(open("/proc/uptime").read().split()[0])
+    last = db.one("SELECT * FROM stats_host ORDER BY t DESC LIMIT 1") or {}
+    return {"cpu": last.get("cpu"), "rx": last.get("rx"), "tx": last.get("tx"),
+            "mem": (m["MemTotal"] - m["MemAvailable"]) / 1024, "mem_total": m["MemTotal"] / 1024,
+            "swap": (m.get("SwapTotal", 0) - m.get("SwapFree", 0)) / 1024, "swap_total": m.get("SwapTotal", 0) / 1024,
+            "disk": du.used / 1e9, "disk_total": du.total / 1e9,
+            "load": [float(x) for x in open("/proc/loadavg").read().split()[:3]], "cores": os.cpu_count() or 1,
+            "uptime": up}
+
+
+def host_series(rng="24h"):
+    span, step = RANGES.get(rng, RANGES["24h"])
+    now = int(time.time())
+    start = (now - span) // step * step + step
+    slots = list(range(start, now // step * step + step, step))
+    idx = {t: i for i, t in enumerate(slots)}
+    n = len(slots)
+    out = {k: [None] * n for k in ("cpu", "mem", "swap", "load1", "rx", "tx")}
+    for r in db.q(f"SELECT (t / {step}) * {step} AS s, avg(cpu) cpu, max(mem) mem, max(swap) swap, avg(load1) load1, "
+                  "avg(rx) rx, avg(tx) tx FROM stats_host WHERE t >= ? GROUP BY s", (start,)):
+        i = idx.get(r["s"])
+        if i is not None:
+            for k in out:
+                out[k][i] = round(r[k], 2) if r[k] is not None else None
+    req, e5 = [0] * n, [0] * n
+    for r in db.q(f"SELECT (t / {step}) * {step} AS s, sum(n) n, sum(e5) e5 FROM stats_req WHERE t >= ? GROUP BY s",
+                  (start,)):
+        i = idx.get(r["s"])
+        if i is not None:
+            req[i], e5[i] = r["n"], r["e5"]
+    out.update(t=slots, step=step, range=rng, req=req, e5=e5)
+    return out
+
+
+def apps_overview():
+    """Par appli sur 24 h : requêtes, 5xx, p95, temps moyen, et requêtes par heure (sparkline)."""
+    since = int(time.time()) - 86400
+    res = {r["app"]: r for r in db.q("SELECT app, sum(n) n, sum(e5) e5, sum(e4) e4, max(p95) p95, sum(dur_sum) d "
+                                     "FROM stats_req WHERE t >= ? GROUP BY app", (since,))}
+    start = since // 3600 * 3600 + 3600
+    spark = {}
+    for r in db.q("SELECT app, (t / 3600) * 3600 AS h, sum(n) n FROM stats_req WHERE t >= ? GROUP BY app, h", (start,)):
+        spark.setdefault(r["app"], [0] * 24)
+        i = (r["h"] - start) // 3600
+        if 0 <= i < 24:
+            spark[r["app"]][i] = r["n"]
+    cpu = {r["app"]: r for r in db.q("SELECT app, avg(cpu) cpu, max(mem) mem FROM stats_res WHERE t >= ? GROUP BY app",
+                                     (since,))}
+    return res, spark, cpu
+
+
+def spark_path(values, w=96, h=24):
+    if not values or max(values) == 0:
+        return f"M0,{h - 1}H{w}"
+    top = max(values)
+    n = len(values)
+    pts = [f"{i * w / (n - 1):.1f},{h - 1 - v / top * (h - 3):.1f}" for i, v in enumerate(values)]
+    return "M" + "L".join(pts)
+
+
 def purge():
     limit = time.time() - KEEP_DAYS * 86400
+    db.x("DELETE FROM stats_host WHERE t < ?", (limit,))
     db.x("DELETE FROM stats_req WHERE t < ?", (limit,))
     db.x("DELETE FROM stats_res WHERE t < ?", (limit,))
 
@@ -140,3 +245,36 @@ def series(slug, rng="24h"):
 def requests_24h():
     since = time.time() - 86400
     return {r["app"]: r for r in db.q("SELECT app, sum(n) n, sum(e5) e5 FROM stats_req WHERE t >= ? GROUP BY app", (since,))}
+
+
+def _per(step):
+    return f"par {step // 3600} h" if step >= 3600 else f"par {step // 60} min"
+
+
+def app_charts(st, mem_mb):
+    st["charts"] = [
+        {"title": "Requêtes", "sub": _per(st["step"]), "unit": "", "kind": "bar", "values": st["req"],
+         "marks": {"values": st["e5"], "label": "erreur(s) 5xx"}},
+        {"title": "Temps de réponse", "sub": "95 % des requêtes en moins de (ms)", "unit": "ms", "kind": "line",
+         "values": st["p95"], "extra": [{"label": "moyenne", "values": st["avg"], "unit": "ms"}]},
+        {"title": "Mémoire", "sub": "max sur l'intervalle (Mo)", "unit": "Mo", "kind": "line", "values": st["mem"],
+         "limit": mem_mb, "limitLabel": f"limite {mem_mb} Mo"},
+        {"title": "Processeur", "sub": "moyenne (% d'un cœur)", "unit": "%", "kind": "line", "values": st["cpu"]},
+    ]
+    return st
+
+
+def host_charts(hs, mem_total):
+    kb = lambda v: [None if x is None else round(x / 1024, 1) for x in v]
+    hs["charts"] = [
+        {"title": "Processeur", "sub": "moyenne (% du cœur)", "unit": "%", "kind": "line", "values": hs["cpu"],
+         "limit": 100, "limitLabel": "100 %", "extra": [{"label": "charge", "values": hs["load1"], "unit": ""}]},
+        {"title": "Mémoire utilisée", "sub": "max sur l'intervalle (Mo)", "unit": "Mo", "kind": "line", "values": hs["mem"],
+         "limit": round(mem_total), "limitLabel": f"total {mem_total:.0f} Mo",
+         "extra": [{"label": "swap", "values": hs["swap"], "unit": "Mo"}]},
+        {"title": "Requêtes, toutes applis", "sub": _per(hs["step"]), "unit": "", "kind": "bar", "values": hs["req"],
+         "marks": {"values": hs["e5"], "label": "erreur(s) 5xx"}},
+        {"title": "Réseau reçu", "sub": "moyenne (Ko/s)", "unit": "Ko/s", "kind": "line", "values": kb(hs["rx"])},
+        {"title": "Réseau envoyé", "sub": "moyenne (Ko/s)", "unit": "Ko/s", "kind": "line", "values": kb(hs["tx"])},
+    ]
+    return hs

@@ -162,3 +162,22 @@ nav.seg{display:inline-flex}
 .chart .tip{position:absolute;top:30px;background:var(--fg);color:var(--surface);font-size:.75rem;padding:4px 8px;border-radius:6px;pointer-events:none;white-space:nowrap;font-variant-numeric:tabular-nums}
 .panel>.btn,.panel>form>.btn{align-self:flex-start}
 .charts{grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+
+/* supervision */
+.svcgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px;margin-top:16px}
+.svc{display:flex;gap:10px;align-items:flex-start;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.svc .nm{display:block;font-weight:600;font-size:.86rem}
+.dotst{width:10px;height:10px;border-radius:50%;margin-top:4px;flex:none;background:var(--idle)}
+.dotst.ok{background:var(--ok)} .dotst.bad{background:var(--bad)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;margin-top:10px}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.tl{font-size:.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.tv{font-size:1.5rem;font-weight:600;font-variant-numeric:tabular-nums}
+.tv small{font-size:.8rem;color:var(--muted);font-weight:400}
+.meter{display:block;height:6px;border-radius:3px;background:var(--sunken);overflow:hidden;margin-top:4px;min-width:60px}
+.meter i{display:block;height:100%;background:var(--chart);border-radius:3px}
+.meter.hot i{background:var(--warn)}
+.sparkcell{display:flex;align-items:center;gap:10px}
+.sparkcell .num{font-variant-numeric:tabular-nums;min-width:3ch}
+.spark path{fill:none;stroke:var(--chart);stroke-width:1.5;stroke-linejoin:round}
+table.mon td{vertical-align:middle}

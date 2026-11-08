@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ title }} · Hangar</title>
-{% if refresh %}<meta http-equiv="refresh" content="3">{% endif %}
+{% if refresh %}<meta http-equiv="refresh" content="3">{% elif auto_refresh %}<meta http-equiv="refresh" content="{{ auto_refresh }}">{% endif %}
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -12,6 +12,7 @@
   <nav class="side" aria-label="Console">
     <div class="brand"><b></b>Hangar</div>
     <a class="nav {{ 'on' if nav == 'apps' }}" href="/">Applications <span class="count">{{ app_count }}</span></a>
+    <a class="nav {{ 'on' if nav == 'monitoring' }}" href="/monitoring">Supervision</a>
     <a class="nav {{ 'on' if nav == 'backups' }}" href="/backups">Sauvegardes</a>
     <a class="nav {{ 'on' if nav == 'system' }}" href="/system">Système et alertes</a>
     <a class="nav {{ 'on' if nav == 'settings' }}" href="/settings">Domaine et accès</a>

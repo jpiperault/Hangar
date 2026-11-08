@@ -13,6 +13,7 @@ from . import alerts, backup, db, registry, stats, system
 from . import platform as P
 
 _fails = {}            # slug -> échecs consécutifs
+health = {}            # slug -> dernier healthcheck : ok, ms, ts, why
 _down = set()          # applis signalées hors ligne
 _flags = {}            # alertes d'état système déjà envoyées (disque, mémoire…)
 _started = False
@@ -35,7 +36,9 @@ def check_apps():
         if a["desired"] != "running" or a["state"] == "deploying":
             _fails.pop(slug, None)
             continue
+        t0 = time.time()
         ok, why = _probe(a)
+        health[slug] = {"ok": ok, "ms": (time.time() - t0) * 1000, "ts": time.time(), "why": why}
         if ok:
             _fails[slug] = 0
             if slug in _down:
@@ -144,7 +147,7 @@ def _loop():
     time.sleep(20)
     while True:
         t0 = time.time()
-        for name, fn in (("stats", stats.collect_requests), ("res", stats.collect_resources),
+        for name, fn in (("stats", stats.collect_requests), ("res", stats.collect_resources), ("host", stats.collect_host),
                          ("apps", check_apps), ("sys", check_system)):
             try:
                 fn()

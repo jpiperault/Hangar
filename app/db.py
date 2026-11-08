@@ -48,6 +48,10 @@ CREATE TABLE IF NOT EXISTS stats_req (           -- une ligne par appli et par m
 CREATE TABLE IF NOT EXISTS stats_res (           -- échantillon CPU / RAM par minute
     app TEXT NOT NULL, t INTEGER NOT NULL, cpu REAL NOT NULL, mem REAL NOT NULL, PRIMARY KEY (app, t)
 );
+CREATE TABLE IF NOT EXISTS stats_host (          -- serveur, par minute
+    t INTEGER PRIMARY KEY, cpu REAL, mem REAL, mem_total REAL, swap REAL, disk REAL, disk_total REAL,
+    load1 REAL, rx REAL, tx REAL
+);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, ts REAL NOT NULL);
 """
 
