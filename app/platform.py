@@ -1,9 +1,12 @@
 """Opérations sur la plateforme : fichiers compose, Docker, Caddy, PostgreSQL."""
+import base64
+import concurrent.futures
 import gzip
 import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import threading
 import time
@@ -217,6 +220,124 @@ def tunnel_status():
     installed = shutil.which("cloudflared") is not None
     return {"installed": installed, "active": out.strip() == "active",
             "state": out.strip() if installed else "non installé"}
+
+
+# ---------------------------------------------------------------- noms publics et tunnel
+
+TUNNEL_TOKEN = "/etc/cloudflared/token"
+_dns_cache = {}
+_dns_pool = concurrent.futures.ThreadPoolExecutor(max_workers=8)
+
+
+def _resolve(name):
+    try:
+        socket.getaddrinfo(name, 443, proto=socket.IPPROTO_TCP)
+        return True
+    except OSError:
+        return False
+
+
+def resolves(names, ttl=30):
+    """{nom: True/False/None} ; None si la résolution n'a pas répondu à temps."""
+    now, out, todo = time.time(), {}, {}
+    for n in names:
+        c = _dns_cache.get(n)
+        if c and now - c[1] < ttl:
+            out[n] = c[0]
+        else:
+            todo[n] = _dns_pool.submit(_resolve, n)
+    for n, fut in todo.items():
+        try:
+            out[n] = fut.result(timeout=max(0.1, 3 - (time.time() - now)))
+            _dns_cache[n] = (out[n], time.time())
+        except concurrent.futures.TimeoutError:
+            out[n] = None
+    return out
+
+
+def public_names(s, apps_list=None):
+    """Chaque nom public que Cloudflare (ou le DNS) doit connaître, sans joker."""
+    apps_list = db.apps() if apps_list is None else apps_list
+    subs = [a for a in apps_list if a["expose"] != "path" and a["sub"]]
+    names = []
+    for d in [s["base_domain"]] + s["aliases"]:
+        names.append({"name": f"{s['hub']}.{d}", "what": "routes par chemin", "slug": None, "alias": d != s["base_domain"]})
+        for a in subs:
+            names.append({"name": f"{a['sub']}.{d}", "what": a["name"], "slug": a["slug"], "alias": d != s["base_domain"]})
+    st = resolves([n["name"] for n in names])
+    for n in names:
+        n["ok"] = st[n["name"]]
+    return names
+
+
+def app_public_names(a, s):
+    if a["expose"] == "path" or not a.get("sub"):
+        return []
+    return [n for n in public_names(s, [a]) if n["slug"]]
+
+
+def parse_tunnel_token(tok):
+    """Un jeton de tunnel est du JSON {a: compte, t: id du tunnel, s: secret} encodé en base64."""
+    tok = (tok or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9+/=_-]{60,4096}", tok):
+        return None
+    try:
+        raw = base64.b64decode(tok + "=" * (-len(tok) % 4), altchars=b"-_" if "-" in tok or "_" in tok else None)
+        d = json.loads(raw)
+    except (ValueError, json.JSONDecodeError):
+        return None
+    if not all(isinstance(d.get(k), str) and d[k] for k in ("a", "t", "s")):
+        return None
+    return {"tunnel_id": d["t"], "token": tok}
+
+
+def tunnel_id():
+    try:
+        p = parse_tunnel_token(open(TUNNEL_TOKEN).read())
+    except OSError:
+        return None
+    return p["tunnel_id"] if p else None
+
+
+def _tunnel_connected(since, wait=25):
+    end = time.time() + wait
+    while time.time() < end:
+        rc, out = run(["journalctl", "-u", "cloudflared", "--since", since, "--no-pager", "-o", "cat"], timeout=10)
+        if "Registered tunnel connection" in out:
+            return True, ""
+        rc2, st = run(["systemctl", "is-active", "cloudflared"], timeout=10)
+        if st.strip() in ("failed", "inactive"):
+            break
+        time.sleep(1)
+    err = [l for l in out.splitlines() if " ERR " in l or "error" in l.lower()]
+    return False, (err[-1] if err else "pas de connexion au bout de 25 s")[-300:]
+
+
+def set_tunnel_token(tok):
+    """Remplace le jeton, redémarre cloudflared, remet l'ancien si la connexion échoue."""
+    p = parse_tunnel_token(tok)
+    if not p:
+        raise ValueError("Jeton invalide : copie la longue chaîne affichée après « cloudflared service install ».")
+    rc, unit = run(["systemctl", "cat", "cloudflared"], timeout=10)
+    if rc != 0 or "--token-file" not in unit:
+        raise ValueError("Le service cloudflared n'utilise pas /etc/cloudflared/token. Installe-le d'abord (voir README).")
+    try:
+        old = open(TUNNEL_TOKEN).read()
+    except OSError:
+        old = None
+    os.makedirs(os.path.dirname(TUNNEL_TOKEN), exist_ok=True)
+    write_private(TUNNEL_TOKEN, p["token"] + "\n")
+    since = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - 1))
+    run(["systemctl", "restart", "cloudflared"], timeout=30)
+    ok, err = _tunnel_connected(since)
+    if ok:
+        log("ok", "tunnel", f"jeton du tunnel remplacé, tunnel {p['tunnel_id']} connecté")
+        return p["tunnel_id"]
+    if old is not None:
+        write_private(TUNNEL_TOKEN, old)
+        run(["systemctl", "restart", "cloudflared"], timeout=30)
+    log("error", "tunnel", f"nouveau jeton refusé ({err}), ancien jeton remis")
+    raise RuntimeError(f"cloudflared n'a pas pu se connecter avec ce jeton : {err}. L'ancien jeton est remis.")
 
 
 def _sync_env_file(s):

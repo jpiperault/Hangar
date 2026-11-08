@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_dns.html" import dnspill %}
 {% block main %}
 <h1>Domaine et accès</h1>
 <div class="cols">
@@ -23,34 +24,20 @@
     <div><button class="btn primary">Appliquer et recharger Caddy</button></div>
   </form>
 
-  {% if s.mode == 'tunnel' %}
   <section class="panel">
-    <h2>Tunnel Cloudflare à configurer</h2>
-    <p class="hint">Dans Cloudflare Zero Trust, onglet Networks › Tunnels, ajoute ces noms d'hôte publics au tunnel, tous vers le même service. Ne publie jamais l'adresse de la console ({{ s.admin_bind }}).</p>
-    {% for d in [s.base_domain] + s.aliases %}
-    <div class="cert"><span class="mono">{{ s.hub }}.{{ d }}</span><span class="mono">→ http://{{ s.tunnel_bind }}</span></div>
-    <div class="cert"><span class="mono">*.{{ d }}</span><span class="mono">→ http://{{ s.tunnel_bind }}</span></div>
+    <h2>Noms publics {{ "à déclarer dans le tunnel" if s.mode == 'tunnel' else "à déclarer en DNS" }}</h2>
+    {% if s.mode == 'tunnel' %}
+    <p class="hint">Pas de joker : chaque nom est déclaré un par un dans Cloudflare Zero Trust › Networks › Tunnels › ton tunnel › Public hostnames, avec le service <code>http://{{ s.tunnel_bind }}</code>. Cloudflare crée l'enregistrement DNS tout seul. Un nom absent d'ici n'est jamais servi : Caddy répond 404.</p>
+    {% else %}
+    <p class="hint">Un enregistrement A par nom, vers l'IP publique du serveur. Chez Cloudflare, commence en « DNS only » pour que Caddy obtienne ses certificats Let's Encrypt.</p>
+    {% endif %}
+    {% for n in names %}
+    <div class="cert"><span><span class="mono">{{ n.name }}</span> <span class="hint">{{ n.what }}{{ ' · ancien domaine' if n.alias }}</span></span>{{ dnspill(n) }}</div>
     {% endfor %}
-    <p class="hint">Le joker <code>*</code> sert aux applis en sous-domaine : une nouvelle appli fonctionne dès sa création dans la console. Cloudflare crée l'enregistrement DNS du nom simple. Pour le joker, ajoute à la main un CNAME <code>*</code> vers <code>&lt;id-du-tunnel&gt;.cfargotunnel.com</code>, en mode proxy (nuage orange). Les noms déjà déclarés chez Cloudflare, comme <code>www</code>, gardent leur propre enregistrement.</p>
-  </section>
-  {% else %}
-  <section class="panel">
-    <h2>DNS attendu</h2>
-    <p class="hint">Enregistrements A vers l'IP publique du serveur. Chez Cloudflare, commence en « DNS only » pour que Caddy obtienne ses certificats.</p>
-    {% for d in [s.base_domain] + s.aliases %}
-    <div class="cert"><span class="mono">{{ s.hub }}.{{ d }}</span><span class="mono">A</span></div>
-    <div class="cert"><span class="mono">*.{{ d }}</span><span class="mono">A</span></div>
-    {% endfor %}
-  </section>
-  {% endif %}
-
-  <section class="panel">
-    <h2>Noms servis par Caddy</h2>
-    <p class="hint">{{ "Le certificat HTTPS est fourni par Cloudflare. Son certificat universel couvre un niveau de sous-domaine : app1.piperault.fr fonctionne, pas x.app1.piperault.fr." if s.mode == 'tunnel' else "Caddy obtient et renouvelle seul un certificat Let's Encrypt pour chacun de ces noms." }}</p>
-    {% for d in [s.base_domain] + s.aliases %}
-      <div class="cert"><span class="mono">{{ s.hub }}.{{ d }}</span><span class="hint">routes par chemin</span></div>
-      {% for a in sub_apps %}<div class="cert"><span class="mono">{{ a.sub }}.{{ d }}</span><span class="hint">{{ a.name }}</span></div>{% endfor %}
-    {% endfor %}
+    {% if missing %}
+    <p class="hint"><strong>{{ missing | length }} nom{{ 's' if missing | length > 1 }} à déclarer.</strong> L'état est vérifié par une résolution DNS publique : après l'ajout, compte jusqu'à quelques minutes avant de le voir passer en « déclaré ». Ne publie jamais l'adresse de la console ({{ s.admin_bind }}).</p>
+    {% endif %}
+    {% if s.mode == 'tunnel' %}<p class="hint">Le certificat de Cloudflare couvre un niveau de sous-domaine : app1.piperault.fr fonctionne, pas x.app1.piperault.fr.</p>{% endif %}
   </section>
 </div>
 
@@ -64,14 +51,18 @@
     <span class="hint">Modifiable dans /srv/platform/.env et le pare-feu (/etc/nftables.d/platform.nft). La console n'est jamais servie sur un domaine public.</span>
   </section>
   {% if s.mode == 'tunnel' %}
-  <section class="panel">
+  <form class="panel" method="post" action="/settings/tunnel" autocomplete="off">
     <h2>cloudflared</h2>
     <dl class="facts">
       <dt>Service</dt><dd><span class="pill {{ 's-running' if tunnel.active else 's-error' }}">{{ 'Connecté' if tunnel.active else tunnel.state }}</span></dd>
+      <dt>Tunnel</dt><dd class="mono">{{ tunnel_id or 'aucun jeton' }}</dd>
       <dt>Cible</dt><dd>http://{{ s.tunnel_bind }}</dd>
     </dl>
-    {% if not tunnel.active %}<span class="hint">Pour relier la machine au tunnel : <code>cloudflared service install &lt;jeton&gt;</code>. Le jeton s'affiche dans Zero Trust à la création du tunnel.</span>{% endif %}
-  </section>
+    <div class="field"><label for="token">{{ 'Remplacer le jeton du tunnel' if tunnel_id else 'Jeton du tunnel' }}</label>
+      <input id="token" name="token" type="password" spellcheck="false" placeholder="eyJhIjoi…" required>
+      <span class="hint">Le jeton s'affiche dans Zero Trust à la création du tunnel (la longue chaîne après <code>cloudflared service install</code>). Il est rangé dans <code>/etc/cloudflared/token</code>, lisible par root seulement. Si cloudflared ne se connecte pas avec le nouveau jeton, l'ancien est remis.</span></div>
+    <div><button class="btn sm">Enregistrer et reconnecter</button></div>
+  </form>
   {% endif %}
   <section class="panel">
     <h2>Système</h2>

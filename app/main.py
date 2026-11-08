@@ -249,8 +249,9 @@ async def show_app(request: Request, slug: str):
     rows = await asyncio.to_thread(P.apps_with_status)
     a = next(r for r in rows if r["slug"] == slug)
     events = db.q("SELECT * FROM events WHERE app = ? ORDER BY id DESC LIMIT 8", (slug,))
+    names = await asyncio.to_thread(P.app_public_names, a, db.settings())
     return render(request, "app_form.html", title=a["name"], nav="apps", a=a, new=False, errors={},
-                  events=events, refresh=a["status"] == "deploying")
+                  events=events, names=names, refresh=a["status"] == "deploying")
 
 
 @app.post("/apps/{slug}")
@@ -353,9 +354,22 @@ async def app_logs(request: Request, slug: str):
 async def settings_page(request: Request):
     info = await asyncio.to_thread(P.system_info)
     tunnel = await asyncio.to_thread(P.tunnel_status)
-    sub_apps = [a for a in db.apps() if a["expose"] != "path" and a["sub"]]
+    names = await asyncio.to_thread(P.public_names, db.settings())
+    tid = await asyncio.to_thread(P.tunnel_id)
     return render(request, "settings.html", title="Domaine et accès", nav="settings", info=info,
-                  sub_apps=sub_apps, tunnel=tunnel)
+                  names=names, missing=[n for n in names if n["ok"] is False], tunnel=tunnel, tunnel_id=tid)
+
+
+@app.post("/settings/tunnel")
+async def save_tunnel_token(request: Request):
+    f = await request.form()
+    try:
+        tid = await asyncio.to_thread(P.set_tunnel_token, f.get("token") or "")
+    except (ValueError, RuntimeError) as e:
+        flash(request, str(e), "error")
+        return go("/settings")
+    flash(request, f"Jeton enregistré. cloudflared est connecté au tunnel {tid}.")
+    return go("/settings")
 
 
 @app.post("/settings")

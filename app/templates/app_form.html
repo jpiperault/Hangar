@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_dns.html" import dnspill %}
 {% macro err(k) %}{% if errors.get(k) %}<span class="err">{{ errors[k] }}</span>{% endif %}{% endmacro %}
 {% block main %}
 <div class="bar">
@@ -83,6 +84,12 @@
       <dt>/data</dt><dd>{{ ('propriétaire ' ~ a.data_owner) if a.data_owner else '—' }}</dd>
       <dt>Déployée</dt><dd>{{ a.deployed_at | when }}</dd>
     </dl>
+    {% for n in names %}
+    <div class="cert"><span class="mono">{{ n.name }}</span>{{ dnspill(n) }}</div>
+    {% endfor %}
+    {% if names | selectattr('ok', 'false') | list %}
+    <span class="hint">{% if s.mode == 'tunnel' %}Déclare ce nom dans Cloudflare Zero Trust › Networks › Tunnels › ton tunnel › Public hostnames, vers <code>http://{{ s.tunnel_bind }}</code>. Cloudflare crée l'enregistrement DNS tout seul.{% else %}Ajoute un enregistrement A vers l'IP publique du serveur.{% endif %} <a href="/settings">Tous les noms</a></span>
+    {% endif %}
     {% if a.status != 'deploying' %}
     <div class="acts" style="justify-content:flex-start;flex-wrap:wrap">
       {% if a.status == 'running' %}

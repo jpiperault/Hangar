@@ -21,6 +21,7 @@ FastAPI + Jinja, sans build front. Elle écoute en HTTPS (certificat auto-signé
 - Secrets masqués dans le formulaire, logs des conteneurs, journal des opérations.
 - Générateur de prompt pour préparer un projet d'appli avec Claude (Dockerfile, healthcheck, CI ghcr.io, client Android).
 - Le Caddyfile est validé avant chaque rechargement. Une configuration refusée n'est jamais appliquée.
+- Liste des noms publics à déclarer chez Cloudflare (sans joker), avec leur état DNS. Remplacement du jeton du tunnel, avec retour à l'ancien si cloudflared ne se connecte pas.
 
 ## Arborescence
 
@@ -56,7 +57,7 @@ Dans un conteneur LXC Proxmox, active d'abord l'imbrication sur l'hôte : `pct s
 9. Pare-feu : `deploy/nftables/platform.nft` → `/etc/nftables.d/` (adapter le set `lan`). **Ne pas activer `nftables.service`**, qui effacerait les règles Docker.
 10. Unités systemd de `deploy/systemd/` → `/etc/systemd/system/`, puis `systemctl daemon-reload` et `systemctl enable --now hangar platform-backup.timer platform-firewall`.
 11. Compte admin : `hangar passwd`.
-12. En mode tunnel : `cloudflared service install <jeton>`. Dans Zero Trust, publier `apps.<domaine>` et `*.<domaine>` vers `http://127.0.0.1:8080`, avec un CNAME `*` vers `<id>.cfargotunnel.com`.
+12. En mode tunnel : `cloudflared service install <jeton>`. Le service doit lire son jeton dans `/etc/cloudflared/token` (option `--token-file`, mode 600), pour que la console puisse le remplacer depuis « Domaine et accès ». Dans Zero Trust, publie `apps.<domaine>` vers `http://127.0.0.1:8080`. Pas de joker : chaque sous-domaine d'appli est déclaré un par un, et la console liste les noms qui manquent.
 
 ## Contrat pour un backend
 

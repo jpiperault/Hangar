@@ -1,0 +1,5 @@
+{% macro dnspill(n) -%}
+{%- if n.ok -%}<span class="pill s-running">déclaré</span>
+{%- elif n.ok is none -%}<span class="pill s-stopped">DNS sans réponse</span>
+{%- else -%}<span class="pill s-error">à déclarer</span>{%- endif -%}
+{%- endmacro %}
