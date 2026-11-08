@@ -176,6 +176,25 @@ def validate(f, cur=None):
     return d, e
 
 
+async def apply_registry(f, d):
+    """Si un jeton est saisi dans la fiche, connecte Docker au registre de l'image.
+    Retourne (connecté, erreurs) ; le jeton n'est jamais stocké par Hangar lui-même."""
+    token = (f.get("reg_token") or "").strip()
+    if d.get("source") != "image" or not token:
+        return False, {}
+    reg = P.registry_of(d["image"])
+    user = (f.get("reg_user") or "").strip() or P.registry_owner(d["image"])
+    if not re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$", user or ""):
+        return False, {"reg_user": "Indique ton nom d'utilisateur sur le registre."}
+    if len(token) > 4096 or any(c.isspace() for c in token):
+        return False, {"reg_token": "Jeton invalide."}
+    try:
+        await asyncio.to_thread(P.registry_login, reg, user, token)
+    except ValueError as e:
+        return False, {"reg_token": str(e)}
+    return True, {}
+
+
 # ---------------------------------------------------------------- connexion
 
 @app.get("/login")
@@ -224,15 +243,19 @@ async def new_app(request: Request):
     blank = {"name": "", "pkg": "fr.piperault.", "expose": "sub", "slug": "", "sub": "", "port": 8080,
              "health_path": "/", "mem_mb": 256, "source": "image", "image": "", "version": "", "env": "", "db": 0,
              "data_user": ""}
-    return render(request, "app_form.html", title="Nouvelle application", nav="apps", a=blank, new=True, errors={})
+    return render(request, "app_form.html", title="Nouvelle application", nav="apps", a=blank, new=True, errors={},
+                  registries=P.registry_logins())
 
 
 @app.post("/apps/new")
 async def create_app(request: Request):
     f = await request.form()
     d, errors = validate(f)
+    if not errors:
+        _, errors = await apply_registry(f, d)
     if errors:
-        return render(request, "app_form.html", 400, title="Nouvelle application", nav="apps", a=d, new=True, errors=errors)
+        return render(request, "app_form.html", 400, title="Nouvelle application", nav="apps", a=d, new=True,
+                      errors=errors, registries=P.registry_logins(), reg_user=f.get("reg_user") or "")
     slug = d.pop("slug")
     d.update(host_port=P.next_host_port(), state="deploying", desired="running", created_at=time.time(),
              db_password=secrets.token_hex(16) if d["db"] else None)
@@ -251,7 +274,7 @@ async def show_app(request: Request, slug: str):
     events = db.q("SELECT * FROM events WHERE app = ? ORDER BY id DESC LIMIT 8", (slug,))
     names = await asyncio.to_thread(P.app_public_names, a, db.settings())
     return render(request, "app_form.html", title=a["name"], nav="apps", a=a, new=False, errors={},
-                  events=events, names=names, refresh=a["status"] == "deploying")
+                  events=events, names=names, refresh=a["status"] == "deploying", registries=P.registry_logins())
 
 
 @app.post("/apps/{slug}")
@@ -262,12 +285,18 @@ async def save_app(request: Request, slug: str):
         return go(f"/apps/{slug}")
     f = await request.form()
     d, errors = validate(f, cur)
+    logged = False
+    if not errors:
+        logged, errors = await apply_registry(f, d)
     if errors:
         a = {**cur, **d, "status": "error" if cur["state"] == "error" else "running", "urls": P.urls({**cur, **d}, db.settings())}
-        return render(request, "app_form.html", 400, title=cur["name"], nav="apps", a=a, new=False, errors=errors, events=[])
+        return render(request, "app_form.html", 400, title=cur["name"], nav="apps", a=a, new=False, errors=errors,
+                      events=[], names=[], registries=P.registry_logins(), reg_user=f.get("reg_user") or "")
     d.pop("slug")
     runtime = ("port", "health_path", "mem_mb", "source", "image", "env", "db", "data_user")
     changed = [k for k in runtime if str(d[k]) != str(cur[k])]
+    if logged and cur["state"] == "error":
+        changed.append("identifiants du registre")  # le téléchargement avait échoué : on retente
     if d["db"] and not cur["db_password"]:
         d["db_password"] = secrets.token_hex(16)
     db.update_app(slug, **d)
@@ -357,7 +386,17 @@ async def settings_page(request: Request):
     names = await asyncio.to_thread(P.public_names, db.settings())
     tid = await asyncio.to_thread(P.tunnel_id)
     return render(request, "settings.html", title="Domaine et accès", nav="settings", info=info,
-                  names=names, missing=[n for n in names if n["ok"] is False], tunnel=tunnel, tunnel_id=tid)
+                  names=names, missing=[n for n in names if n["ok"] is False], tunnel=tunnel, tunnel_id=tid,
+                  registries=P.registry_logins())
+
+
+@app.post("/settings/registry/remove")
+async def remove_registry(request: Request):
+    reg = ((await request.form()).get("registry") or "").strip()
+    if reg in P.registry_logins():
+        await asyncio.to_thread(P.registry_logout, reg)
+        flash(request, f"Identifiants retirés pour {reg}. Les images déjà téléchargées restent utilisables.")
+    return go("/settings")
 
 
 @app.post("/settings/tunnel")

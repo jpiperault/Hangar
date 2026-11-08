@@ -65,6 +65,16 @@
   </form>
   {% endif %}
   <section class="panel">
+    <h2>Registres d'images privés</h2>
+    {% for reg, user in registries.items() %}
+    <form class="cert" method="post" action="/settings/registry/remove"><span><span class="mono">{{ reg }}</span> <span class="hint">{{ user }}</span></span>
+      <input type="hidden" name="registry" value="{{ reg }}"><button class="btn sm">Retirer</button></form>
+    {% else %}
+    <p class="hint">Aucun. Les images publiques n'en ont pas besoin.</p>
+    {% endfor %}
+    <span class="hint">Un jeton se donne dans la fiche d'une appli, au moment de la créer ou de la modifier. Il sert ensuite à toutes les applis du même registre.</span>
+  </section>
+  <section class="panel">
     <h2>Système</h2>
     <dl class="facts">
       <dt>OS</dt><dd>{{ info.debian }}</dd>

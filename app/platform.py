@@ -416,6 +416,68 @@ def image_ref(a, version):
     return f"{a['image']}:{version}"
 
 
+# ---------------------------------------------------------------- registres privés
+
+DOCKER_CFG = "/root/.docker/config.json"
+DOCKER_HUB = "https://index.docker.io/v1/"
+
+
+def registry_of(image):
+    """ghcr.io/jpiperault/x -> ghcr.io ; nginx ou user/x -> docker.io."""
+    first = image.split("/", 1)[0]
+    if "/" in image and ("." in first or ":" in first or first == "localhost"):
+        return first
+    return "docker.io"
+
+
+def registry_owner(image):
+    parts = image.split("/")
+    if registry_of(image) != "docker.io":
+        parts = parts[1:]
+    return parts[0] if len(parts) > 1 else ""
+
+
+def _cfg_key(registry):
+    return DOCKER_HUB if registry == "docker.io" else registry
+
+
+def registry_logins():
+    """{registre: utilisateur} d'après /root/.docker/config.json (jamais le jeton)."""
+    try:
+        auths = json.load(open(DOCKER_CFG)).get("auths", {})
+    except (OSError, ValueError):
+        return {}
+    out = {}
+    for k, v in auths.items():
+        try:
+            user = base64.b64decode(v.get("auth", "")).decode().split(":", 1)[0]
+        except (ValueError, UnicodeDecodeError):
+            user = "?"
+        out["docker.io" if k == DOCKER_HUB else k] = user
+    return out
+
+
+def registry_login(registry, user, token):
+    """docker login, jeton passé sur stdin (jamais en argument). Lève ValueError si refusé."""
+    rc, out = run(["docker", "login", _cfg_key(registry), "-u", user, "--password-stdin"],
+                  input=token.strip() + "\n", timeout=60)
+    if rc:
+        msg = tail(out).replace(token.strip(), "••••••")
+        log("error", "registre", f"connexion à {registry} refusée pour {user}")
+        raise ValueError(f"{registry} refuse ce jeton : {msg}")
+    try:
+        os.chmod(DOCKER_CFG, 0o600)
+    except OSError:
+        pass
+    log("ok", "registre", f"identifiants enregistrés pour {registry} ({user})")
+
+
+def registry_logout(registry):
+    rc, out = run(["docker", "logout", _cfg_key(registry)], timeout=30)
+    log("info", "registre", f"identifiants retirés pour {registry}")
+    return rc == 0
+
+
 def write_compose(a, version):
     env, _ = parse_env(a["env"])
     if a["db"]:
@@ -632,7 +694,16 @@ def _up(a, version):
         if rc:
             rc2, _ = run(["docker", "image", "inspect", image_ref(a, version)], timeout=20)
             if rc2:
-                return False, f"téléchargement de {image_ref(a, version)} impossible : " + tail(out)
+                hint = ""
+                if re.search(r"unauthorized|denied|authentication required", out, re.I):
+                    reg = registry_of(a["image"])
+                    hint = (f" Image privée, ou absente sous ce nom ou ce tag. Vérifie qu'elle existe, puis renseigne "
+                            f"un jeton de lecture pour {reg} dans la fiche de l'appli."
+                            if reg not in registry_logins() else
+                            f" Les identifiants enregistrés pour {reg} ne donnent pas accès à cette image "
+                            f"(droit read:packages ? image sous ce nom et ce tag ?).")
+                return False, f"téléchargement de {image_ref(a, version)} refusé.{hint}" if hint else \
+                    f"téléchargement de {image_ref(a, version)} impossible : " + tail(out)
             log("warn", a["slug"], f"registre injoignable pour {image_ref(a, version)}, image déjà présente utilisée")
     prepare_data(a, version)
     rc, out = run(["docker", "compose", "up", "-d", "--remove-orphans", "--no-build"], cwd=d, timeout=300)

@@ -49,6 +49,16 @@
       <div class="field {{ 'bad' if errors.version }}"><label for="version" id="versionlbl">Version (tag)</label><input id="version" name="version" value="{{ a.version }}" spellcheck="false" placeholder="latest">{{ err('version') }}</div>
       {% endif %}
     </div>
+    <div id="regbox">
+      <div class="preview" id="regstate" aria-live="polite"></div>
+      <div class="row2">
+        <div class="field {{ 'bad' if errors.reg_user }}"><label for="reg_user">Utilisateur du registre</label>
+          <input id="reg_user" name="reg_user" value="{{ reg_user or '' }}" spellcheck="false" autocomplete="off">{{ err('reg_user') }}</div>
+        <div class="field {{ 'bad' if errors.reg_token }}"><label for="reg_token">Jeton d'accès (image privée)</label>
+          <input id="reg_token" name="reg_token" type="password" spellcheck="false" autocomplete="new-password" placeholder="laisser vide si inutile">{{ err('reg_token') }}</div>
+      </div>
+      <span class="hint" id="reghint"></span>
+    </div>
   </div>
 
   <div class="group">
@@ -142,7 +152,7 @@
 
 <script>
 (function () {
-  var base = {{ s.base_domain | tojson }}, hub = {{ s.hub | tojson }};
+  var base = {{ s.base_domain | tojson }}, hub = {{ s.hub | tojson }}, REG = {{ (registries or {}) | tojson }};
   var f = document.getElementById('appform');
   function val(n) { var el = f.querySelector('[name=' + n + ']:checked') || f.elements[n]; return el ? el.value : ''; }
   function clean(v) { return (v || '').toLowerCase().replace(/[^a-z0-9-]/g, ''); }
@@ -159,6 +169,18 @@
     f.elements.image.placeholder = git ? 'https://github.com/piperault/meteo-backend.git' : 'ghcr.io/piperault/courses-api';
     var vl = document.getElementById('versionlbl');
     if (vl) { vl.textContent = git ? 'Branche ou commit' : 'Version (tag)'; f.elements.version.placeholder = git ? 'main' : 'latest'; }
+    // Registre de l'image : même règle que Docker (premier segment avec un point = registre)
+    var img = (f.elements.image.value || '').trim(), parts = img.split('/'), first = parts[0] || '';
+    var hasReg = parts.length > 1 && (first.indexOf('.') >= 0 || first.indexOf(':') >= 0 || first === 'localhost');
+    var reg = hasReg ? first : 'docker.io', owner = (hasReg ? parts[1] : (parts.length > 1 ? parts[0] : '')) || '';
+    document.getElementById('regbox').hidden = git || !img;
+    var known = REG[reg], st = document.getElementById('regstate'), u = f.elements.reg_user;
+    st.textContent = known ? ('Identifiants enregistrés pour ' + reg + ' (' + known + '). Rien à saisir, sauf pour les remplacer.')
+                           : ('Aucun identifiant pour ' + reg + '. Image publique : rien à saisir. Image privée : renseigne un jeton.');
+    u.placeholder = owner || 'utilisateur';
+    document.getElementById('reghint').innerHTML = reg === 'ghcr.io'
+      ? 'Sur GitHub : Settings › Developer settings › Personal access tokens › Tokens (classic), avec <b>uniquement</b> le droit <code>read:packages</code>. Il est vérifié puis enregistré une fois pour tout ghcr.io, dans <code>/root/.docker/config.json</code> (root seulement) : les applis suivantes en profitent.'
+      : 'Jeton de lecture du registre. Il est vérifié puis enregistré une fois pour tout ' + reg + ', dans <code>/root/.docker/config.json</code> (root seulement).';
   }
   f.addEventListener('input', update); f.addEventListener('change', update); update();
   var c = document.getElementById('confirm');

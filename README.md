@@ -21,6 +21,7 @@ FastAPI + Jinja, sans build front. Elle écoute en HTTPS (certificat auto-signé
 - Secrets masqués dans le formulaire, logs des conteneurs, journal des opérations.
 - Générateur de prompt pour préparer un projet d'appli avec Claude (Dockerfile, healthcheck, CI ghcr.io, client Android).
 - Le Caddyfile est validé avant chaque rechargement. Une configuration refusée n'est jamais appliquée.
+- Images privées : un jeton de lecture du registre (ghcr.io : `read:packages`) se saisit dans la fiche de l'appli. Il est vérifié par `docker login`, puis enregistré une fois pour tout le registre dans `/root/.docker/config.json`.
 - Liste des noms publics à déclarer chez Cloudflare (sans joker), avec leur état DNS. Remplacement du jeton du tunnel, avec retour à l'ancien si cloudflared ne se connecte pas.
 
 ## Arborescence
