@@ -1,6 +1,7 @@
 """Console Hangar : routes web."""
 import asyncio
 import ipaddress
+import json
 import os
 import re
 import secrets
@@ -9,12 +10,12 @@ import time
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from fastapi import FastAPI, Request
-from fastapi.responses import PlainTextResponse, RedirectResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import db
+from . import alerts, backup, db, dbadmin, monitor, stats, system
 from . import platform as P
 
 HERE = os.path.dirname(__file__)
@@ -23,6 +24,7 @@ ph = PasswordHasher()
 
 db.init()
 P.recover()
+monitor.start()
 
 
 def _secret():
@@ -38,6 +40,21 @@ tpl = Jinja2Templates(directory=f"{HERE}/templates")
 tpl.env.globals.update(LABELS=P.LABELS, mask_env=P.mask_env)
 tpl.env.filters["when"] = lambda ts: time.strftime("%d/%m %H:%M", time.localtime(ts)) if ts else "—"
 tpl.env.filters["clock"] = lambda ts: time.strftime("%d/%m %H:%M:%S", time.localtime(ts))
+tpl.env.filters["size"] = backup.human
+tpl.env.filters["ago"] = lambda ts: _ago(ts)
+
+
+def _ago(ts):
+    if not ts:
+        return "jamais"
+    d = time.time() - ts
+    if d < 90:
+        return "à l'instant"
+    if d < 3600:
+        return f"il y a {d // 60:.0f} min"
+    if d < 86400 * 2:
+        return f"il y a {d // 3600:.0f} h"
+    return f"il y a {d // 86400:.0f} j"
 
 
 @app.middleware("http")
@@ -233,7 +250,7 @@ async def logout(request: Request):
 @app.get("/")
 async def home(request: Request):
     rows = await asyncio.to_thread(P.apps_with_status)
-    return render(request, "apps.html", title="Applications", nav="apps", apps=rows,
+    return render(request, "apps.html", title="Applications", nav="apps", apps=rows, req24=stats.requests_24h(),
                   refresh=any(r["status"] == "deploying" for r in rows),
                   ram_total=sum(r["ram"] for r in rows))
 
@@ -273,8 +290,12 @@ async def show_app(request: Request, slug: str):
     a = next(r for r in rows if r["slug"] == slug)
     events = db.q("SELECT * FROM events WHERE app = ? ORDER BY id DESC LIMIT 8", (slug,))
     names = await asyncio.to_thread(P.app_public_names, a, db.settings())
+    rng = request.query_params.get("r") if request.query_params.get("r") in stats.RANGES else "24h"
+    st = stats.series(slug, rng)
+    dbi = await asyncio.to_thread(dbadmin.info, slug) if a["db"] and a["status"] != "deploying" else None
     return render(request, "app_form.html", title=a["name"], nav="apps", a=a, new=False, errors={},
-                  events=events, names=names, refresh=a["status"] == "deploying", registries=P.registry_logins())
+                  events=events, names=names, refresh=a["status"] == "deploying", registries=P.registry_logins(),
+                  st=st, dbi=dbi, ranges=list(stats.RANGES))
 
 
 @app.post("/apps/{slug}")
@@ -381,11 +402,10 @@ async def app_logs(request: Request, slug: str):
 
 @app.get("/settings")
 async def settings_page(request: Request):
-    info = await asyncio.to_thread(P.system_info)
     tunnel = await asyncio.to_thread(P.tunnel_status)
     names = await asyncio.to_thread(P.public_names, db.settings())
     tid = await asyncio.to_thread(P.tunnel_id)
-    return render(request, "settings.html", title="Domaine et accès", nav="settings", info=info,
+    return render(request, "settings.html", title="Domaine et accès", nav="settings",
                   names=names, missing=[n for n in names if n["ok"] is False], tunnel=tunnel, tunnel_id=tid,
                   registries=P.registry_logins())
 
@@ -483,3 +503,259 @@ async def journal(request: Request):
         events = db.q("SELECT * FROM events ORDER BY id DESC LIMIT 300")
     names = [r["app"] for r in db.q("SELECT DISTINCT app FROM events ORDER BY app")]
     return render(request, "journal.html", title="Journal", nav="journal", events=events, names=names, app_filter=app_filter)
+
+
+# ---------------------------------------------------------------- sauvegardes
+
+def _confirmed(f, slug):
+    return (f.get("confirm") or "").strip() == slug
+
+
+@app.get("/backups")
+async def backups_page(request: Request):
+    conf = backup.configured()
+    snaps, snap_err = (await asyncio.to_thread(backup.snapshots)) if conf else ([], None)
+    keep = json.loads(db.settings().get("backup_keep") or "{}")
+    nxt = P.run(["systemctl", "show", "platform-backup.timer", "-p", "NextElapseUSecRealtime", "--value"], timeout=10)[1]
+    m = re.search(r"(\d{4})-(\d{2})-(\d{2}) (\d{2}:\d{2})", nxt)
+    nxt = f"{m.group(3)}/{m.group(2)} à {m.group(4)}" if m else nxt
+    busy = backup.running()
+    return render(request, "backups.html", title="Sauvegardes", nav="backups", conf=conf, runs=backup.last_runs(12),
+                  last_ok=backup.last_ok(), busy=busy, snaps=snaps, snap_err=snap_err,
+                  pending=backup.auth_pending(), google_url=backup._auth.get("google_url"),
+                  pw=backup.password(), keep=keep, next_run=nxt.strip(), apps=db.apps(), refresh=busy,
+                  folder=backup.FOLDER)
+
+
+@app.post("/backups/drive/start")
+async def drive_start(request: Request):
+    try:
+        url = await asyncio.to_thread(backup.auth_start)
+        backup._auth["google_url"] = url
+    except RuntimeError as e:
+        flash(request, str(e), "error")
+    return go("/backups#drive")
+
+
+@app.post("/backups/drive/finish")
+async def drive_finish(request: Request):
+    f = await request.form()
+    try:
+        await asyncio.to_thread(backup.auth_finish, f.get("url") or "")
+        flash(request, "Google Drive connecté. Note le mot de passe des sauvegardes ci-dessous, puis lance une première sauvegarde.")
+    except (ValueError, RuntimeError) as e:
+        flash(request, str(e), "error")
+    return go("/backups#drive")
+
+
+@app.post("/backups/drive/cancel")
+async def drive_cancel(request: Request):
+    backup.auth_cancel()
+    return go("/backups")
+
+
+@app.post("/backups/drive/disconnect")
+async def drive_disconnect(request: Request):
+    await asyncio.to_thread(backup.disconnect)
+    flash(request, "Google Drive déconnecté. Les sauvegardes déjà envoyées restent dans ton Drive.")
+    return go("/backups")
+
+
+@app.post("/backups/run")
+async def backup_run(request: Request):
+    if backup.running():
+        flash(request, "Une sauvegarde est déjà en cours.", "error")
+    else:
+        try:
+            await asyncio.to_thread(backup.start_now)
+            flash(request, "Sauvegarde lancée. Cette page se met à jour toute seule.")
+        except RuntimeError as e:
+            flash(request, str(e), "error")
+    return go("/backups")
+
+
+@app.post("/backups/keep")
+async def backup_keep(request: Request):
+    f = await request.form()
+    try:
+        keep = {k: int(f.get(k)) for k in ("daily", "weekly", "monthly")}
+        if not all(0 <= v <= 365 for v in keep.values()) or not any(keep.values()):
+            raise ValueError
+    except (TypeError, ValueError):
+        flash(request, "Indique des nombres entre 0 et 365, dont au moins un non nul.", "error")
+        return go("/backups")
+    db.set_setting("backup_keep", keep)
+    flash(request, "Rétention enregistrée. Elle s'applique à la prochaine sauvegarde.")
+    return go("/backups")
+
+
+@app.post("/backups/restore")
+async def backup_restore(request: Request):
+    f = await request.form()
+    slug, snap = f.get("slug") or "", (f.get("snap") or "").strip()
+    parts = [p for p in ("data", "db") if f.get(p) == "on"]
+    a = db.app(slug)
+    if not a or not re.fullmatch(r"[0-9a-f]{8,64}", snap):
+        flash(request, "Choisis une appli et une sauvegarde.", "error")
+    elif not parts:
+        flash(request, "Coche au moins « fichiers » ou « base ».", "error")
+    elif "db" in parts and not a["db"]:
+        flash(request, f"{a['name']} n'a pas de base.", "error")
+    elif not _confirmed(f, slug):
+        flash(request, f"Tape {slug} pour confirmer la restauration.", "error")
+    elif a["state"] == "deploying":
+        flash(request, "Une opération est déjà en cours sur cette appli.", "error")
+    else:
+        db.update_app(slug, state="deploying")
+        P.spawn(backup.restore_app, slug, snap, parts)
+        flash(request, f"Restauration de {a['name']} en cours. L'état actuel est mis de côté avant d'être remplacé.")
+        return go(f"/apps/{slug}")
+    return go("/backups#restaurer")
+
+
+# ---------------------------------------------------------------- système, mises à jour, alertes
+
+@app.get("/system")
+async def system_page(request: Request):
+    chk = db.kv_get("sys_check")
+    busy = system.running()
+    info = await asyncio.to_thread(P.system_info)
+    events = db.q("SELECT * FROM events WHERE app IN ('système', 'alertes') ORDER BY id DESC LIMIT 12")
+    return render(request, "system.html", title="Système", nav="system", chk=chk, chk_ts=db.kv_ts("sys_check"),
+                  busy=busy, comps=system.COMPONENTS, info=info, events=events, refresh=bool(busy))
+
+
+@app.post("/system/check")
+async def system_check(request: Request):
+    try:
+        await asyncio.to_thread(system.check)
+        flash(request, "Vérification terminée.")
+    except Exception as e:
+        flash(request, f"Vérification impossible : {e}", "error")
+    return go("/system")
+
+
+@app.post("/system/update/{cid}")
+async def system_update(request: Request, cid: str):
+    try:
+        await asyncio.to_thread(system.launch, cid)
+        msg = f"Mise à jour de {system.COMPONENTS[cid]['name']} lancée."
+        if cid == "docker":
+            msg += " La console va redémarrer : recharge la page dans une minute."
+        flash(request, msg)
+    except (ValueError, RuntimeError) as e:
+        flash(request, str(e), "error")
+    return go("/system")
+
+
+@app.post("/system/alerts")
+async def alerts_save(request: Request):
+    f = await request.form()
+    server = (f.get("ntfy_server") or "").strip().rstrip("/")
+    topic = (f.get("ntfy_topic") or "").strip()
+    token = (f.get("ntfy_token") or "").strip()
+    if not re.fullmatch(r"https://[A-Za-z0-9.-]+(:\d+)?(/[A-Za-z0-9._~/-]*)?", server):
+        flash(request, "Serveur ntfy invalide (https://…).", "error")
+    elif not re.fullmatch(r"[A-Za-z0-9_-]{6,64}", topic):
+        flash(request, "Sujet invalide : 6 à 64 lettres, chiffres, - ou _.", "error")
+    else:
+        db.set_setting("ntfy_server", server)
+        db.set_setting("ntfy_topic", topic)
+        if token != P.MASK:
+            db.set_setting("ntfy_token", token)
+        db.set_setting("alerts_on", "1" if f.get("alerts_on") == "on" else "0")
+        flash(request, "Alertes enregistrées.")
+    return go("/system#alertes")
+
+
+@app.post("/system/alerts/test")
+async def alerts_test(request: Request):
+    ok, err = await asyncio.to_thread(alerts.send, "Test Hangar", "Si tu lis ceci, les alertes arrivent bien sur ton téléphone.",
+                                      3, ["bell"], None, 0, True)
+    flash(request, "Notification de test envoyée." if ok else f"Envoi impossible : {err}", "ok" if ok else "error")
+    return go("/system#alertes")
+
+
+# ---------------------------------------------------------------- versions, base, statistiques d'une appli
+
+@app.post("/apps/{slug}/versions/check")
+async def versions_check(request: Request, slug: str):
+    get_app_or_404(slug)
+    await asyncio.to_thread(monitor.check_versions, slug)
+    a = db.app(slug)
+    if a["latest_error"]:
+        flash(request, f"Vérification impossible : {a['latest_error']}", "error")
+    elif a["latest_version"]:
+        flash(request, f"Version {a['latest_version']} disponible.")
+    else:
+        flash(request, f"{a['version']} est la version la plus récente.")
+    return go(f"/apps/{slug}")
+
+
+@app.get("/apps/{slug}/db/export")
+async def db_export(request: Request, slug: str):
+    a = get_app_or_404(slug)
+    if not a["db"]:
+        return go(f"/apps/{slug}")
+    name = f"{slug}-{time.strftime('%Y%m%d-%H%M')}.sql.gz"
+    return StreamingResponse(dbadmin.export_stream(slug), media_type="application/gzip",
+                             headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+IMPORT_DIR = "/srv/backups/import-tmp"
+IMPORT_MAX = 2 * 1024 ** 3
+
+
+@app.post("/apps/{slug}/db/import")
+async def db_import(request: Request, slug: str):
+    a = get_app_or_404(slug)
+    f = await request.form()
+    up = f.get("file")
+    if not a["db"] or a["state"] == "deploying":
+        flash(request, "Import impossible pour l'instant.", "error")
+        return go(f"/apps/{slug}#base")
+    if not _confirmed(f, slug):
+        flash(request, f"Tape {slug} pour confirmer l'import : il remplace tout le contenu de la base.", "error")
+        return go(f"/apps/{slug}#base")
+    if not up or not getattr(up, "filename", ""):
+        flash(request, "Choisis un fichier .sql, .sql.gz ou .dump.", "error")
+        return go(f"/apps/{slug}#base")
+    os.makedirs(IMPORT_DIR, mode=0o700, exist_ok=True)
+    path = f"{IMPORT_DIR}/{slug}-{secrets.token_hex(4)}"
+    size, head = 0, b""
+    with open(path, "wb") as out:
+        while chunk := await up.read(1024 * 1024):
+            if not head:
+                head = chunk[:8]
+            size += len(chunk)
+            if size > IMPORT_MAX:
+                out.close()
+                os.remove(path)
+                flash(request, "Fichier trop gros (2 Go maximum).", "error")
+                return go(f"/apps/{slug}#base")
+            out.write(chunk)
+    kind = "dump" if head.startswith(b"PGDMP") else "sqlgz" if head.startswith(b"\x1f\x8b") else "sql"
+    if kind == "sql" and b"\x00" in head:
+        os.remove(path)
+        flash(request, "Format non reconnu : attendu un export SQL (.sql, .sql.gz) ou pg_dump -Fc (.dump).", "error")
+        return go(f"/apps/{slug}#base")
+    db.update_app(slug, state="deploying")
+    P.spawn(dbadmin.import_file, slug, path, kind)
+    flash(request, f"Import de {up.filename} en cours. Une copie de la base actuelle est faite avant.")
+    return go(f"/apps/{slug}")
+
+
+@app.post("/apps/{slug}/db/reset")
+async def db_reset(request: Request, slug: str):
+    a = get_app_or_404(slug)
+    f = await request.form()
+    if not a["db"] or a["state"] == "deploying":
+        flash(request, "Remise à zéro impossible pour l'instant.", "error")
+    elif not _confirmed(f, slug):
+        flash(request, f"Tape {slug} pour confirmer la remise à zéro.", "error")
+    else:
+        db.update_app(slug, state="deploying")
+        P.spawn(dbadmin.reset, slug)
+        flash(request, "Remise à zéro en cours. Une copie de la base actuelle est faite avant.")
+        return go(f"/apps/{slug}")
+    return go(f"/apps/{slug}#base")

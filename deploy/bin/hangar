@@ -1,4 +1,4 @@
 #!/bin/sh
-# Outil console Hangar. Usage : hangar passwd   (changer le mot de passe admin)
+# Outil console Hangar. Usage : hangar passwd | hangar backup | hangar sysupdate <composant>
 set -a; . /srv/platform/.env; set +a
 cd /opt/hangar && exec /opt/hangar/venv/bin/python -m app "$@"

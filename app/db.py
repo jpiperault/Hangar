@@ -36,6 +36,19 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS events_ts ON events(ts);
 CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, hash TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS backups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL, duration REAL, ok INTEGER NOT NULL, remote INTEGER NOT NULL DEFAULT 0,
+    added INTEGER, total INTEGER, snapshot TEXT, trigger TEXT, msg TEXT
+);
+CREATE TABLE IF NOT EXISTS stats_req (           -- une ligne par appli et par minute
+    app TEXT NOT NULL, t INTEGER NOT NULL, n INTEGER NOT NULL, e4 INTEGER NOT NULL, e5 INTEGER NOT NULL,
+    dur_sum REAL NOT NULL, p95 REAL NOT NULL, bytes INTEGER NOT NULL, PRIMARY KEY (app, t)
+);
+CREATE TABLE IF NOT EXISTS stats_res (           -- échantillon CPU / RAM par minute
+    app TEXT NOT NULL, t INTEGER NOT NULL, cpu REAL NOT NULL, mem REAL NOT NULL, PRIMARY KEY (app, t)
+);
+CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, ts REAL NOT NULL);
 """
 
 _lock = threading.RLock()
@@ -69,11 +82,20 @@ def init():
             _c.execute("ALTER TABLE apps ADD COLUMN data_user TEXT NOT NULL DEFAULT ''")
         if "data_owner" not in cols:  # propriétaire effectivement appliqué à /data
             _c.execute("ALTER TABLE apps ADD COLUMN data_owner TEXT")
+        if "latest_version" not in cols:  # dernière version trouvée sur le registre
+            _c.execute("ALTER TABLE apps ADD COLUMN latest_version TEXT")
+            _c.execute("ALTER TABLE apps ADD COLUMN latest_checked REAL")
+            _c.execute("ALTER TABLE apps ADD COLUMN latest_error TEXT")
     defaults = {
         "base_domain": os.environ.get("BASE_DOMAIN", "piperault.fr"),
         "hub": os.environ.get("HUB", "apps"),
         "aliases": "[]",
         "mode": os.environ.get("EXPOSURE_MODE", "tunnel"),   # tunnel | direct
+        "ntfy_server": "https://ntfy.sh",
+        "ntfy_topic": "hangar-" + os.urandom(9).hex(),
+        "ntfy_token": "",
+        "alerts_on": "1",
+        "backup_keep": json.dumps({"daily": 7, "weekly": 4, "monthly": 12}),
     }
     for k, v in defaults.items():
         x("INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)", (k, v))
@@ -106,7 +128,8 @@ def app(slug):
 
 APP_FIELDS = ["name", "pkg", "expose", "sub", "source", "image", "version", "prev_version",
               "port", "host_port", "health_path", "mem_mb", "env", "db", "db_password",
-              "state", "desired", "deployed_at", "created_at", "data_user", "data_owner"]
+              "state", "desired", "deployed_at", "created_at", "data_user", "data_owner",
+              "latest_version", "latest_checked", "latest_error"]
 
 
 def insert_app(slug, data):
@@ -122,3 +145,21 @@ def update_app(slug, **fields):
     if fields:
         sets = ", ".join(f"{k} = ?" for k in fields)
         x(f"UPDATE apps SET {sets} WHERE slug = ?", list(fields.values()) + [slug])
+
+
+def kv_get(key, default=None):
+    r = one("SELECT value, ts FROM kv WHERE key = ?", (key,))
+    if not r:
+        return default
+    return json.loads(r["value"])
+
+
+def kv_ts(key):
+    r = one("SELECT ts FROM kv WHERE key = ?", (key,))
+    return r["ts"] if r else None
+
+
+def kv_set(key, value):
+    import time
+    x("INSERT INTO kv(key, value, ts) VALUES(?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, "
+      "ts = excluded.ts", (key, json.dumps(value), time.time()))

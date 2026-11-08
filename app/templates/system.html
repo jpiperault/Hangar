@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="bar"><h1>Système et alertes</h1>
+  <form method="post" action="/system/check"><button class="btn" {{ 'disabled' if busy }}>Rechercher les mises à jour</button></form>
+</div>
+<div class="cols">
+<div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+  <section class="panel">
+    <h2>Mises à jour</h2>
+    <p class="hint">Vérifiées chaque jour{% if chk_ts %}, dernière fois {{ chk_ts | ago }}{% endif %}. Ces composants ne se mettent jamais à jour tout seuls. Si un service ne repart pas après sa mise à jour, l'ancienne version est réinstallée.</p>
+    {% if chk %}
+    <div class="tablebox"><table>
+      <thead><tr><th>Composant</th><th>Installé</th><th>Disponible</th><th></th></tr></thead>
+      <tbody>
+      {% for cid, c in comps.items() %}{% set x = chk.components.get(cid, {}) %}
+        <tr><td><div class="nm">{{ c.name }}</div><div class="pk">{{ c.note }}</div></td>
+          <td class="mono">{{ x.current or '—' }}</td>
+          <td>{% if x.available %}<span class="pill s-deploying">{{ x.available }}</span>{% if cid == 'debian' %}<div class="pk">{{ x.packages[:8] | join(', ') }}{{ '…' if x.packages | length > 8 }}</div>{% endif %}
+              {% elif x.error %}<span class="hint lv-error">{{ x.error }}</span>{% else %}<span class="hint">à jour</span>{% endif %}</td>
+          <td><div class="acts">{% if busy == cid %}<span class="pill s-deploying">En cours…</span>
+            {% elif x.available %}<form class="inline" method="post" action="/system/update/{{ cid }}"
+              onsubmit="return confirm({{ ('Mettre à jour ' ~ c.name ~ ' ? ' ~ c.note) | tojson }})"><button class="btn sm primary" {{ 'disabled' if busy }}>Mettre à jour</button></form>{% endif %}</div></td></tr>
+      {% endfor %}
+        <tr><td><div class="nm">Hangar</div><div class="pk">Code de la console (dépôt GitHub)</div></td>
+          <td class="mono">{{ chk.hangar.head }}</td>
+          <td>{% if chk.hangar.behind %}<span class="pill s-deploying">{{ chk.hangar.behind }} commit(s) sur GitHub</span>{% elif chk.hangar.ahead %}<span class="hint">{{ chk.hangar.ahead }} commit(s) pas encore poussé(s)</span>{% else %}<span class="hint">à jour</span>{% endif %}
+            {% if chk.hangar.dirty %}<div class="pk">modifications locales non commitées</div>{% endif %}</td><td></td></tr>
+      </tbody></table></div>
+    {% if chk.reboot %}<p class="hint lv-warn">Un redémarrage du conteneur est demandé par une mise à jour (depuis Proxmox).</p>{% endif %}
+    {% else %}<p class="hint">Pas encore vérifié : clique sur « Rechercher les mises à jour ».</p>{% endif %}
+  </section>
+
+  {% if events %}
+  <section class="panel">
+    <div class="bar"><h2>Derniers événements système</h2><a class="btn sm link" href="/journal?app=système">Tout voir</a></div>
+    <ul class="events">{% for e in events %}<li><time>{{ e.ts | when }}</time><span class="lv-{{ e.level }}">{{ e.msg }}</span></li>{% endfor %}</ul>
+  </section>
+  {% endif %}
+</div>
+
+<div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+  <form class="panel" id="alertes" method="post" action="/system/alerts">
+    <h2>Alertes sur ton téléphone</h2>
+    <ol class="steps">
+      <li>Installe l'appli <strong>ntfy</strong> (Play Store ou F-Droid).</li>
+      <li>Appuie sur « + », puis abonne-toi au sujet <code>{{ s.ntfy_topic }}</code>{% if s.ntfy_server != 'https://ntfy.sh' %} sur le serveur <code>{{ s.ntfy_server }}</code>{% endif %}.</li>
+      <li>Envoie une notification de test.</li>
+    </ol>
+    <label class="check"><input type="checkbox" name="alerts_on" {{ 'checked' if s.alerts_on == '1' }}><span>Alertes activées</span></label>
+    <div class="field"><label for="ntfy_topic">Sujet</label><input id="ntfy_topic" name="ntfy_topic" value="{{ s.ntfy_topic }}" spellcheck="false">
+      <span class="hint">Garde-le secret : sur ntfy.sh, quiconque connaît le sujet peut lire les alertes. Elles contiennent les noms de tes applis et les erreurs, jamais de mot de passe.</span></div>
+    <div class="row2">
+      <div class="field"><label for="ntfy_server">Serveur</label><input id="ntfy_server" name="ntfy_server" value="{{ s.ntfy_server }}" spellcheck="false"></div>
+      <div class="field"><label for="ntfy_token">Jeton (optionnel)</label><input id="ntfy_token" name="ntfy_token" type="password" value="{{ '••••••' if s.ntfy_token }}" autocomplete="new-password" spellcheck="false"></div>
+    </div>
+    <span class="hint">Tu reçois une alerte quand :
+      <ul>
+        <li>une appli ne répond plus depuis 2 minutes, puis quand elle revient ;</li>
+        <li>un déploiement, une sauvegarde ou une mise à jour échoue ;</li>
+        <li>aucune sauvegarde n'a réussi depuis 36 h ;</li>
+        <li>le disque est plein à plus de 85 % ;</li>
+        <li>la mémoire est presque saturée ;</li>
+        <li>PostgreSQL ou le tunnel s'arrête.</li>
+      </ul>
+      Une alerte plus discrète signale aussi une nouvelle version d'appli ou de composant.</span>
+    <div class="bar" style="justify-content:flex-start">
+      <button class="btn primary sm">Enregistrer</button>
+      <button class="btn sm" formaction="/system/alerts/test">Envoyer un test</button>
+    </div>
+  </form>
+
+  <section class="panel">
+    <h2>Machine</h2>
+    <dl class="facts">
+      <dt>OS</dt><dd>{{ info.debian }}</dd>
+      <dt>Docker</dt><dd>{{ info.docker }} · compose {{ info.compose }}</dd>
+      <dt>Caddy</dt><dd>{{ info.caddy }}</dd>
+      <dt>PostgreSQL</dt><dd>{{ info.postgres }}</dd>
+      <dt>RAM</dt><dd>{{ info.mem_used }} / {{ info.mem_total }} Mo</dd>
+      <dt>Disque</dt><dd>{{ info.disk_used }} / {{ info.disk_total }} Go</dd>
+    </dl>
+  </section>
+</div>
+</div>
+{% endblock %}

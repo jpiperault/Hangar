@@ -130,3 +130,35 @@ textarea{font-family:var(--mono);font-size:.8rem;min-height:110px;resize:vertica
 }
 
 .events li span,.jmsg{white-space:pre-line;overflow-wrap:anywhere}
+
+/* sauvegardes, système, statistiques */
+.steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:10px;font-size:.9rem}
+.steps li{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.inlinefield{display:flex;gap:8px;width:100%;flex-wrap:wrap}
+.inlinefield input{flex:1;min-width:220px}
+details>summary{cursor:pointer;list-style:none;display:inline-flex}
+details>summary::-webkit-details-marker{display:none}
+details[open]>summary{margin-bottom:8px}
+nav.seg{display:inline-flex}
+.segbtn{font-size:.8rem;padding:5px 12px;color:var(--fg);text-decoration:none;border-right:1px solid var(--line)}
+.segbtn:last-child{border-right:0}
+.segbtn.on{background:var(--accent-soft);color:var(--accent);font-weight:700}
+:root{--chart:#008a7c;--grid:#e3e8e7}
+@media (prefers-color-scheme: dark){:root{--chart:#22a596;--grid:#26302e}}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+.chart{margin:0;position:relative;min-width:0}
+.chart figcaption{display:flex;flex-direction:column;gap:1px;margin-bottom:4px}
+.chart .ct{font-weight:600;font-size:.88rem}
+.chart .cs{font-size:.75rem;color:var(--muted)}
+.chart svg{display:block;overflow:visible}
+.chart .grid{stroke:var(--grid);stroke-width:1}
+.chart .tick{fill:var(--muted);font-size:10px;font-family:var(--mono)}
+.chart .mark{fill:var(--chart)}
+.chart .line{fill:none;stroke:var(--chart);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.chart .dot{fill:var(--chart);stroke:var(--surface);stroke-width:2}
+.chart .limit{stroke:var(--muted);stroke-width:1}
+.chart .errmark{fill:var(--bad)}
+.chart .cross{stroke:var(--muted);stroke-width:1}
+.chart .tip{position:absolute;top:30px;background:var(--fg);color:var(--surface);font-size:.75rem;padding:4px 8px;border-radius:6px;pointer-events:none;white-space:nowrap;font-variant-numeric:tabular-nums}
+.panel>.btn,.panel>form>.btn{align-self:flex-start}
+.charts{grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}

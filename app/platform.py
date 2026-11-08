@@ -13,7 +13,7 @@ import time
 import urllib.error
 import urllib.request
 
-from . import db
+from . import alerts, db
 
 PLATFORM = "/srv/platform"
 APPS_DIR = "/srv/apps"
@@ -21,6 +21,7 @@ BACKUPS = "/srv/backups"
 CADDYFILE = f"{PLATFORM}/Caddyfile"
 APPS_JSON = f"{PLATFORM}/public/.well-known/apps.json"
 ENV_FILE = f"{PLATFORM}/.env"
+ACCESS_LOG = "/var/log/caddy/access.log"
 PG = "platform-postgres-1"
 HOST_PORT_MIN = 18001
 
@@ -185,8 +186,12 @@ def render_caddyfile(s, apps):
               "\t\tclient_ip_headers Cf-Connecting-IP X-Forwarded-For",
               "\t}"]
     L += ["}", "",
+          "# Journal des requêtes (JSON), lu par Hangar pour les statistiques",
+          "(hangar_log) {", "\tlog {", f"\t\toutput file {ACCESS_LOG} {{", "\t\t\troll_size 20MiB",
+          "\t\t\troll_keep 3", "\t\t}", "\t\tformat json", "\t}", "}", "",
           "# Routes par chemin",
           names(s["hub"]) + " {",
+         "\timport hangar_log",
          "\tencode zstd gzip",
          "\thandle /.well-known/apps.json {",
          "\t\troot * /srv/platform/public",
@@ -200,13 +205,15 @@ def render_caddyfile(s, apps):
         if a["expose"] not in ("path", "both"):
             continue
         slug = a["slug"]
-        L += ["", f"\t# appli {slug}", f"\tredir /{slug} /{slug}/ 308", f"\thandle_path /{slug}/* {{"]
+        L += ["", f"\t# appli {slug}", f"\tredir /{slug} /{slug}/ 308", f"\thandle_path /{slug}/* {{",
+              f"\t\tlog_append hangar_app {slug}"]
         L += _upstream(a, f"/{slug}", "\t\t")
         L.append("\t}")
     L += ["", "\thandle {", '\t\trespond "Not found" 404', "\t}", "}"]
     for a in apps:
         if a["expose"] in ("sub", "both") and a["sub"]:
             L += ["", f"# appli {a['slug']}", names(a["sub"]) + " {",
+                  "\timport hangar_log", f"\tlog_append hangar_app {a['slug']}",
                   "\tencode zstd gzip"]
             L += _upstream(a, None, "\t")
             L.append("}")
@@ -366,10 +373,28 @@ def _sync_env_file(s):
     os.replace(tmp, ENV_FILE)
 
 
+def _ensure_access_log():
+    """`caddy validate` tourne en root : sans ça il créerait le journal en root et Caddy ne pourrait plus y écrire."""
+    import grp
+    import pwd
+    try:
+        uid, gid = pwd.getpwnam("caddy").pw_uid, grp.getgrnam("caddy").gr_gid
+    except KeyError:
+        return
+    os.makedirs(os.path.dirname(ACCESS_LOG), exist_ok=True)
+    if not os.path.exists(ACCESS_LOG):
+        open(ACCESS_LOG, "a").close()
+    st = os.stat(ACCESS_LOG)
+    if (st.st_uid, st.st_gid) != (uid, gid):
+        os.chown(ACCESS_LOG, uid, gid)
+    os.chmod(ACCESS_LOG, 0o640)
+
+
 def apply_routing():
     """Régénère le Caddyfile et apps.json. Ne remplace rien si Caddy refuse la config."""
     with routing_lock:
         s, apps = db.settings(), db.apps()
+        _ensure_access_log()
         new = CADDYFILE + ".new"
         with open(new, "w") as f:
             f.write(render_caddyfile(s, apps))
@@ -779,6 +804,10 @@ def deploy(slug, version, kind, previous=None):
             prev = old if version != old else a["prev_version"]
             db.update_app(slug, state="ok", desired="running", version=version, prev_version=prev, deployed_at=time.time())
             log("ok", slug, f"{version} en ligne ({detail})")
+            if a.get("latest_version"):
+                from . import registry
+                if registry.newest([a["latest_version"]], version) is None:   # plus rien de plus récent
+                    db.update_app(slug, latest_version=None)
         else:
             log("error", slug, detail)
             state = "error"
@@ -800,6 +829,9 @@ def deploy(slug, version, kind, previous=None):
                 else:
                     log("error", slug, f"{msg} impossible : {d2}")
             db.update_app(slug, state=state)
+            alerts.send_async(f"{a['name']} : {verb} de {version} en échec",
+                              detail + ("" if state == "error" else f"\n{old} est resté en ligne."),
+                              priority=4 if state == "ok" else 5, tags=["x"])
         try:
             apply_routing()
         except RuntimeError:

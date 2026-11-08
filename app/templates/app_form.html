@@ -119,7 +119,12 @@
     <dl class="facts">
       <dt>Déployée</dt><dd>{{ a.version }}</dd>
       <dt>Précédente</dt><dd>{{ a.prev_version or '—' }}</dd>
+      {% if a.source == 'image' %}<dt>Registre</dt><dd>{% if a.latest_version %}<span class="pill s-deploying">{{ a.latest_version }} disponible</span>{% elif a.latest_error %}<span class="lv-warn">{{ a.latest_error }}</span>{% elif a.latest_checked %}à jour{% else %}pas encore vérifié{% endif %}</dd>{% endif %}
     </dl>
+    {% if a.latest_version and a.status != 'deploying' %}
+    <form method="post" action="/apps/{{ a.slug }}/version"><input type="hidden" name="version" value="{{ a.latest_version }}">
+      <button class="btn primary sm">Déployer {{ a.latest_version }}</button></form>
+    {% endif %}
     <form method="post" action="/apps/{{ a.slug }}/version" style="display:flex;gap:8px">
       <label class="sr" for="newversion" hidden>Nouvelle version</label>
       <input id="newversion" name="version" placeholder="{{ 'tag, ex. 1.5.0' if a.source == 'image' else 'branche ou commit' }}" spellcheck="false" required aria-label="Nouvelle version">
@@ -128,8 +133,42 @@
     {% if a.prev_version %}
     <form method="post" action="/apps/{{ a.slug }}/rollback"><button class="btn warn sm" {{ 'disabled' if a.status == 'deploying' }}>Revenir à {{ a.prev_version }}</button></form>
     {% endif %}
-    <span class="hint">Avant de basculer, la console attend que {{ a.health_path }} réponde. En cas d'échec, la version actuelle est remise en ligne.</span>
+    <span class="hint">Avant de basculer, la console attend que {{ a.health_path }} réponde. En cas d'échec, la version actuelle est remise en ligne.{% if a.source == 'image' %} Les nouvelles versions (tags x.y.z) sont recherchées toutes les 6 h{% if a.latest_checked %}, dernière fois {{ a.latest_checked | ago }}{% endif %}.{% endif %}</span>
+    {% if a.source == 'image' %}<form method="post" action="/apps/{{ a.slug }}/versions/check"><button class="btn sm link">Vérifier maintenant</button></form>{% endif %}
   </section>
+
+  {% if a.db %}
+  <section class="panel" id="base">
+    <h2>Base de données</h2>
+    {% if dbi %}
+    <dl class="facts">
+      <dt>Nom</dt><dd>{{ dbi.name }}</dd>
+      <dt>Taille</dt><dd>{{ dbi.size | size }}</dd>
+      <dt>Tables</dt><dd>{{ dbi.count }}</dd>
+    </dl>
+    {% if dbi.tables %}
+    <details><summary class="hint">Tables les plus lourdes</summary>
+      {% for t in dbi.tables %}<div class="cert"><span class="mono">{{ t.name }}</span><span class="hint">{{ '{:,}'.format(t.rows).replace(',', ' ') }} lignes · {{ t.size | size }}</span></div>{% endfor %}
+    </details>
+    {% endif %}
+    <a class="btn sm" href="/apps/{{ a.slug }}/db/export" download>Exporter (.sql.gz)</a>
+    <details><summary class="btn sm">Importer ou remettre à zéro</summary>
+      <form method="post" action="/apps/{{ a.slug }}/db/import" enctype="multipart/form-data" class="panel danger" style="padding:12px;margin-top:10px">
+        <div class="field"><label for="dbfile">Fichier .sql, .sql.gz ou .dump</label><input id="dbfile" name="file" type="file" accept=".sql,.gz,.dump" required></div>
+        <div class="field"><label for="iconfirm">Tape <code>{{ a.slug }}</code> pour confirmer</label><input id="iconfirm" name="confirm" autocomplete="off" spellcheck="false"></div>
+        <span class="hint">Remplace tout le contenu de la base. L'appli est arrêtée pendant l'import, et une copie de la base actuelle va d'abord dans /srv/backups/avant-import.</span>
+        <div><button class="btn danger sm">Importer</button></div>
+      </form>
+      <form method="post" action="/apps/{{ a.slug }}/db/reset" class="panel danger" style="padding:12px;margin-top:10px">
+        <div class="field"><label for="zconfirm">Remettre la base à zéro : tape <code>{{ a.slug }}</code></label><input id="zconfirm" name="confirm" autocomplete="off" spellcheck="false"></div>
+        <span class="hint">Base vide, recréée au démarrage par les migrations de l'appli. Copie de l'actuelle dans /srv/backups/avant-import.</span>
+        <div><button class="btn danger sm">Remettre à zéro</button></div>
+      </form>
+    </details>
+    <span class="hint">Depuis le serveur : <code>docker exec -it platform-postgres-1 psql -U platform {{ dbi.name }}</code></span>
+    {% else %}<p class="hint">Base indisponible pour l'instant.</p>{% endif %}
+  </section>
+  {% endif %}
 
   {% if events %}
   <section class="panel">
@@ -149,6 +188,27 @@
 </div>
 {% endif %}
 </div>
+
+{% if not new %}
+<section class="panel" id="stats" style="margin-top:20px">
+  <div class="bar">
+    <h2>Statistiques</h2>
+    <nav class="seg" aria-label="Période">{% for r in ranges %}<a class="segbtn {{ 'on' if st.range == r }}" href="?r={{ r }}#stats">{{ r }}</a>{% endfor %}</nav>
+  </div>
+  {% set su = st.summary %}
+  <div class="kpis">
+    <span class="kpi"><strong>{{ '{:,}'.format(su.requests).replace(',', ' ') }}</strong> requêtes</span>
+    <span class="kpi"><strong>{{ su.errors5 }}</strong> erreurs serveur (5xx){% if su.requests %} · {{ '%.1f' % su.error_rate }} %{% endif %}</span>
+    <span class="kpi">Temps moyen <strong>{{ '%.0f ms' % su.avg_ms if su.avg_ms is not none else '—' }}</strong></span>
+    <span class="kpi">RAM max <strong>{{ '%.0f' % su.mem_max if su.mem_max is not none else '—' }}</strong> / {{ a.mem_mb }} Mo</span>
+  </div>
+  <div class="charts" id="charts"></div>
+  <details><summary class="hint">Voir les données en tableau</summary><div class="tablebox" id="stattable"></div></details>
+  <span class="hint">Requêtes vues par Caddy (le healthcheck interne de la console n'est pas compté). Données gardées 8 jours.</span>
+</section>
+<script id="stdata" type="application/json">{{ st | tojson }}</script>
+<script src="/static/charts.js" defer></script>
+{% endif %}
 
 <script>
 (function () {

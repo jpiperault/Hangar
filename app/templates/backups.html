@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="bar"><h1>Sauvegardes</h1>
+  <form method="post" action="/backups/run"><button class="btn primary" {{ 'disabled' if busy }}>{{ 'Sauvegarde en cours…' if busy else 'Sauvegarder maintenant' }}</button></form>
+</div>
+<div class="kpis">
+  <span class="kpi">Dernière sauvegarde sur Drive <strong>{{ last_ok.ts | ago if last_ok else 'jamais' }}</strong></span>
+  {% if last_ok and last_ok.total %}<span class="kpi">Volume sauvegardé <strong>{{ last_ok.total | size }}</strong></span>{% endif %}
+  <span class="kpi">Prochaine <strong>{{ next_run or '—' }}</strong></span>
+</div>
+
+<div class="cols">
+<div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+  <section class="panel" id="drive">
+    <h2>Google Drive</h2>
+    {% if conf %}
+      <dl class="facts">
+        <dt>État</dt><dd><span class="pill s-running">Connecté</span></dd>
+        <dt>Dossier</dt><dd class="mono">Mon Drive › {{ folder }}</dd>
+        <dt>Accès</dt><dd>uniquement les fichiers créés par Hangar (<code>drive.file</code>)</dd>
+      </dl>
+      <span class="hint">Chaque nuit à 3 h : un export de chaque base, le dossier data/ de chaque appli et la configuration de la plateforme. Tout est chiffré avant l'envoi : Google ne voit que des fichiers illisibles.</span>
+      <form method="post" action="/backups/drive/disconnect" onsubmit="return confirm('Déconnecter Google Drive ? Les sauvegardes déjà envoyées restent dans le Drive.')"><button class="btn sm">Déconnecter</button></form>
+    {% elif pending and google_url %}
+      <ol class="steps">
+        <li><a class="btn primary sm" href="{{ google_url }}" target="_blank" rel="noopener">Ouvrir Google et autoriser l'accès</a>
+          <span class="hint">Choisis ton compte puis « Autoriser ». Google demande seulement l'accès aux fichiers que Hangar crée lui-même.</span></li>
+        <li>Google renvoie ensuite vers une adresse <code>http://127.0.0.1:53682/…</code> et le navigateur affiche « site inaccessible ». <strong>C'est normal.</strong> Copie toute la barre d'adresse de cet onglet.</li>
+        <li><form method="post" action="/backups/drive/finish" class="inlinefield">
+          <label class="sr" for="url" hidden>Adresse copiée</label>
+          <input id="url" name="url" placeholder="http://127.0.0.1:53682/?state=…&code=…" spellcheck="false" autocomplete="off" required aria-label="Adresse copiée">
+          <button class="btn primary sm">Terminer la connexion</button></form></li>
+      </ol>
+      <form method="post" action="/backups/drive/cancel"><button class="btn sm link">Annuler</button></form>
+    {% else %}
+      <p class="hint">Les sauvegardes restent pour l'instant sur ce serveur : un export des bases chaque nuit, gardé 14 jours. Si le disque lâche, tout est perdu. Connecte Google Drive pour en garder une copie chiffrée ailleurs.</p>
+      <form method="post" action="/backups/drive/start"><button class="btn primary">Connecter Google Drive</button></form>
+    {% endif %}
+  </section>
+
+  {% if pw %}
+  <section class="panel">
+    <h2>Mot de passe des sauvegardes</h2>
+    <p class="hint"><strong>Sans ce mot de passe, les sauvegardes sont illisibles, même pour toi.</strong> Si ce serveur disparaît, c'est lui qui permet de tout récupérer depuis le Drive. Garde-le dans ton gestionnaire de mots de passe, avec le nom du dossier « {{ folder }} ».</p>
+    <details><summary class="btn sm">Afficher le mot de passe</summary>
+      <div class="cert"><span class="mono" id="pw">{{ pw }}</span><button type="button" class="btn sm" onclick="navigator.clipboard && navigator.clipboard.writeText(document.getElementById('pw').textContent).then(()=>{this.textContent='Copié'})">Copier</button></div>
+    </details>
+  </section>
+  {% endif %}
+
+  <section class="panel">
+    <h2>Dernières exécutions</h2>
+    {% for r in runs %}
+      <div class="cert"><span><span class="mono">{{ r.ts | when }}</span> <span class="hint">{{ r.trigger }} · {{ '%.0f' % (r.duration or 0) }} s</span><br><span class="{{ '' if r.ok else 'lv-error' }}">{{ r.msg }}</span></span>
+        <span class="pill {{ 's-running' if r.ok and r.remote else ('s-stopped' if r.ok else 's-error') }}">{{ ('Drive' if r.remote else 'Locale') if r.ok else 'Échec' }}</span></div>
+    {% else %}<p class="hint">Aucune exécution pour l'instant.</p>{% endfor %}
+  </section>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+  {% if conf %}
+  <form class="panel danger" id="restaurer" method="post" action="/backups/restore">
+    <h2>Restaurer une appli</h2>
+    {% if snap_err %}<p class="hint lv-error">{{ snap_err }}</p>{% endif %}
+    {% if snaps %}
+    <div class="row2">
+      <div class="field"><label for="rslug">Application</label>
+        <select id="rslug" name="slug">{% for a in apps %}<option value="{{ a.slug }}">{{ a.name }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="snap">Sauvegarde du</label>
+        <select id="snap" name="snap">{% for x in snaps %}<option value="{{ x.id }}">{{ x.ts | when }} ({{ x.ts | ago }})</option>{% endfor %}</select></div>
+    </div>
+    <label class="check"><input type="checkbox" name="data" checked><span>Fichiers (dossier data/)</span></label>
+    <label class="check"><input type="checkbox" name="db" checked><span>Base de données</span></label>
+    <div class="field"><label for="rconfirm">Tape l'identifiant de l'appli pour confirmer</label><input id="rconfirm" name="confirm" autocomplete="off" spellcheck="false"></div>
+    <span class="hint">L'appli est arrêtée pendant la restauration. Ses fichiers et sa base actuels sont d'abord copiés dans /srv/backups/avant-restauration : tu peux revenir en arrière.</span>
+    <div><button class="btn danger sm">Restaurer</button></div>
+    {% else %}<p class="hint">Aucune sauvegarde sur le Drive pour l'instant.</p>{% endif %}
+  </form>
+  {% endif %}
+
+  <form class="panel" method="post" action="/backups/keep">
+    <h2>Conservation</h2>
+    <div class="row3">
+      <div class="field"><label for="daily">Quotidiennes</label><input id="daily" name="daily" type="number" min="0" max="365" value="{{ keep.daily }}"></div>
+      <div class="field"><label for="weekly">Hebdomadaires</label><input id="weekly" name="weekly" type="number" min="0" max="365" value="{{ keep.weekly }}"></div>
+      <div class="field"><label for="monthly">Mensuelles</label><input id="monthly" name="monthly" type="number" min="0" max="365" value="{{ keep.monthly }}"></div>
+    </div>
+    <span class="hint">Nombre de sauvegardes gardées sur le Drive. Les fichiers identiques d'un jour à l'autre ne sont stockés qu'une fois : garder un an coûte peu de place.</span>
+    <div><button class="btn sm">Enregistrer</button></div>
+  </form>
+</div>
+</div>
+{% endblock %}

@@ -9,14 +9,15 @@
 </div>
 <div class="tablebox">
   <table>
-    <thead><tr><th>Application</th><th>Adresses publiques</th><th>État</th><th>Version</th><th>RAM</th><th></th></tr></thead>
+    <thead><tr><th>Application</th><th>Adresses publiques</th><th>État</th><th>Version</th><th>Requêtes 24 h</th><th>RAM</th><th></th></tr></thead>
     <tbody>
     {% for a in apps %}
       <tr>
         <td><div class="nm"><a href="/apps/{{ a.slug }}">{{ a.name }}</a></div><div class="pk">{{ a.pkg or a.slug }}</div></td>
         <td><div class="urls">{% for k, u in a.urls %}<span class="route"><i>{{ k }}</i><a href="{{ u }}" target="_blank" rel="noopener">{{ u }}</a></span>{% endfor %}</div></td>
         <td><span class="pill s-{{ a.status }}">{{ LABELS[a.status] }}</span></td>
-        <td><div class="mono">{{ a.version }}</div><div class="pk">{{ a.deployed_at | when }}</div></td>
+        <td><div class="mono">{{ a.version }}</div>{% if a.latest_version %}<div><span class="pill s-deploying" title="Nouvelle version sur le registre">{{ a.latest_version }} disponible</span></div>{% else %}<div class="pk">{{ a.deployed_at | when }}</div>{% endif %}</td>
+        {% set rq = req24.get(a.slug) %}<td class="ram">{{ '{:,}'.format(rq.n).replace(',', ' ') if rq else '0' }}{% if rq and rq.e5 %} <span class="lv-error">· {{ rq.e5 }} err.</span>{% endif %}</td>
         <td class="ram">{{ a.ram ~ ' Mo' if a.status == 'running' else '—' }}</td>
         <td><div class="acts">
           {% if a.status != 'deploying' %}
@@ -29,7 +30,7 @@
         </div></td>
       </tr>
     {% else %}
-      <tr><td colspan="6" class="empty">Aucune application pour l'instant. Prépare d'abord ton projet avec le <a href="/prompt">prompt de déploiement</a>, puis clique sur « Nouvelle application ».</td></tr>
+      <tr><td colspan="7" class="empty">Aucune application pour l'instant. Prépare d'abord ton projet avec le <a href="/prompt">prompt de déploiement</a>, puis clique sur « Nouvelle application ».</td></tr>
     {% endfor %}
     </tbody>
   </table>

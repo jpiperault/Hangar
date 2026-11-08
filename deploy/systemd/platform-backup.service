@@ -1,7 +1,14 @@
 [Unit]
-Description=Dump PostgreSQL de la plateforme
+Description=Sauvegarde Hangar (dumps PostgreSQL + restic vers Google Drive)
 Requires=docker.service
-After=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/platform-backup
+EnvironmentFile=/srv/platform/.env
+WorkingDirectory=/opt/hangar
+ExecStart=/opt/hangar/venv/bin/python -m app backup
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=8h

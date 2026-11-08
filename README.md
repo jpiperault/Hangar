@@ -22,19 +22,27 @@ FastAPI + Jinja, sans build front. Elle écoute en HTTPS (certificat auto-signé
 - Générateur de prompt pour préparer un projet d'appli avec Claude (Dockerfile, healthcheck, CI ghcr.io, client Android).
 - Le Caddyfile est validé avant chaque rechargement. Une configuration refusée n'est jamais appliquée.
 - Images privées : un jeton de lecture du registre (ghcr.io : `read:packages`) se saisit dans la fiche de l'appli. Il est vérifié par `docker login`, puis enregistré une fois pour tout le registre dans `/root/.docker/config.json`.
+- **Sauvegardes** chiffrées (restic) vers Google Drive chaque nuit : exports des bases, `data/` des applis, configuration. Restauration d'une appli en un clic, avec copie de l'état d'avant.
+- **Alertes ntfy** sur le téléphone : appli qui ne répond plus, échec de déploiement, de sauvegarde ou de mise à jour, disque, mémoire, PostgreSQL, tunnel.
+- **Nouvelles versions** : les tags x.y.z des images sont vérifiés toutes les 6 h, avec un bouton pour déployer la nouvelle version.
+- **Base de données** de chaque appli : taille, tables, export `.sql.gz`, import (`.sql`, `.sql.gz`, `.dump`) et remise à zéro, avec copie de sécurité.
+- **Mises à jour système** (Debian, Docker, Caddy, cloudflared, PostgreSQL) depuis la console, avec retour à la version précédente si le service ne repart pas.
+- **Statistiques** par appli sur 1 h, 24 h ou 7 jours : requêtes, erreurs, temps de réponse, mémoire, processeur.
 - Liste des noms publics à déclarer chez Cloudflare (sans joker), avec leur état DNS. Remplacement du jeton du tunnel, avec retour à l'ancien si cloudflared ne se connecte pas.
 
 ## Arborescence
 
 ```
-app/                 code de la console (main.py routes, platform.py opérations, db.py registre SQLite)
+app/                 code de la console : main.py (routes), platform.py (déploiements, Caddy), db.py (registre SQLite),
+                     backup.py, monitor.py (surveillance), alerts.py (ntfy), stats.py, system.py (mises à jour),
+                     dbadmin.py (bases), registry.py (API des registres Docker)
 deploy/              fichiers système installés sur le serveur (copies de référence)
   systemd/           hangar, platform-backup (+timer), platform-firewall, drop-in caddy
   caddy/             /etc/caddy/Caddyfile (importe /srv/platform/Caddyfile généré)
   docker/            daemon.json (live-restore, rotation des logs), compose PostgreSQL
   nftables/          pare-feu dans une table dédiée (ne touche pas aux règles Docker)
   apt/               mises à jour de sécurité automatiques (Docker, Caddy, cloudflared exclus)
-  bin/               hangar (CLI), platform-backup (dump quotidien)
+  bin/               hangar (CLI : passwd, backup, sysupdate)
 docs/                exploitation et prompt de déploiement d'une appli
 ```
 
@@ -42,13 +50,13 @@ docs/                exploitation et prompt de déploiement d'une appli
 
 Dans un conteneur LXC Proxmox, active d'abord l'imbrication sur l'hôte : `pct set <id> --features nesting=1,keyctl=1`.
 
-1. Paquets : Docker (dépôt officiel), Caddy (dépôt Cloudsmith), `cloudflared` (dépôt Cloudflare) en mode tunnel, `python3-venv`, `git`, `unattended-upgrades`.
+1. Paquets : Docker (dépôt officiel), Caddy (dépôt Cloudsmith), `cloudflared` (dépôt Cloudflare) en mode tunnel, `python3-venv`, `git`, `unattended-upgrades`, `restic`, `rclone`.
 2. `deploy/docker/daemon.json` → `/etc/docker/daemon.json`, puis redémarrer Docker et créer le réseau : `docker network create platform`.
-3. Dossiers : `/srv/platform/{caddy,public/.well-known,tls}`, `/srv/apps`, `/srv/backups/postgres`.
+3. Dossiers : `/srv/platform/{caddy,public/.well-known,tls}`, `/srv/apps`, `/srv/backups/postgres`, `/var/cache/restic` (700).
 4. `deploy/platform.env.example` → `/srv/platform/.env` : adapter `ADMIN_BIND`, `LAN_CIDR`, `EXPOSURE_MODE`. Groupe `caddy`, mode 640.
 5. `deploy/postgres.env.example` → `/srv/platform/postgres.env` (mode 600) avec un mot de passe aléatoire. `deploy/docker/platform-compose.yml` → `/srv/platform/compose.yml`, puis `docker compose up -d` dans `/srv/platform`.
 6. `deploy/caddy/etc-caddy-Caddyfile` → `/etc/caddy/Caddyfile`, et `deploy/systemd/caddy-platform.conf` → `/etc/systemd/system/caddy.service.d/platform.conf`.
-7. Code : ce dépôt dans `/opt/hangar`, puis `python3 -m venv venv && venv/bin/pip install -r requirements.txt`. Copier `deploy/bin/*` dans `/usr/local/bin/`.
+7. Code : ce dépôt dans `/opt/hangar`, puis `python3 -m venv venv && venv/bin/pip install -r requirements.txt`. Copier `deploy/bin/hangar` dans `/usr/local/bin/`.
 8. Certificat de la console :
    ```
    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \

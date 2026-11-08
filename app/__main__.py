@@ -1,4 +1,5 @@
-"""Point d'entrée : `python -m app` lance la console, `python -m app passwd [--random]` gère le compte."""
+"""Point d'entrée : `python -m app` lance la console.
+`python -m app passwd [--random]` gère le compte, `backup [--manual]` sauvegarde, `sysupdate <composant>` met à jour."""
 import getpass
 import os
 import secrets
@@ -36,8 +37,27 @@ def serve():
                 proxy_headers=False, server_header=False)
 
 
+def backup_cmd(args):
+    from . import backup, db
+    db.init()
+    sys.exit(backup.run_backup("manuelle" if "--manual" in args else "planifiée"))
+
+
+def sysupdate(args):
+    from . import db, system
+    db.init()
+    if not args or args[0] not in system.COMPONENTS:
+        sys.exit("Usage : hangar sysupdate " + "|".join(system.COMPONENTS))
+    sys.exit(system.run_update(args[0]))
+
+
 if __name__ == "__main__":
-    if sys.argv[1:2] == ["passwd"]:
+    cmd = sys.argv[1:2]
+    if cmd == ["passwd"]:
         passwd(sys.argv[2:])
+    elif cmd == ["backup"]:
+        backup_cmd(sys.argv[2:])
+    elif cmd == ["sysupdate"]:
+        sysupdate(sys.argv[2:])
     else:
         serve()

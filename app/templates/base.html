@@ -12,8 +12,10 @@
   <nav class="side" aria-label="Console">
     <div class="brand"><b></b>Hangar</div>
     <a class="nav {{ 'on' if nav == 'apps' }}" href="/">Applications <span class="count">{{ app_count }}</span></a>
-    <a class="nav {{ 'on' if nav == 'prompt' }}" href="/prompt">Prompt de déploiement</a>
+    <a class="nav {{ 'on' if nav == 'backups' }}" href="/backups">Sauvegardes</a>
+    <a class="nav {{ 'on' if nav == 'system' }}" href="/system">Système et alertes</a>
     <a class="nav {{ 'on' if nav == 'settings' }}" href="/settings">Domaine et accès</a>
+    <a class="nav {{ 'on' if nav == 'prompt' }}" href="/prompt">Prompt de déploiement</a>
     <a class="nav {{ 'on' if nav == 'journal' }}" href="/journal">Journal</a>
     <div class="foot">
       <span class="lanpill">LAN uniquement</span>
