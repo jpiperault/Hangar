@@ -128,3 +128,5 @@ textarea{font-family:var(--mono);font-size:.8rem;min-height:110px;resize:vertica
   .main{padding:18px 16px 40px}
   .row2,.row3{grid-template-columns:1fr}
 }
+
+.events li span,.jmsg{white-space:pre-line;overflow-wrap:anywhere}

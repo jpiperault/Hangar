@@ -611,16 +611,60 @@ def apps_with_status():
 
 # ---------------------------------------------------------------- déploiement
 
+LOG_TS = re.compile(r"^\s*\[?\d{4}-\d{2}-\d{2}[T ][\d:.,]+(?:Z|[+-]\d{2}:?\d{2})?\]?\s*")
+
+
+def _container_state(name):
+    rc, st = run(["docker", "inspect", "-f",
+                  "{{.State.Status}} {{.State.ExitCode}} {{.RestartCount}} {{.State.OOMKilled}}", name], timeout=10)
+    if rc:
+        return None
+    status, code, restarts, oom = (st.split() + ["", "0", "0", "false"])[:4]
+    return {"status": status, "code": code, "restarts": int(restarts or 0), "oom": oom == "true"}
+
+
+def container_report(name, lines=6):
+    """État du conteneur et dernières lignes de ses logs, sans horodatage, répétitions regroupées."""
+    st = _container_state(name)
+    out = []
+    if st is None:
+        return "Conteneur introuvable."
+    if st["oom"]:
+        out.append("Le conteneur a été tué faute de mémoire : augmente « RAM max ».")
+    elif st["status"] in ("exited", "dead", "restarting") and st["code"] not in ("", "0"):
+        out.append(f"Le conteneur s'arrête avec le code {st['code']}"
+                   + (f" ({st['restarts']} redémarrages)." if st["restarts"] else "."))
+    rc, logs = run(["docker", "logs", "--tail", "80", name], timeout=15)
+    groups = []
+    for l in logs.splitlines():
+        l = LOG_TS.sub("", l).rstrip()
+        if not l.strip():
+            continue
+        l = l if len(l) <= 300 else l[:297] + "…"
+        if groups and groups[-1][0] == l:
+            groups[-1][1] += 1
+        else:
+            groups.append([l, 1])
+    if groups:
+        out.append("Derniers logs :")
+        out += [f"  {l}" + (f"  (×{n})" if n > 1 else "") for l, n in groups[-lines:]]
+    else:
+        out.append("Aucune ligne de log : l'appli n'a rien écrit sur sa sortie standard.")
+    return "\n".join(out)
+
+
 def wait_health(a, timeout=90):
     url = f"http://127.0.0.1:{a['host_port']}{a['health_path']}"
     name = f"app-{a['slug']}-app-1"
     deadline, last = time.time() + timeout, "pas de réponse"
+    st0 = _container_state(name)
+    base = st0["restarts"] if st0 else 0
     time.sleep(1)
     while time.time() < deadline:
-        rc, st = run(["docker", "inspect", "-f", "{{.State.Status}} {{.State.ExitCode}}", name], timeout=10)
-        if rc == 0 and st.startswith(("exited", "dead")):
-            _, logs = run(["docker", "logs", "--tail", "8", name], timeout=10)
-            return False, f"le conteneur s'est arrêté (code {st.split()[-1]}) : {tail(logs, 4)}"
+        st = _container_state(name)
+        if st and (st["status"] in ("exited", "dead") or st["restarts"] - base >= 3):
+            why = "s'est arrêté" if st["status"] in ("exited", "dead") else "redémarre en boucle"
+            return False, f"le conteneur {why}.\n{container_report(name)}"
         try:
             with urllib.request.urlopen(url, timeout=3) as r:
                 return True, f"HTTP {r.status}"
@@ -631,7 +675,7 @@ def wait_health(a, timeout=90):
         except Exception as e:
             last = str(getattr(e, "reason", e))
         time.sleep(2)
-    return False, f"{url} → {last} après {timeout} s"
+    return False, f"{url} → {last} après {timeout} s.\n{container_report(name)}"
 
 
 USER_RE = re.compile(r"^(\d{1,10})(?::(\d{1,10}))?$")
