@@ -1,5 +1,6 @@
 """Point d'entrée : `python -m app` lance la console.
-`python -m app passwd [--random]` gère le compte, `backup [--manual]` sauvegarde, `sysupdate <composant>` met à jour."""
+`python -m app passwd [--random]` gère le compte, `backup [--manual]` sauvegarde, `archive` crée une archive, `restore <archive>` reprend tout,
+`routing` régénère la configuration de Caddy, `sysupdate <composant>` met à jour."""
 import getpass
 import os
 import secrets
@@ -49,6 +50,55 @@ def archive_cmd(args):
     sys.exit(backup.create_archive())
 
 
+def routing(args):
+    from . import db, platform as P
+    db.init()
+    P.apply_routing()
+    print("Caddyfile régénéré et Caddy rechargé.")
+
+
+def restore(args):
+    """hangar restore <archive.tar.gz> [--apps a,b] [--no-settings] : reprise complète en ligne de commande."""
+    import shutil
+    from . import backup, db, platform as P
+    db.init()
+    files, only, i = [], None, 0
+    while i < len(args):
+        if args[i] == "--apps" and i + 1 < len(args):
+            only = {x.strip() for x in args[i + 1].split(",") if x.strip()}
+            i += 2
+            continue
+        if not args[i].startswith("--"):
+            files.append(args[i])
+        i += 1
+    if len(files) != 1 or not os.path.exists(files[0]):
+        sys.exit("Usage : hangar restore <archive.tar.gz> [--apps appli1,appli2] [--no-settings]")
+    src = os.path.abspath(files[0])
+    man = backup.read_manifest(src)
+    os.makedirs(backup.ARCHIVES, mode=0o700, exist_ok=True)
+    if os.path.dirname(src) == backup.ARCHIVES and backup.NAME_RE.match(os.path.basename(src)):
+        name = os.path.basename(src)
+    else:
+        name = backup.save_upload_name()
+        shutil.copy2(src, f"{backup.ARCHIVES}/{name}")
+        os.chmod(f"{backup.ARCHIVES}/{name}", 0o600)
+    if "--no-settings" not in args and man.get("settings"):
+        backup.apply_settings(man["settings"])
+        st = man["settings"]
+        print(f"Réglages repris : {st.get('hub')}.{st.get('base_domain')}, mode {st.get('mode')}")
+    choices = {a["slug"]: [p for p in ("data", "db") if a.get(f"has_{p}")]
+               for a in man["apps"] if only is None or a["slug"] in only}
+    print(f"Restauration de {len(choices)} appli(s) : {', '.join(choices) or 'aucune'}")
+    backup.restore_archive(name, choices)
+    bad = 0
+    for slug in choices:
+        a = db.app(slug)
+        state = a["state"] if a else "absente"
+        bad += state != "ok"
+        print(f"  {slug:24} {state}")
+    sys.exit(1 if bad else 0)
+
+
 def sysupdate(args):
     from . import db, system
     db.init()
@@ -63,6 +113,10 @@ if __name__ == "__main__":
         passwd(sys.argv[2:])
     elif cmd == ["backup"]:
         backup_cmd(sys.argv[2:])
+    elif cmd == ["routing"]:
+        routing(sys.argv[2:])
+    elif cmd == ["restore"]:
+        restore(sys.argv[2:])
     elif cmd == ["archive"]:
         archive_cmd(sys.argv[2:])
     elif cmd == ["sysupdate"]:

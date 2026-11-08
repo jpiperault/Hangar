@@ -544,6 +544,30 @@ async def backups_page(request: Request):
                   folder=backup.FOLDER, own_client=backup.client_id(), archives=backup.archives())
 
 
+@app.post("/backups/password")
+async def backup_password(request: Request):
+    f = await request.form()
+    try:
+        backup.set_password(f.get("password") or "")
+        flash(request, "Mot de passe enregistré. Connecte maintenant Drive ou le NAS : les sauvegardes existantes seront reprises.")
+    except ValueError as e:
+        flash(request, str(e), "error")
+    return go("/backups")
+
+
+@app.post("/backups/full-restore")
+async def backup_full_restore(request: Request):
+    f = await request.form()
+    dest_id, snap = f.get("dest") or "", (f.get("snap") or "").strip()
+    if not backup.dest(dest_id) or not re.fullmatch(r"[0-9a-f]{8,64}", snap):
+        flash(request, "Choisis une sauvegarde.", "error")
+    else:
+        P.spawn(backup.snapshot_to_archive, dest_id, snap)
+        flash(request, "Préparation de la reprise : la sauvegarde est téléchargée puis convertie en archive. "
+                       "Elle apparaîtra dans « Archives » (importée) ; ouvre-la pour lancer la restauration.")
+    return go("/backups#archives")
+
+
 @app.post("/backups/nas/connect")
 async def nas_connect(request: Request):
     f = await request.form()
@@ -669,9 +693,19 @@ async def archive_restore(request: Request, name: str):
         if cur and not parts:
             continue
         choices[slug] = parts
-    if not choices:
+    with_settings = f.get("settings") == "on" and man.get("settings")
+    if not choices and not with_settings:
         flash(request, "Coche au moins une appli et ce qu'il faut restaurer.", "error")
         return go(f"/backups/archive/{name}")
+    if with_settings:
+        try:
+            await asyncio.to_thread(backup.apply_settings, man["settings"])
+        except RuntimeError as e:
+            flash(request, f"Réglages non repris : {e}", "error")
+            return go(f"/backups/archive/{name}")
+    if not choices:
+        flash(request, "Réglages repris (domaine et mode d'exposition).")
+        return go("/settings")
     for slug in choices:
         if db.app(slug):
             db.update_app(slug, state="deploying")

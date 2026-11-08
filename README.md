@@ -43,31 +43,23 @@ deploy/              fichiers système installés sur le serveur (copies de réf
   docker/            daemon.json (live-restore, rotation des logs), compose PostgreSQL
   nftables/          pare-feu dans une table dédiée (ne touche pas aux règles Docker)
   apt/               mises à jour de sécurité automatiques (Docker, Caddy, cloudflared exclus)
-  bin/               hangar (CLI : passwd, backup, sysupdate)
-docs/                exploitation et prompt de déploiement d'une appli
+  bin/               hangar (CLI : passwd, backup, archive, restore, routing, sysupdate)
+docs/                exploitation, reprise sur un nouveau serveur, prompt de déploiement d'une appli
+install.sh           installation complète (idempotente), avec restauration optionnelle d'une archive
 ```
 
 ## Installation (Debian 13)
 
+```bash
+./install.sh                     # questions : IP, réseau local, domaine, mode
+./install.sh --domain piperault.fr --mode tunnel --tunnel-token <jeton> --restore archive.tar.gz --yes
+```
+
+Le script installe Docker, Caddy, cloudflared, restic et rclone, puis PostgreSQL, la console, le pare-feu et les services. Il génère les secrets et le compte administrateur, et peut restaurer une archive dans la foulée. Il est idempotent : le relancer ne remplace aucun secret ni réglage existant.
+
 Dans un conteneur LXC Proxmox, active d'abord l'imbrication sur l'hôte : `pct set <id> --features nesting=1,keyctl=1`.
 
-1. Paquets : Docker (dépôt officiel), Caddy (dépôt Cloudsmith), `cloudflared` (dépôt Cloudflare) en mode tunnel, `python3-venv`, `git`, `unattended-upgrades`, `restic`, `rclone`.
-2. `deploy/docker/daemon.json` → `/etc/docker/daemon.json`, puis redémarrer Docker et créer le réseau : `docker network create platform`.
-3. Dossiers : `/srv/platform/{caddy,public/.well-known,tls}`, `/srv/apps`, `/srv/backups/postgres`, `/var/cache/restic` (700).
-4. `deploy/platform.env.example` → `/srv/platform/.env` : adapter `ADMIN_BIND`, `LAN_CIDR`, `EXPOSURE_MODE`. Groupe `caddy`, mode 640.
-5. `deploy/postgres.env.example` → `/srv/platform/postgres.env` (mode 600) avec un mot de passe aléatoire. `deploy/docker/platform-compose.yml` → `/srv/platform/compose.yml`, puis `docker compose up -d` dans `/srv/platform`.
-6. `deploy/caddy/etc-caddy-Caddyfile` → `/etc/caddy/Caddyfile`, et `deploy/systemd/caddy-platform.conf` → `/etc/systemd/system/caddy.service.d/platform.conf`.
-7. Code : ce dépôt dans `/opt/hangar`, puis `python3 -m venv venv && venv/bin/pip install -r requirements.txt`. Copier `deploy/bin/hangar` dans `/usr/local/bin/`.
-8. Certificat de la console :
-   ```
-   openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
-     -subj "/CN=Hangar" -addext "subjectAltName=IP:<ip-lan>" \
-     -keyout /srv/platform/tls/hangar.key -out /srv/platform/tls/hangar.crt
-   ```
-9. Pare-feu : `deploy/nftables/platform.nft` → `/etc/nftables.d/` (adapter le set `lan`). **Ne pas activer `nftables.service`**, qui effacerait les règles Docker.
-10. Unités systemd de `deploy/systemd/` → `/etc/systemd/system/`, puis `systemctl daemon-reload` et `systemctl enable --now hangar platform-backup.timer platform-firewall`.
-11. Compte admin : `hangar passwd`.
-12. En mode tunnel : `cloudflared service install <jeton>`. Le service doit lire son jeton dans `/etc/cloudflared/token` (option `--token-file`, mode 600), pour que la console puisse le remplacer depuis « Domaine et accès ». Dans Zero Trust, publie `apps.<domaine>` vers `http://127.0.0.1:8080`. Pas de joker : chaque sous-domaine d'appli est déclaré un par un, et la console liste les noms qui manquent.
+Reprise complète sur un nouveau serveur, depuis une archive, Drive ou le NAS : voir [docs/reprise.md](docs/reprise.md).
 
 ## Contrat pour un backend
 

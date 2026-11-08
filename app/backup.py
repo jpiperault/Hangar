@@ -88,6 +88,34 @@ def _ensure_password():
         P.write_private(PASS_FILE, "-".join(raw[i:i + 5] for i in range(0, 30, 5)) + "\n")
 
 
+def set_password(pw):
+    """Reprise sur un nouveau serveur : utiliser le mot de passe des sauvegardes existantes.
+    Seulement tant qu'aucune destination n'est connectée (sinon on casserait l'accès aux dépôts actuels)."""
+    pw = (pw or "").strip()
+    if dests():
+        raise ValueError("Déconnecte d'abord Drive et le NAS : le mot de passe ne peut changer que sans destination.")
+    if len(pw) < 8 or any(c in pw for c in "\r\n"):
+        raise ValueError("Mot de passe invalide.")
+    os.makedirs(BK, mode=0o700, exist_ok=True)
+    P.write_private(PASS_FILE, pw + "\n")
+    P.log("info", "sauvegarde", "mot de passe des sauvegardes remplacé (reprise d'un serveur)")
+
+
+def _check_repo(d, where):
+    """Dépôt présent : vérifie qu'il s'ouvre avec notre mot de passe. Absent : le crée."""
+    rc, _, err = restic("cat", "config", timeout=120, d=d)
+    if rc == 0:
+        P.log("ok", "sauvegarde", f"{where} : dépôt existant retrouvé")
+        return
+    if re.search(r"wrong password|no key found", err, re.I):
+        raise RuntimeError(f"{where} contient déjà des sauvegardes chiffrées avec un autre mot de passe. Pour les "
+                           "reprendre, saisis ce mot de passe dans « Mot de passe des sauvegardes » puis reconnecte.")
+    rc, _, err = restic("init", timeout=300, d=d)
+    if rc:
+        raise RuntimeError(f"Initialisation du dépôt chiffré impossible ({where}) : " + P.tail(err, 3))
+    P.log("ok", "sauvegarde", f"{where} : dépôt chiffré créé")
+
+
 def _env(d=None):
     d = d or {"repo": REPO, "conf": RCLONE_CONF}
     return {**os.environ, "RESTIC_REPOSITORY": d["repo"], "RESTIC_PASSWORD_FILE": PASS_FILE,
@@ -263,14 +291,11 @@ def auth_finish(pasted):
                            "Crée ton propre identifiant Google (étapes ci-dessous) et reconnecte Drive.")
     if rc:
         raise RuntimeError("Drive refuse la création du dossier : " + P.tail(out, 3))
-    rc, _, err = restic("cat", "config", timeout=120)
-    if rc:
-        rc, _, err = restic("init", timeout=300)
-        if rc:
-            raise RuntimeError("Initialisation du dépôt chiffré impossible : " + P.tail(err, 3))
-        P.log("ok", "sauvegarde", f"Google Drive connecté, dépôt chiffré créé dans « {FOLDER} »")
-    else:
-        P.log("ok", "sauvegarde", f"Google Drive reconnecté, dépôt existant « {FOLDER} » retrouvé")
+    try:
+        _check_repo(None, f"Google Drive « {FOLDER} »")
+    except RuntimeError:
+        os.remove(RCLONE_CONF)
+        raise
 
 
 def disconnect():
@@ -338,15 +363,11 @@ def nas_connect(kind, host, port, user, password, share, path):
         if os.path.exists(tmp):
             os.remove(tmp)
     db.set_setting("backup_nas", n)
-    d = dest("nas")
-    rc, _, err = restic("cat", "config", timeout=120, d=d)
-    if rc:
-        rc, _, err = restic("init", timeout=300, d=d)
-        if rc:
-            raise RuntimeError("Initialisation du dépôt chiffré sur le NAS impossible : " + P.tail(err, 3))
-        P.log("ok", "sauvegarde", f"NAS {host} connecté ({kind.upper()}), dépôt chiffré créé dans {_nas_path(n)}")
-    else:
-        P.log("ok", "sauvegarde", f"NAS {host} reconnecté, dépôt existant retrouvé dans {_nas_path(n)}")
+    try:
+        _check_repo(dest("nas"), f"le NAS {host} ({_nas_path(n)})")
+    except RuntimeError:
+        nas_disconnect()
+        raise
 
 
 def nas_disconnect():
@@ -802,6 +823,81 @@ def _recreate_app(e, src_data, src_dump, parts, name):
     if "data" in parts and os.path.isdir(src_data):
         shutil.move(src_data, f"{P.app_dir(slug)}/data")
     P.deploy(slug, a["version"], "create")   # pull, /data, démarrage, healthcheck, routes
+
+
+def snapshot_to_archive(dest_id, snap):
+    """Reprise complète depuis Drive/NAS : extrait l'instantané et le convertit en archive Hangar (manifeste tiré
+    de la copie du registre), à restaurer ensuite depuis la page de l'archive."""
+    import sqlite3
+    import tarfile
+    import io
+    d = dest(dest_id)
+    if not d:
+        return
+    tmp = f"/srv/backups/restore-tmp/instantane-{time.strftime('%Y%m%d-%H%M%S')}"
+    os.makedirs(tmp, mode=0o700, exist_ok=True)
+    P.log("info", "sauvegarde", f"préparation de la reprise complète depuis {d['name']}, sauvegarde {snap}")
+    try:
+        rc, out, err = restic("restore", snap, "--target", tmp, "--include", STAGING,
+                              "--include", P.APPS_DIR, timeout=12 * 3600, d=d)
+        if rc:
+            raise RuntimeError("restic restore : " + P.tail(err, 3))
+        reg = f"{tmp}{STAGING}/platform.db.copie"
+        if not os.path.exists(reg):
+            raise RuntimeError("cette sauvegarde ne contient pas la copie du registre (sauvegarde trop ancienne)")
+        c = sqlite3.connect(reg)
+        c.row_factory = sqlite3.Row
+        apps = [dict(r) for r in c.execute("SELECT * FROM apps")]
+        sett = {r["key"]: r["value"] for r in c.execute("SELECT key, value FROM settings")}
+        c.close()
+        try:
+            aliases = json.loads(sett.get("aliases") or "[]")
+        except ValueError:
+            aliases = []
+        manifest = {"format": 1, "created": time.time(), "hangar": f"instantané {snap} ({d['name']})",
+                    "settings": {"base_domain": sett.get("base_domain"), "hub": sett.get("hub"),
+                                 "aliases": aliases, "mode": sett.get("mode")},
+                    "apps": [{"slug": a["slug"], **{k: a.get(k) for k in APP_KEYS}} for a in apps]}
+        os.makedirs(ARCHIVES, mode=0o700, exist_ok=True)
+        name = save_upload_name()
+        part = f"{ARCHIVES}/.{name}.part"
+        fdp = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fdp, "wb") as raw, tarfile.open(fileobj=raw, mode="w:gz", compresslevel=6) as tar:
+            data = json.dumps(manifest, ensure_ascii=False, indent=1).encode()
+            ti = tarfile.TarInfo("manifest.json")
+            ti.size, ti.mtime, ti.mode = len(data), int(time.time()), 0o600
+            tar.addfile(ti, io.BytesIO(data))
+            for a in apps:
+                dump = f"{tmp}{STAGING}/db/{a['slug']}.dump"
+                if os.path.exists(dump):
+                    tar.add(dump, arcname=f"db/{a['slug']}.dump")
+                ddir = f"{tmp}{P.APPS_DIR}/{a['slug']}/data"
+                if os.path.isdir(ddir):
+                    tar.add(ddir, arcname=f"apps/{a['slug']}/data")
+        os.replace(part, f"{ARCHIVES}/{name}")
+        P.log("ok", "sauvegarde", f"reprise prête : archive {name} ({len(apps)} appli(s)). "
+                                  "Ouvre-la dans Sauvegardes › Archives pour lancer la restauration.")
+    except Exception as e:
+        P.log("error", "sauvegarde", f"reprise complète impossible : {e}")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def apply_settings(st):
+    """Reprend le domaine, l'hôte des chemins, les alias et le mode d'exposition d'une archive."""
+    cur = db.settings()
+    for k in ("base_domain", "hub", "mode"):
+        if st.get(k):
+            db.set_setting(k, st[k])
+    aliases = [a for a in (st.get("aliases") or []) if a and a != st.get("base_domain")]
+    db.set_setting("aliases", aliases)
+    try:
+        P.apply_routing()
+    except RuntimeError:
+        for k in ("base_domain", "hub", "aliases", "mode"):
+            db.set_setting(k, cur[k])
+        raise
+    P.log("ok", "caddy", f"réglages repris de l'archive : {st.get('hub')}.{st.get('base_domain')}, mode {st.get('mode')}")
 
 
 def start_archive_restore(name, choices):

@@ -118,15 +118,24 @@
     </form>
   </section>
 
-  {% if pw %}
-  <section class="panel">
+  <section class="panel" id="motdepasse">
     <h2>Mot de passe des sauvegardes</h2>
+    {% if pw %}
     <p class="hint"><strong>Sans ce mot de passe, les sauvegardes Drive et NAS sont illisibles, même pour toi.</strong> Si ce serveur disparaît, c'est lui qui permet de tout récupérer. Garde-le dans ton gestionnaire de mots de passe, avec le nom du dossier « {{ folder }} ».</p>
     <details><summary class="btn sm">Afficher le mot de passe</summary>
       <div class="cert"><span class="mono" id="pw">{{ pw }}</span><button type="button" class="btn sm" onclick="navigator.clipboard && navigator.clipboard.writeText(document.getElementById('pw').textContent).then(()=>{this.textContent='Copié'})">Copier</button></div>
     </details>
+    {% endif %}
+    {% if not dests %}
+    <details><summary class="hint"><strong>▸ Nouveau serveur ? Reprendre des sauvegardes existantes</strong></summary>
+      <form method="post" action="/backups/password" autocomplete="off" style="margin-top:8px">
+        <div class="field"><label for="oldpw">Mot de passe de tes sauvegardes</label><input id="oldpw" name="password" type="password" autocomplete="new-password" spellcheck="false" required></div>
+        <span class="hint">À saisir <strong>avant</strong> de connecter Drive ou le NAS : Hangar reprend alors le dépôt existant au lieu d'en créer un nouveau. Ensuite, « Tout restaurer » recrée toutes les applis.</span>
+        <div style="margin-top:8px"><button class="btn sm">Utiliser ce mot de passe</button></div>
+      </form>
+    </details>
+    {% endif %}
   </section>
-  {% endif %}
 
   <section class="panel">
     <h2>Dernières exécutions</h2>
@@ -155,7 +164,11 @@
     <label class="check"><input type="checkbox" name="db" checked><span>Base de données</span></label>
     <div class="field"><label for="rconfirm">Tape l'identifiant de l'appli pour confirmer</label><input id="rconfirm" name="confirm" autocomplete="off" spellcheck="false"></div>
     <span class="hint">L'appli est arrêtée pendant la restauration. Ses fichiers et sa base actuels sont d'abord copiés dans /srv/backups/avant-restauration : tu peux revenir en arrière.</span>
-    <div><button class="btn danger sm">Restaurer</button></div>
+    <div class="bar" style="justify-content:flex-start">
+      <button class="btn danger sm">Restaurer cette appli</button>
+      <button class="btn sm" formaction="/backups/full-restore" formnovalidate>Tout restaurer (reprise du serveur)…</button>
+    </div>
+    <span class="hint">« Tout restaurer » télécharge la sauvegarde choisie et la convertit en archive : tu choisis ensuite les applis (absentes : recréées) et la reprise du domaine.</span>
     {% else %}<p class="hint">Aucune sauvegarde à cet endroit pour l'instant.</p>{% endif %}
   </form>
   {% endif %}

@@ -9,6 +9,12 @@
 </div>
 <form class="panel danger" method="post" action="/backups/archive/{{ aname }}/restore" style="margin-top:16px">
   <p class="hint">Coche ce que tu veux restaurer. Pour une appli qui existe déjà, ses fichiers et sa base actuels sont d'abord copiés dans /srv/backups/avant-restauration, puis remplacés. Une appli absente de ce serveur est <strong>recréée</strong> avec sa fiche (image, version, variables), puis déployée.</p>
+  {% if man.settings and man.settings.base_domain %}
+  <label class="check"><input type="checkbox" name="settings" {{ 'checked' if man.settings.base_domain != s.base_domain or man.settings.mode != s.mode }}>
+    <span>Reprendre les réglages : <code>{{ man.settings.hub }}.{{ man.settings.base_domain }}</code>, mode {{ 'tunnel Cloudflare' if man.settings.mode == 'tunnel' else 'direct' }}{% if man.settings.aliases %}, alias {{ man.settings.aliases | join(', ') }}{% endif %}
+    <span class="hint">(actuellement {{ s.hub }}.{{ s.base_domain }}, mode {{ s.mode }})</span></span></label>
+  {% endif %}
+  <div><button type="button" class="btn sm" id="all">Tout cocher</button></div>
   <div class="tablebox"><table>
     <thead><tr><th></th><th>Application</th><th>Ici</th><th>Version</th><th>Fichiers (data/)</th><th>Base</th></tr></thead>
     <tbody>
@@ -28,4 +34,9 @@
   <div class="field"><label for="confirm">Tape <code>restaurer</code> pour confirmer</label><input id="confirm" name="confirm" autocomplete="off" spellcheck="false"></div>
   <div class="bar" style="justify-content:flex-start"><button class="btn danger">Lancer la restauration</button><a class="btn" href="/backups#archives">Annuler</a></div>
 </form>
+<script>
+document.getElementById('all').addEventListener('click', function () {
+  document.querySelectorAll('form input[type=checkbox]').forEach(function (c) { c.checked = true; });
+});
+</script>
 {% endblock %}
