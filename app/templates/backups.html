@@ -18,7 +18,9 @@
         <dt>État</dt><dd><span class="pill s-running">Connecté</span></dd>
         <dt>Dossier</dt><dd class="mono">Mon Drive › {{ folder }}</dd>
         <dt>Accès</dt><dd>uniquement les fichiers créés par Hangar (<code>drive.file</code>)</dd>
+        <dt>Identifiant</dt><dd>{{ 'personnel' if own_client else 'partagé (rclone)' }}</dd>
       </dl>
+      {% if not own_client %}<p class="hint lv-warn">L'identifiant partagé de rclone est souvent bloqué par Google. Si les sauvegardes échouent avec « rateLimitExceeded », déconnecte Drive et reconnecte-le avec ton propre identifiant.</p>{% endif %}
       <span class="hint">Chaque nuit à 3 h : un export de chaque base, le dossier data/ de chaque appli et la configuration de la plateforme. Tout est chiffré avant l'envoi : Google ne voit que des fichiers illisibles.</span>
       <form method="post" action="/backups/drive/disconnect" onsubmit="return confirm('Déconnecter Google Drive ? Les sauvegardes déjà envoyées restent dans le Drive.')"><button class="btn sm">Déconnecter</button></form>
     {% elif pending and google_url %}
@@ -34,7 +36,25 @@
       <form method="post" action="/backups/drive/cancel"><button class="btn sm link">Annuler</button></form>
     {% else %}
       <p class="hint">Les sauvegardes restent pour l'instant sur ce serveur : un export des bases chaque nuit, gardé 14 jours. Si le disque lâche, tout est perdu. Connecte Google Drive pour en garder une copie chiffrée ailleurs.</p>
-      <form method="post" action="/backups/drive/start"><button class="btn primary">Connecter Google Drive</button></form>
+      <details {{ 'open' if not conf }}><summary class="hint"><strong>Étape préalable : ton identifiant Google</strong> (10 minutes, une seule fois)</summary>
+        <p class="hint">L'identifiant fourni par défaut avec rclone est partagé par tous ses utilisateurs, et Google le bloque souvent (« quota dépassé »). Le tien est gratuit, et son quota t'est réservé.</p>
+        <ol class="steps">
+          <li>Ouvre <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">console.cloud.google.com</a> et crée un projet « Hangar ».</li>
+          <li>Dans <a href="https://console.cloud.google.com/apis/library/drive.googleapis.com" target="_blank" rel="noopener">API et services › Bibliothèque</a>, active <strong>Google Drive API</strong>.</li>
+          <li>Dans <a href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noopener">Google Auth Platform</a>, clique sur « Commencer » : nom de l'application « Hangar », ton adresse e-mail, audience <strong>Externe</strong>.</li>
+          <li>Dans <strong>Accès aux données</strong>, ajoute le champ d'application <code>…/auth/drive.file</code>.</li>
+          <li>Dans <strong>Audience</strong>, clique sur <strong>Publier l'application</strong> (« En production »). <span class="hint">En mode « Test », Google coupe l'accès au bout de 7 jours. Le droit <code>drive.file</code> ne demande aucune validation par Google.</span></li>
+          <li>Dans <strong>Clients</strong>, crée un client de type <strong>Application de bureau</strong>, nommé « Hangar ». Copie son <strong>ID client</strong> et son <strong>code secret</strong> ci-dessous.</li>
+        </ol>
+      </details>
+      <form method="post" action="/backups/drive/start" autocomplete="off">
+        <div class="row2">
+          <div class="field"><label for="client_id">ID client</label><input id="client_id" name="client_id" spellcheck="false" placeholder="123456-abc….apps.googleusercontent.com"></div>
+          <div class="field"><label for="client_secret">Code secret du client</label><input id="client_secret" name="client_secret" type="password" spellcheck="false" autocomplete="new-password" placeholder="GOCSPX-…"></div>
+        </div>
+        <span class="hint">Laisse vide pour essayer avec l'identifiant partagé de rclone (déconseillé).</span>
+        <div style="margin-top:10px"><button class="btn primary">Connecter Google Drive</button></div>
+      </form>
     {% endif %}
   </section>
 

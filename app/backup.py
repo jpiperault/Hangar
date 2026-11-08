@@ -105,11 +105,16 @@ def _reader(proc, sink):
         sink.append(line)
 
 
-def auth_start():
-    """Lance `rclone authorize` (écoute sur 127.0.0.1:53682 du serveur) et renvoie l'URL Google."""
+def auth_start(client_id="", client_secret=""):
+    """Lance `rclone authorize` (écoute sur 127.0.0.1:53682 du serveur) et renvoie l'URL Google.
+    Avec un identifiant OAuth personnel : quota Google réservé (celui de rclone est partagé et souvent saturé)."""
     with _auth_lock:
         auth_cancel()
-        opts = base64.urlsafe_b64encode(json.dumps({"scope": "drive.file"}).encode()).decode().rstrip("=")
+        cfg = {"scope": "drive.file"}
+        if client_id:
+            cfg.update(client_id=client_id, client_secret=client_secret)
+        _auth["client"] = (client_id, client_secret)
+        opts = base64.urlsafe_b64encode(json.dumps(cfg).encode()).decode().rstrip("=")
         proc = subprocess.Popen(["rclone", "authorize", "drive", opts, "--auth-no-open-browser"],
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                 env={**os.environ, "RCLONE_CONFIG": "/dev/null"})
@@ -202,6 +207,7 @@ def auth_finish(pasted):
         except subprocess.TimeoutExpired:
             pass
         out = "".join(_auth["out"])
+        client = _auth.get("client") or ("", "")
         auth_cancel()
         token = _parse_token(out)
         if not token:
@@ -209,10 +215,16 @@ def auth_finish(pasted):
             errs = [l for l in out.splitlines() if ("ERROR" in l or "Failed" in l) and "--->" not in l]
             raise RuntimeError("Google n'a pas donné de jeton exploitable" + (" : " + P.tail("\n".join(errs), 2) if errs else "."))
     _ensure_password()
+    cid, csec = client
     conf = (f"[{REMOTE}]\ntype = drive\nscope = drive.file\n"
-            f"token = {json.dumps(token, separators=(',', ':'))}\n")
+            + (f"client_id = {cid}\nclient_secret = {csec}\n" if cid else "")
+            + f"token = {json.dumps(token, separators=(',', ':'))}\n")
     P.write_private(RCLONE_CONF, conf)
-    rc, out = P.run(["rclone", "--config", RCLONE_CONF, "mkdir", f"{REMOTE}:{FOLDER}"], timeout=60)
+    rc, out = P.run(["rclone", "--config", RCLONE_CONF, "mkdir", f"{REMOTE}:{FOLDER}"], timeout=180)
+    if rc and "rateLimitExceeded" in out or rc == 124:
+        os.remove(RCLONE_CONF)
+        raise RuntimeError("Google limite les accès faits avec l'identifiant partagé de rclone (quota saturé). "
+                           "Crée ton propre identifiant Google (étapes ci-dessous) et reconnecte Drive.")
     if rc:
         raise RuntimeError("Drive refuse la création du dossier : " + P.tail(out, 3))
     rc, _, err = restic("cat", "config", timeout=120)
@@ -449,3 +461,12 @@ def restore_app(slug, snap, parts):
             db.update_app(slug, state="error")
             P.log("error", slug, f"restauration impossible : {e}" +
                   (f". L'état d'avant est gardé dans {safe}" if os.path.exists(safe) else ". Rien n'a été remplacé"))
+
+
+def client_id():
+    """Identifiant OAuth personnel enregistré dans rclone.conf ('' = celui, partagé, de rclone)."""
+    try:
+        m = re.search(r"^client_id = (.+)$", open(RCLONE_CONF).read(), re.M)
+        return m.group(1).strip() if m else ""
+    except OSError:
+        return ""

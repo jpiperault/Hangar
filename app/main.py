@@ -534,13 +534,21 @@ async def backups_page(request: Request):
                   last_ok=backup.last_ok(), busy=busy, snaps=snaps, snap_err=snap_err,
                   pending=backup.auth_pending(), google_url=backup._auth.get("google_url"),
                   pw=backup.password(), keep=keep, next_run=nxt.strip(), apps=db.apps(), refresh=busy,
-                  folder=backup.FOLDER)
+                  folder=backup.FOLDER, own_client=backup.client_id())
 
 
 @app.post("/backups/drive/start")
 async def drive_start(request: Request):
+    f = await request.form()
+    cid, csec = (f.get("client_id") or "").strip(), (f.get("client_secret") or "").strip()
+    if cid and not re.fullmatch(r"[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com", cid):
+        flash(request, "Client ID invalide : il se termine par .apps.googleusercontent.com", "error")
+        return go("/backups#drive")
+    if cid and not re.fullmatch(r"[A-Za-z0-9_-]{10,100}", csec):
+        flash(request, "Indique aussi le code secret du client (Client secret).", "error")
+        return go("/backups#drive")
     try:
-        url = await asyncio.to_thread(backup.auth_start)
+        url = await asyncio.to_thread(backup.auth_start, cid, csec)
         backup._auth["google_url"] = url
     except RuntimeError as e:
         flash(request, str(e), "error")
