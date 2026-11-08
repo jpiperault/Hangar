@@ -1,10 +1,13 @@
 {% extends "base.html" %}
 {% block main %}
 <div class="bar"><h1>Sauvegardes</h1>
-  <form method="post" action="/backups/run"><button class="btn primary" {{ 'disabled' if busy }}>{{ 'Sauvegarde en cours…' if busy else 'Sauvegarder maintenant' }}</button></form>
+  <div class="acts">
+    <form method="post" action="/backups/archive/create"><button class="btn" {{ 'disabled' if busy }}>{{ 'Archive en cours…' if arch_busy else 'Créer une archive à télécharger' }}</button></form>
+    <form method="post" action="/backups/run"><button class="btn primary" {{ 'disabled' if busy }}>{{ 'Sauvegarde en cours…' if busy and not arch_busy else 'Sauvegarder maintenant' }}</button></form>
+  </div>
 </div>
 <div class="kpis">
-  <span class="kpi">Dernière sauvegarde sur Drive <strong>{{ last_ok.ts | ago if last_ok else 'jamais' }}</strong></span>
+  {% for d in dests %}<span class="kpi">{{ d.name }} <strong>{{ d.last.ts | ago if d.last else 'jamais' }}</strong></span>{% else %}<span class="kpi">Aucune destination hors du serveur</span>{% endfor %}
   {% if last_ok and last_ok.total %}<span class="kpi">Volume sauvegardé <strong>{{ last_ok.total | size }}</strong></span>{% endif %}
   <span class="kpi">Prochaine <strong>{{ next_run or '—' }}</strong></span>
 </div>
@@ -13,7 +16,7 @@
 <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
   <section class="panel" id="drive">
     <h2>Google Drive</h2>
-    {% if conf %}
+    {% if drive_conf %}
       <dl class="facts">
         <dt>État</dt><dd><span class="pill s-running">Connecté</span></dd>
         <dt>Dossier</dt><dd class="mono">Mon Drive › {{ folder }}</dd>
@@ -36,7 +39,7 @@
       <form method="post" action="/backups/drive/cancel"><button class="btn sm link">Annuler</button></form>
     {% else %}
       <p class="hint">Les sauvegardes restent pour l'instant sur ce serveur : un export des bases chaque nuit, gardé 14 jours. Si le disque lâche, tout est perdu. Connecte Google Drive pour en garder une copie chiffrée ailleurs.</p>
-      <details {{ 'open' if not conf }}><summary class="hint"><strong>Étape préalable : ton identifiant Google</strong> (10 minutes, une seule fois)</summary>
+      <details><summary class="hint"><strong>▸ Étape préalable : ton identifiant Google</strong> (10 minutes, une seule fois)</summary>
         <p class="hint">L'identifiant fourni par défaut avec rclone est partagé par tous ses utilisateurs, et Google le bloque souvent (« quota dépassé »). Le tien est gratuit, et son quota t'est réservé.</p>
         <ol class="steps">
           <li>Ouvre <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">console.cloud.google.com</a> et crée un projet « Hangar ».</li>
@@ -58,10 +61,67 @@
     {% endif %}
   </section>
 
+  <section class="panel" id="nas">
+    <h2>NAS</h2>
+    {% if nas %}
+      <dl class="facts">
+        <dt>État</dt><dd><span class="pill s-running">Connecté</span></dd>
+        <dt>Adresse</dt><dd>{{ nas.kind | upper }} · {{ nas.user }}@{{ nas.host }}:{{ nas.port }}</dd>
+        <dt>Dossier</dt><dd>{{ (nas.share ~ '/' if nas.kind == 'smb' else ('/' if nas.abs else '')) ~ nas.path }}</dd>
+      </dl>
+      <span class="hint">Chaque sauvegarde part aussi sur le NAS, chiffrée avec le même mot de passe que Drive.</span>
+      <form method="post" action="/backups/nas/disconnect" onsubmit="return confirm('Déconnecter le NAS ? Les sauvegardes déjà envoyées y restent.')"><button class="btn sm">Déconnecter</button></form>
+    {% else %}
+      <p class="hint">Une copie chez toi, pour restaurer vite sans passer par Internet. Crée sur le NAS un utilisateur dédié (par exemple « hangar ») avec accès en écriture à un dossier partagé.</p>
+      <form method="post" action="/backups/nas/connect" autocomplete="off">
+        <div class="seg" role="radiogroup" aria-label="Protocole" style="margin-bottom:12px">
+          <label><input type="radio" name="kind" value="smb" checked><span>SMB (partage Windows)</span></label>
+          <label><input type="radio" name="kind" value="sftp"><span>SFTP (SSH)</span></label>
+        </div>
+        <div class="row2">
+          <div class="field"><label for="nhost">Adresse du NAS</label><input id="nhost" name="host" placeholder="192.168.91.20" spellcheck="false" required></div>
+          <div class="field"><label for="nport">Port</label><input id="nport" name="port" type="number" min="1" max="65535" placeholder="445 (SMB) ou 22 (SFTP)"></div>
+        </div>
+        <div class="row2">
+          <div class="field"><label for="nuser">Utilisateur</label><input id="nuser" name="user" spellcheck="false" required></div>
+          <div class="field"><label for="npass">Mot de passe</label><input id="npass" name="password" type="password" autocomplete="new-password" required></div>
+        </div>
+        <div class="row2">
+          <div class="field" id="nsharef"><label for="nshare">Dossier partagé (SMB)</label><input id="nshare" name="share" placeholder="backup" spellcheck="false"></div>
+          <div class="field"><label for="npath">Sous-dossier</label><input id="npath" name="path" placeholder="Hangar-sauvegardes" spellcheck="false"></div>
+        </div>
+        <span class="hint">SMB : le nom du partage tel qu'il apparaît sur le réseau (Synology : « Dossier partagé »). SFTP : le chemin depuis le dossier de l'utilisateur, ou absolu s'il commence par /. Le mot de passe est rangé dans /srv/platform/backup (root seulement).</span>
+        <div style="margin-top:10px"><button class="btn primary">Tester et connecter le NAS</button></div>
+      </form>
+      <script>
+      (function(){var f=document.getElementById('nsharef');function u(){var k=document.querySelector('input[name=kind]:checked').value;f.hidden=k!=='smb';}
+      document.querySelectorAll('input[name=kind]').forEach(function(r){r.addEventListener('change',u)});u();})();
+      </script>
+    {% endif %}
+  </section>
+
+  <section class="panel" id="archives">
+    <h2>Archives à télécharger</h2>
+    <p class="hint">Un fichier <code>.tar.gz</code> avec, pour chaque appli, sa fiche (image, version, variables), l'export de sa base et son dossier data/. Il se restaure ici ou sur un autre serveur Hangar : les applis absentes sont recréées. <strong>Il n'est pas chiffré et contient tes secrets</strong> (variables d'environnement, mots de passe des bases) : range-le en lieu sûr. Les 10 dernières archives sont gardées sur le serveur.</p>
+    {% for x in archives %}
+      <div class="cert"><span><span class="mono">{{ x.ts | when }}</span> <span class="hint">{{ x.size | size }}{{ ' · importée' if x.imported }}</span></span>
+        <span class="acts">
+          <a class="btn sm" href="/backups/archive/{{ x.name }}/download" download>Télécharger</a>
+          <a class="btn sm" href="/backups/archive/{{ x.name }}">Restaurer…</a>
+          <form class="inline" method="post" action="/backups/archive/{{ x.name }}/delete" onsubmit="return confirm('Supprimer cette archive du serveur ?')"><button class="btn sm link">Supprimer</button></form>
+        </span></div>
+    {% else %}<p class="hint">Aucune archive pour l'instant : clique sur « Créer une archive à télécharger ».</p>{% endfor %}
+    <form method="post" action="/backups/archive/upload" enctype="multipart/form-data" class="inlinefield">
+      <label class="sr" for="afile" hidden>Archive à restaurer</label>
+      <input id="afile" name="file" type="file" accept=".gz,.tar.gz,application/gzip" required aria-label="Archive à restaurer">
+      <button class="btn sm">Envoyer une archive pour la restaurer</button>
+    </form>
+  </section>
+
   {% if pw %}
   <section class="panel">
     <h2>Mot de passe des sauvegardes</h2>
-    <p class="hint"><strong>Sans ce mot de passe, les sauvegardes sont illisibles, même pour toi.</strong> Si ce serveur disparaît, c'est lui qui permet de tout récupérer depuis le Drive. Garde-le dans ton gestionnaire de mots de passe, avec le nom du dossier « {{ folder }} ».</p>
+    <p class="hint"><strong>Sans ce mot de passe, les sauvegardes Drive et NAS sont illisibles, même pour toi.</strong> Si ce serveur disparaît, c'est lui qui permet de tout récupérer. Garde-le dans ton gestionnaire de mots de passe, avec le nom du dossier « {{ folder }} ».</p>
     <details><summary class="btn sm">Afficher le mot de passe</summary>
       <div class="cert"><span class="mono" id="pw">{{ pw }}</span><button type="button" class="btn sm" onclick="navigator.clipboard && navigator.clipboard.writeText(document.getElementById('pw').textContent).then(()=>{this.textContent='Copié'})">Copier</button></div>
     </details>
@@ -72,15 +132,17 @@
     <h2>Dernières exécutions</h2>
     {% for r in runs %}
       <div class="cert"><span><span class="mono">{{ r.ts | when }}</span> <span class="hint">{{ r.trigger }} · {{ '%.0f' % (r.duration or 0) }} s</span><br><span class="{{ '' if r.ok else 'lv-error' }}">{{ r.msg }}</span></span>
-        <span class="pill {{ 's-running' if r.ok and r.remote else ('s-stopped' if r.ok else 's-error') }}">{{ ('Drive' if r.remote else 'Locale') if r.ok else 'Échec' }}</span></div>
+        <span class="pill {{ 's-running' if r.ok and (r.remote or r.dest == 'archive') else ('s-stopped' if r.ok else 's-error') }}">{{ {'gdrive': 'Drive', 'nas': 'NAS', 'archive': 'Archive'}.get(r.dest, 'Locale') }}{{ '' if r.ok else ' · échec' }}</span></div>
     {% else %}<p class="hint">Aucune exécution pour l'instant.</p>{% endfor %}
   </section>
 </div>
 
 <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
-  {% if conf %}
+  {% if dests %}
   <form class="panel danger" id="restaurer" method="post" action="/backups/restore">
     <h2>Restaurer une appli</h2>
+    <input type="hidden" name="dest" value="{{ cur }}">
+    {% if dests | length > 1 %}<nav class="seg" aria-label="Source">{% for d in dests %}<a class="segbtn {{ 'on' if d.id == cur }}" href="?d={{ d.id }}#restaurer">{{ d.name }}</a>{% endfor %}</nav>{% endif %}
     {% if snap_err %}<p class="hint lv-error">{{ snap_err }}</p>{% endif %}
     {% if snaps %}
     <div class="row2">
@@ -94,7 +156,7 @@
     <div class="field"><label for="rconfirm">Tape l'identifiant de l'appli pour confirmer</label><input id="rconfirm" name="confirm" autocomplete="off" spellcheck="false"></div>
     <span class="hint">L'appli est arrêtée pendant la restauration. Ses fichiers et sa base actuels sont d'abord copiés dans /srv/backups/avant-restauration : tu peux revenir en arrière.</span>
     <div><button class="btn danger sm">Restaurer</button></div>
-    {% else %}<p class="hint">Aucune sauvegarde sur le Drive pour l'instant.</p>{% endif %}
+    {% else %}<p class="hint">Aucune sauvegarde à cet endroit pour l'instant.</p>{% endif %}
   </form>
   {% endif %}
 

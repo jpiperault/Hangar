@@ -11,7 +11,7 @@ import time
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from fastapi import FastAPI, Request
-from fastapi.responses import PlainTextResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -523,18 +523,161 @@ def _confirmed(f, slug):
 
 @app.get("/backups")
 async def backups_page(request: Request):
-    conf = backup.configured()
-    snaps, snap_err = (await asyncio.to_thread(backup.snapshots)) if conf else ([], None)
+    ds = backup.dests()
+    cur = request.query_params.get("d") or (ds[0]["id"] if ds else "")
+    if not backup.dest(cur):
+        cur = ds[0]["id"] if ds else ""
+    snaps, snap_err = (await asyncio.to_thread(backup.snapshots, cur)) if cur else ([], None)
     keep = json.loads(db.settings().get("backup_keep") or "{}")
     nxt = P.run(["systemctl", "show", "platform-backup.timer", "-p", "NextElapseUSecRealtime", "--value"], timeout=10)[1]
     m = re.search(r"(\d{4})-(\d{2})-(\d{2}) (\d{2}:\d{2})", nxt)
     nxt = f"{m.group(3)}/{m.group(2)} à {m.group(4)}" if m else nxt
     busy = backup.running()
-    return render(request, "backups.html", title="Sauvegardes", nav="backups", conf=conf, runs=backup.last_runs(12),
-                  last_ok=backup.last_ok(), busy=busy, snaps=snaps, snap_err=snap_err,
+    arch_busy = backup.archive_running()
+    for d in ds:
+        d["last"] = backup.last_ok(d["id"])
+    return render(request, "backups.html", title="Sauvegardes", nav="backups", drive_conf=backup.drive_configured(),
+                  dests=ds, cur=cur, runs=backup.last_runs(12), last_ok=backup.last_ok(), busy=busy or arch_busy,
+                  arch_busy=arch_busy, snaps=snaps, snap_err=snap_err, nas=backup.nas_info(),
                   pending=backup.auth_pending(), google_url=backup._auth.get("google_url"),
-                  pw=backup.password(), keep=keep, next_run=nxt.strip(), apps=db.apps(), refresh=busy,
-                  folder=backup.FOLDER, own_client=backup.client_id())
+                  pw=backup.password(), keep=keep, next_run=nxt.strip(), apps=db.apps(), refresh=busy or arch_busy,
+                  folder=backup.FOLDER, own_client=backup.client_id(), archives=backup.archives())
+
+
+@app.post("/backups/nas/connect")
+async def nas_connect(request: Request):
+    f = await request.form()
+    try:
+        await asyncio.to_thread(backup.nas_connect, f.get("kind"), (f.get("host") or "").strip(), f.get("port"),
+                                (f.get("user") or "").strip(), f.get("password") or "", (f.get("share") or "").strip(),
+                                (f.get("path") or "").strip())
+        flash(request, "NAS connecté. Les prochaines sauvegardes y seront aussi envoyées.")
+    except (ValueError, RuntimeError) as e:
+        flash(request, str(e), "error")
+    return go("/backups#nas")
+
+
+@app.post("/backups/nas/disconnect")
+async def nas_disconnect(request: Request):
+    await asyncio.to_thread(backup.nas_disconnect)
+    flash(request, "NAS déconnecté. Les sauvegardes déjà envoyées restent sur le NAS.")
+    return go("/backups")
+
+
+@app.post("/backups/archive/create")
+async def archive_create(request: Request):
+    if backup.running() or backup.archive_running():
+        flash(request, "Une sauvegarde ou une archive est déjà en cours.", "error")
+    else:
+        try:
+            await asyncio.to_thread(backup.start_archive)
+            flash(request, "Création de l'archive lancée. Elle apparaîtra dans la liste une fois prête.")
+        except RuntimeError as e:
+            flash(request, str(e), "error")
+    return go("/backups#archives")
+
+
+@app.get("/backups/archive/{name}/download")
+async def archive_download(request: Request, name: str):
+    path = backup.archive_path(name)
+    if not path:
+        return go("/backups#archives")
+    P.log("info", "sauvegarde", f"archive {name} téléchargée")
+    return FileResponse(path, media_type="application/gzip", filename=name)
+
+
+@app.post("/backups/archive/{name}/delete")
+async def archive_delete(request: Request, name: str):
+    path = backup.archive_path(name)
+    if path:
+        os.remove(path)
+        P.log("info", "sauvegarde", f"archive {name} supprimée")
+        flash(request, f"Archive {name} supprimée.")
+    return go("/backups#archives")
+
+
+ARCHIVE_MAX = 20 * 1024 ** 3
+
+
+@app.post("/backups/archive/upload")
+async def archive_upload(request: Request):
+    f = await request.form()
+    up = f.get("file")
+    if not up or not getattr(up, "filename", ""):
+        flash(request, "Choisis une archive .tar.gz créée par Hangar.", "error")
+        return go("/backups#archives")
+    os.makedirs(backup.ARCHIVES, mode=0o700, exist_ok=True)
+    name = backup.save_upload_name()
+    part = f"{backup.ARCHIVES}/.{name}.part"
+    size = 0
+    with open(part, "wb") as out:
+        os.chmod(part, 0o600)
+        while chunk := await up.read(4 * 1024 * 1024):
+            size += len(chunk)
+            if size > ARCHIVE_MAX:
+                break
+            out.write(chunk)
+    if size > ARCHIVE_MAX:
+        os.remove(part)
+        flash(request, "Archive trop grosse (20 Go maximum).", "error")
+        return go("/backups#archives")
+    try:
+        await asyncio.to_thread(backup.read_manifest, part)
+    except ValueError as e:
+        os.remove(part)
+        flash(request, f"{up.filename} : {e}", "error")
+        return go("/backups#archives")
+    os.replace(part, f"{backup.ARCHIVES}/{name}")
+    P.log("info", "sauvegarde", f"archive {up.filename} importée ({backup.human(size)}) sous le nom {name}")
+    return go(f"/backups/archive/{name}")
+
+
+@app.get("/backups/archive/{name}")
+async def archive_page(request: Request, name: str):
+    path = backup.archive_path(name)
+    if not path:
+        return go("/backups#archives")
+    try:
+        man = await asyncio.to_thread(backup.read_manifest, path)
+    except ValueError as e:
+        flash(request, str(e), "error")
+        return go("/backups#archives")
+    return render(request, "archive.html", title="Restaurer une archive", nav="backups", aname=name, man=man,
+                  size=os.path.getsize(path))
+
+
+@app.post("/backups/archive/{name}/restore")
+async def archive_restore(request: Request, name: str):
+    path = backup.archive_path(name)
+    if not path:
+        return go("/backups#archives")
+    f = await request.form()
+    if (f.get("confirm") or "").strip().lower() != "restaurer":
+        flash(request, "Tape « restaurer » pour confirmer.", "error")
+        return go(f"/backups/archive/{name}")
+    man = await asyncio.to_thread(backup.read_manifest, path)
+    choices = {}
+    for a in man["apps"]:
+        slug = a["slug"]
+        if f.get(f"app_{slug}") != "on":
+            continue
+        cur = db.app(slug)
+        if cur and cur["state"] == "deploying":
+            flash(request, f"{slug} : une opération est en cours, réessaie plus tard.", "error")
+            return go(f"/backups/archive/{name}")
+        parts = [p for p in ("data", "db") if f.get(f"{p}_{slug}") == "on" and a.get(f"has_{p}")]
+        if cur and not parts:
+            continue
+        choices[slug] = parts
+    if not choices:
+        flash(request, "Coche au moins une appli et ce qu'il faut restaurer.", "error")
+        return go(f"/backups/archive/{name}")
+    for slug in choices:
+        if db.app(slug):
+            db.update_app(slug, state="deploying")
+    backup.start_archive_restore(name, choices)
+    flash(request, f"Restauration lancée pour {', '.join(choices)}. Suis l'avancement dans la liste des applis.")
+    return go("/")
 
 
 @app.post("/backups/drive/start")
@@ -610,10 +753,12 @@ async def backup_keep(request: Request):
 @app.post("/backups/restore")
 async def backup_restore(request: Request):
     f = await request.form()
-    slug, snap = f.get("slug") or "", (f.get("snap") or "").strip()
+    slug, snap, dest_id = f.get("slug") or "", (f.get("snap") or "").strip(), f.get("dest") or ""
     parts = [p for p in ("data", "db") if f.get(p) == "on"]
     a = db.app(slug)
-    if not a or not re.fullmatch(r"[0-9a-f]{8,64}", snap):
+    if not backup.dest(dest_id):
+        flash(request, "Destination inconnue.", "error")
+    elif not a or not re.fullmatch(r"[0-9a-f]{8,64}", snap):
         flash(request, "Choisis une appli et une sauvegarde.", "error")
     elif not parts:
         flash(request, "Coche au moins « fichiers » ou « base ».", "error")
@@ -625,7 +770,7 @@ async def backup_restore(request: Request):
         flash(request, "Une opération est déjà en cours sur cette appli.", "error")
     else:
         db.update_app(slug, state="deploying")
-        P.spawn(backup.restore_app, slug, snap, parts)
+        P.spawn(backup.restore_app, slug, dest_id, snap, parts)
         flash(request, f"Restauration de {a['name']} en cours. L'état actuel est mis de côté avant d'être remplacé.")
         return go(f"/apps/{slug}")
     return go("/backups#restaurer")

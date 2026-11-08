@@ -22,7 +22,8 @@ FastAPI + Jinja, sans build front. Elle écoute en HTTPS (certificat auto-signé
 - Générateur de prompt pour préparer un projet d'appli avec Claude (Dockerfile, healthcheck, CI ghcr.io, client Android).
 - Le Caddyfile est validé avant chaque rechargement. Une configuration refusée n'est jamais appliquée.
 - Images privées : un jeton de lecture du registre (ghcr.io : `read:packages`) se saisit dans la fiche de l'appli. Il est vérifié par `docker login`, puis enregistré une fois pour tout le registre dans `/root/.docker/config.json`.
-- **Sauvegardes** chiffrées (restic) vers Google Drive chaque nuit : exports des bases, `data/` des applis, configuration. Restauration d'une appli en un clic, avec copie de l'état d'avant.
+- **Sauvegardes** chiffrées (restic) chaque nuit vers Google Drive et/ou un NAS (SMB ou SFTP) : exports des bases, `data/` des applis, configuration. Restauration d'une appli depuis la destination choisie, avec copie de l'état d'avant.
+- **Archives manuelles** `.tar.gz` à télécharger (fiche, base et `data/` de chaque appli), restaurables ici ou sur un autre serveur Hangar : les applis absentes sont recréées.
 - **Alertes ntfy** sur le téléphone : appli qui ne répond plus, échec de déploiement, de sauvegarde ou de mise à jour, disque, mémoire, PostgreSQL, tunnel.
 - **Nouvelles versions** : les tags x.y.z des images sont vérifiés toutes les 6 h, avec un bouton pour déployer la nouvelle version.
 - **Base de données** de chaque appli : taille, tables, export `.sql.gz`, import (`.sql`, `.sql.gz`, `.dump`) et remise à zéro, avec copie de sécurité.

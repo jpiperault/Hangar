@@ -43,6 +43,12 @@ def backup_cmd(args):
     sys.exit(backup.run_backup("manuelle" if "--manual" in args else "planifiée"))
 
 
+def archive_cmd(args):
+    from . import backup, db
+    db.init()
+    sys.exit(backup.create_archive())
+
+
 def sysupdate(args):
     from . import db, system
     db.init()
@@ -57,6 +63,8 @@ if __name__ == "__main__":
         passwd(sys.argv[2:])
     elif cmd == ["backup"]:
         backup_cmd(sys.argv[2:])
+    elif cmd == ["archive"]:
+        archive_cmd(sys.argv[2:])
     elif cmd == ["sysupdate"]:
         sysupdate(sys.argv[2:])
     else:

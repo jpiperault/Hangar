@@ -86,6 +86,10 @@ def init():
             _c.execute("ALTER TABLE apps ADD COLUMN data_user TEXT NOT NULL DEFAULT ''")
         if "data_owner" not in cols:  # propriétaire effectivement appliqué à /data
             _c.execute("ALTER TABLE apps ADD COLUMN data_owner TEXT")
+        bcols = {r["name"] for r in _c.execute("PRAGMA table_info(backups)").fetchall()}
+        if "dest" not in bcols:   # destination de la sauvegarde : gdrive, nas… (NULL = locale)
+            _c.execute("ALTER TABLE backups ADD COLUMN dest TEXT")
+            _c.execute("UPDATE backups SET dest = 'gdrive' WHERE remote = 1")
         if "latest_version" not in cols:  # dernière version trouvée sur le registre
             _c.execute("ALTER TABLE apps ADD COLUMN latest_version TEXT")
             _c.execute("ALTER TABLE apps ADD COLUMN latest_checked REAL")

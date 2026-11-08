@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="bar"><div><div class="crumb"><a href="/backups#archives">Sauvegardes</a> /</div><h1>Restaurer une archive</h1></div></div>
+<div class="kpis">
+  <span class="kpi">Créée le <strong>{{ man.created | when }}</strong></span>
+  <span class="kpi"><strong>{{ man.apps | length }}</strong> appli(s)</span>
+  <span class="kpi">Taille <strong>{{ size | size }}</strong></span>
+  {% if man.settings %}<span class="kpi">Domaine d'origine <strong>{{ man.settings.hub }}.{{ man.settings.base_domain }}</strong></span>{% endif %}
+</div>
+<form class="panel danger" method="post" action="/backups/archive/{{ aname }}/restore" style="margin-top:16px">
+  <p class="hint">Coche ce que tu veux restaurer. Pour une appli qui existe déjà, ses fichiers et sa base actuels sont d'abord copiés dans /srv/backups/avant-restauration, puis remplacés. Une appli absente de ce serveur est <strong>recréée</strong> avec sa fiche (image, version, variables), puis déployée.</p>
+  <div class="tablebox"><table>
+    <thead><tr><th></th><th>Application</th><th>Ici</th><th>Version</th><th>Fichiers (data/)</th><th>Base</th></tr></thead>
+    <tbody>
+    {% for a in man.apps %}
+      <tr>
+        <td><input type="checkbox" name="app_{{ a.slug }}" id="app_{{ a.slug }}" aria-label="Restaurer {{ a.name }}"></td>
+        <td><label for="app_{{ a.slug }}"><span class="nm">{{ a.name }}</span></label><div class="pk">{{ a.slug }} · {{ a.image }}</div></td>
+        <td>{% if a.exists %}<span class="pill s-running">existe</span>{% else %}<span class="pill s-deploying">sera recréée</span>{% endif %}</td>
+        <td class="mono">{{ a.version }}</td>
+        <td>{% if a.has_data %}<label class="check"><input type="checkbox" name="data_{{ a.slug }}" checked><span>restaurer</span></label>{% else %}<span class="hint">vide</span>{% endif %}</td>
+        <td>{% if a.has_db %}<label class="check"><input type="checkbox" name="db_{{ a.slug }}" checked><span>restaurer</span></label>{% else %}<span class="hint">{{ 'absente' if a.db else 'pas de base' }}</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <span class="hint">Une appli recréée dont l'image est privée a besoin du jeton de son registre : si son déploiement échoue, renseigne-le dans sa fiche puis redéploie.</span>
+  <div class="field"><label for="confirm">Tape <code>restaurer</code> pour confirmer</label><input id="confirm" name="confirm" autocomplete="off" spellcheck="false"></div>
+  <div class="bar" style="justify-content:flex-start"><button class="btn danger">Lancer la restauration</button><a class="btn" href="/backups#archives">Annuler</a></div>
+</form>
+{% endblock %}
