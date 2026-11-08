@@ -1,0 +1,4 @@
+{% macro meter(v, total, warn=0.85) -%}
+{%- set pct = (v / total * 100) if total else 0 -%}
+<span class="meter {{ 'hot' if pct >= warn * 100 }}" role="meter" aria-valuenow="{{ '%.0f' % pct }}" aria-valuemin="0" aria-valuemax="100"><i style="width:{{ [pct, 100] | min }}%"></i></span>
+{%- endmacro %}

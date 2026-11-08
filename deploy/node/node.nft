@@ -1,0 +1,19 @@
+# Pare-feu d'un nœud Hangar. Table dédiée : ne touche pas aux règles de Docker.
+table inet hangarnode
+delete table inet hangarnode
+table inet hangarnode {
+	chain input {
+		type filter hook input priority 0; policy drop;
+		iif lo accept
+		ct state established,related accept
+		ct state invalid drop
+		meta l4proto { icmp, ipv6-icmp } accept
+		iifname { "docker0", "br-*" } accept
+		# réseau privé des nœuds (console et autres nœuds) : de confiance
+		iifname "wg-hangar" accept
+		udp dport 51820 accept
+		tcp dport 22 accept
+		tcp dport { 80, 443 } accept
+		udp dport 443 accept
+	}
+}

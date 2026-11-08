@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% from "_meter.html" import meter %}
+{% macro nstate(n) -%}
+{%- if n.state == 'ok' -%}<span class="pill s-running">En ligne</span>
+{%- elif n.state == 'installing' -%}<span class="pill s-deploying">Installation…</span>
+{%- elif n.state == 'offline' -%}<span class="pill s-error">Injoignable</span>
+{%- else -%}<span class="pill s-error">Erreur</span>{%- endif -%}
+{%- endmacro %}
+{% block main %}
+<div class="bar"><div><h1>Nœuds</h1><span class="hint">Machines qui hébergent tes applis, reliées par un réseau privé chiffré (WireGuard).</span></div></div>
+
+<div class="nodegrid">
+{% for n in rows %}{% set i = n.info or {} %}
+  <a class="node {{ 'off' if n.state in ('offline', 'error') }}" href="/nodes/{{ n.id }}">
+    <div class="bar"><span><span class="nm">{{ n.name }}</span><span class="pk">{{ n.id }} · {{ n.address or '' }}</span></span>{{ nstate(n) }}</div>
+    {% if i.mem_total %}
+    <div class="nstat"><span>Processeur</span><span class="mono">{{ '%.0f' % (i.cpu or 0) }} % · {{ i.cores }} cœur{{ 's' if i.cores > 1 }}</span>{{ meter(i.cpu or 0, 100) }}</div>
+    <div class="nstat"><span>Mémoire</span><span class="mono">{{ '%.0f' % i.mem }} / {{ '%.0f' % i.mem_total }} Mo</span>{{ meter(i.mem, i.mem_total) }}</div>
+    <div class="nstat"><span>Réservée aux applis</span><span class="mono">{{ n.reserved }} / {{ '%.0f' % i.mem_total }} Mo</span>{{ meter(n.reserved, i.mem_total, 0.9) }}</div>
+    <div class="nstat"><span>Disque</span><span class="mono">{{ '%.1f' % i.disk }} / {{ '%.0f' % i.disk_total }} Go</span>{{ meter(i.disk, i.disk_total) }}</div>
+    {% elif n.state == 'error' %}<p class="hint lv-error">{{ n.error }}</p>
+    {% else %}<p class="hint">Mesures disponibles une fois l'installation terminée.</p>{% endif %}
+    <div class="pk">{{ n.apps | length }} appli{{ 's' if n.apps | length > 1 }}{% if n.id != 'local' %} · réseau privé {{ n.wg_ip }}{% if n.hs %} · lien vu {{ n.hs | ago }}{% endif %}{% endif %}</div>
+  </a>
+{% endfor %}
+</div>
+
+<div class="cols" style="margin-top:20px">
+<form class="panel" method="post" action="/nodes/add" autocomplete="off">
+  <h2>Ajouter un nœud</h2>
+  <ol class="steps">
+    <li>Prends un serveur sous <strong>Debian 13</strong> : VPS, serveur dédié ou conteneur Proxmox (avec <code>nesting</code> et <code>keyctl</code>). Il doit être joignable en SSH, et en UDP sur le port {{ 51820 }} pour le réseau privé.</li>
+    <li>Connecté en root sur ce serveur, colle cette ligne. Elle autorise uniquement la clé de Hangar :
+      <div class="cert"><code class="mono" id="authline" style="word-break:break-all">mkdir -p /root/.ssh && chmod 700 /root/.ssh && echo '{{ key }}' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys</code>
+      <button type="button" class="btn sm" onclick="navigator.clipboard && navigator.clipboard.writeText(document.getElementById('authline').textContent).then(()=>{this.textContent='Copié'})">Copier</button></div></li>
+    <li>Remplis puis lance l'installation. Hangar installe Docker, PostgreSQL, le pare-feu et le réseau privé, puis vérifie que tout répond. Compte 3 à 5 minutes.</li>
+  </ol>
+  <div class="row3">
+    <div class="field"><label for="nid">Identifiant</label><input id="nid" name="id" placeholder="vps-1" spellcheck="false" required></div>
+    <div class="field"><label for="nname">Nom</label><input id="nname" name="name" placeholder="VPS OVH Gravelines"></div>
+    <div class="field"><label for="nport">Port SSH</label><input id="nport" name="ssh_port" type="number" min="1" max="65535" value="22"></div>
+  </div>
+  <div class="field"><label for="naddr">Adresse du serveur</label><input id="naddr" name="address" placeholder="IP publique ou nom DNS" spellcheck="false" required>
+    <span class="hint">Hangar s'y connecte depuis ce serveur : ta box n'a aucun port à ouvrir.</span></div>
+  <div><button class="btn primary">Installer le nœud</button></div>
+</form>
+<section class="panel">
+  <h2>Répartition</h2>
+  <p class="hint">Chaque appli tourne sur un nœud, avec sa base PostgreSQL sur ce même nœud, pour éviter la latence du réseau. Le choix du nœud à la création d'une appli et son déplacement vers un autre nœud arrivent à l'étape suivante.</p>
+  {% for n in rows %}<div class="cert"><span class="mono">{{ n.id }}</span><span class="hint">{{ n.apps | map(attribute='slug') | join(', ') or 'aucune appli' }}</span></div>{% endfor %}
+</section>
+</div>
+{% endblock %}

@@ -90,6 +90,8 @@ def init():
         if "dest" not in bcols:   # destination de la sauvegarde : gdrive, nas… (NULL = locale)
             _c.execute("ALTER TABLE backups ADD COLUMN dest TEXT")
             _c.execute("UPDATE backups SET dest = 'gdrive' WHERE remote = 1")
+        if "node" not in cols:   # nœud qui héberge l'appli ('local' = la machine de la console)
+            _c.execute("ALTER TABLE apps ADD COLUMN node TEXT NOT NULL DEFAULT 'local'")
         if "latest_version" not in cols:  # dernière version trouvée sur le registre
             _c.execute("ALTER TABLE apps ADD COLUMN latest_version TEXT")
             _c.execute("ALTER TABLE apps ADD COLUMN latest_checked REAL")
@@ -137,7 +139,7 @@ def app(slug):
 APP_FIELDS = ["name", "pkg", "expose", "sub", "source", "image", "version", "prev_version",
               "port", "host_port", "health_path", "mem_mb", "env", "db", "db_password",
               "state", "desired", "deployed_at", "created_at", "data_user", "data_owner",
-              "latest_version", "latest_checked", "latest_error"]
+              "latest_version", "latest_checked", "latest_error", "node"]
 
 
 def insert_app(slug, data):

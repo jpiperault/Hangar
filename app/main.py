@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import alerts, backup, db, dbadmin, monitor, stats, system
+from . import alerts, backup, db, dbadmin, monitor, nodes, stats, system
 from . import platform as P
 
 HERE = os.path.dirname(__file__)
@@ -1039,3 +1039,86 @@ async def monitoring(request: Request):
     return render(request, "monitoring.html", title="Supervision", nav="monitoring", host=host, hs=hs, rng=rng,
                   ranges=list(stats.RANGES), rows=rows, svc=svc, pg=pg, incidents=incidents, auto_refresh=60,
                   now=time.time())
+
+
+# ---------------------------------------------------------------- nœuds
+
+@app.get("/nodes")
+async def nodes_page(request: Request):
+    rows = nodes.all_nodes()
+    if not nodes.get(nodes.LOCAL):
+        rows.insert(0, {"id": nodes.LOCAL, "name": "Ce serveur (console)", "address": db.settings()["admin_bind"].rsplit(":", 1)[0],
+                        "wg_ip": "—", "state": "ok", "info": {}, "created_at": 0})
+    hs = await asyncio.to_thread(nodes.handshakes)
+    loc = await asyncio.to_thread(nodes.local_info)
+    apps_by = {}
+    for a in db.apps():
+        apps_by.setdefault(a["node"], []).append(a)
+    for n in rows:
+        if n["id"] == nodes.LOCAL:
+            n["info"] = loc
+        n["hs"] = hs.get(n.get("wg_pubkey") or "")
+        n["apps"] = apps_by.get(n["id"], [])
+        n["reserved"] = sum(a["mem_mb"] for a in n["apps"] if a["desired"] == "running")
+    key = await asyncio.to_thread(nodes.ensure_key)
+    busy = any(n["state"] == "installing" for n in rows)
+    return render(request, "nodes.html", title="Nœuds", nav="nodes", rows=rows, key=key, now=time.time(),
+                  refresh=busy, auto_refresh=None if busy else 60)
+
+
+@app.post("/nodes/add")
+async def nodes_add(request: Request):
+    f = await request.form()
+    try:
+        await asyncio.to_thread(nodes.add, f.get("id"), f.get("name"), f.get("address"), f.get("ssh_port"))
+        flash(request, "Installation du nœud lancée : quelques minutes. Cette page se met à jour toute seule.")
+    except (ValueError, RuntimeError) as e:
+        flash(request, str(e), "error")
+    return go("/nodes")
+
+
+@app.post("/nodes/{node_id}/retry")
+async def nodes_retry(request: Request, node_id: str):
+    n = nodes.get(node_id)
+    if n and node_id != nodes.LOCAL and n["state"] != "installing":
+        P.spawn(nodes.install, node_id)
+        flash(request, f"Réinstallation de {n['name']} lancée. Rien n'est effacé : le script reprend là où il en était.")
+    return go("/nodes")
+
+
+@app.post("/nodes/{node_id}/remove")
+async def nodes_remove(request: Request, node_id: str):
+    f = await request.form()
+    if (f.get("confirm") or "").strip() != node_id:
+        flash(request, f"Tape {node_id} pour confirmer.", "error")
+        return go(f"/nodes/{node_id}")
+    try:
+        await asyncio.to_thread(nodes.remove, node_id)
+        flash(request, f"Nœud {node_id} retiré du réseau privé.")
+    except ValueError as e:
+        flash(request, str(e), "error")
+        return go(f"/nodes/{node_id}")
+    return go("/nodes")
+
+
+@app.get("/nodes/{node_id}")
+async def node_page(request: Request, node_id: str):
+    n = nodes.get(node_id)
+    if not n:
+        return go("/nodes")
+    rng = request.query_params.get("r") if request.query_params.get("r") in stats.RANGES else "24h"
+    if node_id == nodes.LOCAL:
+        n["info"] = await asyncio.to_thread(nodes.local_info)
+    se = nodes.series(node_id, rng)
+    mem_total = (n["info"] or {}).get("mem_total") or 0
+    se["charts"] = [
+        {"title": "Processeur", "sub": "moyenne (% des cœurs)", "unit": "%", "kind": "line", "values": se["cpu"],
+         "limit": 100, "limitLabel": "100 %", "extra": [{"label": "charge", "values": se["load1"], "unit": ""}]},
+        {"title": "Mémoire utilisée", "sub": "max sur l'intervalle (Mo)", "unit": "Mo", "kind": "line", "values": se["mem"],
+         "limit": round(mem_total) or None, "limitLabel": f"total {mem_total:.0f} Mo"},
+    ]
+    events = db.q("SELECT * FROM events WHERE app = ? ORDER BY id DESC LIMIT 30", (f"nœud {node_id}",))
+    hs = (await asyncio.to_thread(nodes.handshakes)).get(n.get("wg_pubkey") or "")
+    return render(request, "node.html", title=n["name"], nav="nodes", n=n, se=se, rng=rng, ranges=list(stats.RANGES),
+                  events=events, hs=hs, now=time.time(), apps=[a for a in db.apps() if a["node"] == node_id],
+                  refresh=n["state"] == "installing")

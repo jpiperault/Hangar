@@ -9,7 +9,7 @@ import time
 import urllib.error
 import urllib.request
 
-from . import alerts, backup, db, registry, stats, system
+from . import alerts, backup, db, nodes, registry, stats, system
 from . import platform as P
 
 _fails = {}            # slug -> échecs consécutifs
@@ -148,12 +148,14 @@ def _loop():
     while True:
         t0 = time.time()
         for name, fn in (("stats", stats.collect_requests), ("res", stats.collect_resources), ("host", stats.collect_host),
-                         ("apps", check_apps), ("sys", check_system)):
+                         ("apps", check_apps), ("sys", check_system),
+                         ("nodes", nodes.check_all)):
             try:
                 fn()
             except Exception as e:
                 P.log("warn", "système", f"surveillance {name} : {e}")
         _every("purge", 3600, stats.purge)
+        _every("purge_nodes", 3600, nodes.purge)
         _every("versions", 6 * 3600, check_versions)
         _every("updates", 24 * 3600, check_updates)
         _every("backup_age", 3600, check_backup_age)

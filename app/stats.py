@@ -104,19 +104,34 @@ def _net(iface="eth0"):
     return 0, 0
 
 
+def _cg_usage():
+    """Temps CPU consommé par cette machine ou ce conteneur (cgroup v2, µs). En LXC, /proc/stat reflète l'hôte."""
+    try:
+        for line in open("/sys/fs/cgroup/cpu.stat"):
+            if line.startswith("usage_usec"):
+                return int(line.split()[1])
+    except (OSError, ValueError):
+        pass
+    return None
+
+
 def collect_host():
-    """CPU (delta /proc/stat), mémoire, swap, disque, charge, débit réseau d'eth0 — vus depuis le conteneur."""
+    """CPU (cgroup, sinon /proc/stat), mémoire, swap, disque, charge, débit réseau d'eth0 — vus depuis le conteneur."""
     import shutil
     now = time.time()
     total, idle = _cpu_times()
+    cg = _cg_usage()
     rx, tx = _net()
     prev = _prev.get("s")
-    _prev["s"] = (now, total, idle, rx, tx)
+    _prev["s"] = (now, total, idle, rx, tx, cg)
     if not prev:
         return
     dt = max(1.0, now - prev[0])
-    dtot = total - prev[1]
-    cpu = (1 - (idle - prev[2]) / dtot) * 100 if dtot > 0 else 0
+    if cg is not None and prev[5] is not None:
+        cpu = (cg - prev[5]) / (dt * 1e6 * (os.cpu_count() or 1)) * 100
+    else:
+        dtot = total - prev[1]
+        cpu = (1 - (idle - prev[2]) / dtot) * 100 if dtot > 0 else 0
     m = {l.split(":")[0]: int(l.split()[1]) for l in open("/proc/meminfo")}
     du = shutil.disk_usage("/")
     load1 = float(open("/proc/loadavg").read().split()[0])

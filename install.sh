@@ -101,7 +101,7 @@ step "Paquets de base"
 [ "$TZONE" = keep ] || timedatectl set-timezone "$TZONE" 2>/dev/null || ln -sf "/usr/share/zoneinfo/$TZONE" /etc/localtime
 $APT update >/dev/null
 $APTI ca-certificates curl gnupg git openssl python3 python3-venv nftables unattended-upgrades \
-  restic rclone sqlite3 >/dev/null
+  restic rclone sqlite3 wireguard-tools >/dev/null
 
 step "Dépôts Docker, Caddy et cloudflared"
 install -m 0755 -d /etc/apt/keyrings

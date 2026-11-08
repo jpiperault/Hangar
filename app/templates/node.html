@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% from "_meter.html" import meter %}
+{% block main %}{% set i = n.info or {} %}
+<div class="bar">
+  <div><div class="crumb"><a href="/nodes">Nœuds</a> /</div><h1>{{ n.name }}</h1><span class="hint">{{ n.id }} · {{ n.address }}{% if n.id != 'local' %} · SSH {{ n.ssh_port }} · réseau privé {{ n.wg_ip }}{% endif %}</span></div>
+  <nav class="seg" aria-label="Période">{% for r in ranges %}<a class="segbtn {{ 'on' if rng == r }}" href="?r={{ r }}">{{ r }}</a>{% endfor %}</nav>
+</div>
+{% if n.state == 'error' %}<div class="flash error" role="status">{{ n.error }}</div>{% endif %}
+{% if i.mem_total %}
+<section class="tiles">
+  <div class="tile"><span class="tl">Processeur</span><span class="tv">{{ '%.0f' % (i.cpu or 0) }} %</span><span class="hint">charge {{ i.load | map('round', 2) | join(' · ') }} ({{ i.cores }} cœur{{ 's' if i.cores > 1 }})</span>{{ meter(i.cpu or 0, 100) }}</div>
+  <div class="tile"><span class="tl">Mémoire</span><span class="tv">{{ '%.0f' % i.mem }} <small>/ {{ '%.0f' % i.mem_total }} Mo</small></span>{{ meter(i.mem, i.mem_total) }}</div>
+  <div class="tile"><span class="tl">Disque</span><span class="tv">{{ '%.1f' % i.disk }} <small>/ {{ '%.0f' % i.disk_total }} Go</small></span>{{ meter(i.disk, i.disk_total) }}</div>
+  <div class="tile"><span class="tl">Allumé depuis</span><span class="tv">{{ i.uptime | dur }}</span><span class="hint">{{ i.os }}</span></div>
+  <div class="tile"><span class="tl">Docker</span><span class="tv">{{ i.docker or '—' }}</span><span class="hint">{{ i.containers }} conteneur{{ 's' if i.containers != 1 }}{% if n.id != 'local' and i.latency_ms is not none %} · ping {{ i.latency_ms }} ms{% endif %}</span></div>
+</section>
+{% endif %}
+<section class="panel" style="margin-top:20px">
+  <h2>Ressources</h2>
+  <div class="charts" id="charts"></div>
+  <details><summary class="hint">Voir les données en tableau</summary><div class="tablebox" id="stattable"></div></details>
+</section>
+<script id="stdata" type="application/json">{{ se | tojson }}</script>
+<script src="/static/charts.js" defer></script>
+
+<div class="cols" style="margin-top:20px">
+  <section class="panel">
+    <h2>Journal du nœud</h2>
+    {% if events %}<ul class="events">{% for e in events %}<li><time>{{ e.ts | when }}</time><span class="lv-{{ e.level }}">{{ e.msg }}</span></li>{% endfor %}</ul>
+    {% else %}<p class="hint">Aucun événement.</p>{% endif %}
+  </section>
+  <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+    <section class="panel">
+      <h2>Applications</h2>
+      {% for a in apps %}<div class="cert"><a href="/apps/{{ a.slug }}">{{ a.name }}</a><span class="hint">{{ a.mem_mb }} Mo réservés</span></div>{% else %}<p class="hint">Aucune appli sur ce nœud.</p>{% endfor %}
+      {% if n.id != 'local' %}<dl class="facts"><dt>Lien privé</dt><dd>{{ ('vu ' ~ (now - hs) | dur ~ ' plus tôt') if hs else 'jamais établi' }}</dd></dl>{% endif %}
+    </section>
+    {% if n.id != 'local' %}
+    <section class="panel">
+      <h2>Maintenance</h2>
+      <form method="post" action="/nodes/{{ n.id }}/retry"><button class="btn sm" {{ 'disabled' if n.state == 'installing' }}>Réinstaller / réparer</button></form>
+      <span class="hint">Relance l'installation : sans danger, rien n'est effacé.</span>
+    </section>
+    <form class="panel danger" method="post" action="/nodes/{{ n.id }}/remove">
+      <h2>Retirer le nœud</h2>
+      <p class="hint">Possible seulement sans appli. La machine quitte le réseau privé ; Docker, PostgreSQL et ses fichiers restent dessus.</p>
+      <div class="field"><label for="rconfirm">Tape <code>{{ n.id }}</code> pour confirmer</label><input id="rconfirm" name="confirm" autocomplete="off" spellcheck="false"></div>
+      <div><button class="btn danger sm">Retirer</button></div>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
