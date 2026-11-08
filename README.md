@@ -59,7 +59,13 @@ Le script installe Docker, Caddy, cloudflared, restic et rclone, puis PostgreSQL
 
 Dans un conteneur LXC Proxmox, active d'abord l'imbrication sur l'hôte : `pct set <id> --features nesting=1,keyctl=1`.
 
-Reprise complète sur un nouveau serveur, depuis une archive, Drive ou le NAS : voir [docs/reprise.md](docs/reprise.md).
+Reprise complète sur un nouveau serveur, depuis une archive téléchargée, Drive ou le NAS : voir [docs/reprise.md](docs/reprise.md).
+
+## Documentation
+
+- [docs/reprise.md](docs/reprise.md) : installer sur un nouveau serveur et tout restaurer (archive téléchargée, Drive, NAS)
+- [docs/exploitation.md](docs/exploitation.md) : services, fichiers, sauvegardes, alertes, mises à jour
+- [docs/prompt-deploiement.md](docs/prompt-deploiement.md) : préparer une appli pour Hangar avec Claude
 
 ## Contrat pour un backend
 
