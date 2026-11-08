@@ -156,6 +156,30 @@ def auth_pending():
     return bool(p and p.poll() is None and time.time() - _auth["started"] < 900)
 
 
+def _parse_token(out):
+    """Jeton OAuth renvoyé par `rclone authorize` : JSON en clair (anciennes versions)
+    ou blob base64 de {"token": "<json>"} (rclone 1.5x/1.60)."""
+    m = re.search(r"--->\s*(.*?)\s*<---", out, re.S)
+    if not m:
+        return None
+    blob = m.group(1).strip()
+    try:
+        if blob.startswith("{"):
+            data = json.loads(blob)
+        else:
+            raw = re.sub(r"\s+", "", blob)
+            data = json.loads(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)))
+    except (ValueError, json.JSONDecodeError):
+        return None
+    tok = data.get("token", data) if isinstance(data, dict) else None
+    if isinstance(tok, str):
+        try:
+            tok = json.loads(tok)
+        except json.JSONDecodeError:
+            return None
+    return tok if isinstance(tok, dict) and tok.get("refresh_token") else None
+
+
 def auth_finish(pasted):
     """`pasted` : l'adresse http://127.0.0.1:53682/?state=…&code=… sur laquelle le navigateur a échoué."""
     with _auth_lock:
@@ -178,11 +202,12 @@ def auth_finish(pasted):
         except subprocess.TimeoutExpired:
             pass
         out = "".join(_auth["out"])
-        m = re.search(r"--->\s*(\{.*?\})\s*<---", out, re.S)
         auth_cancel()
-        if not m:
-            raise RuntimeError("Google n'a pas donné de jeton : " + P.tail(out, 3))
-        token = json.loads(m.group(1))
+        token = _parse_token(out)
+        if not token:
+            # jamais la sortie brute : elle peut contenir un jeton
+            errs = [l for l in out.splitlines() if ("ERROR" in l or "Failed" in l) and "--->" not in l]
+            raise RuntimeError("Google n'a pas donné de jeton exploitable" + (" : " + P.tail("\n".join(errs), 2) if errs else "."))
     _ensure_password()
     conf = (f"[{REMOTE}]\ntype = drive\nscope = drive.file\n"
             f"token = {json.dumps(token, separators=(',', ':'))}\n")
