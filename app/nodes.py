@@ -32,28 +32,12 @@ WG_KEY = "/etc/wireguard/hangar.key"
 LOCAL = "local"
 SRC = "/opt/hangar/deploy"
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS nodes (
-    id TEXT PRIMARY KEY, name TEXT NOT NULL, address TEXT, ssh_port INTEGER NOT NULL DEFAULT 22,
-    wg_ip TEXT NOT NULL UNIQUE, wg_pubkey TEXT, state TEXT NOT NULL DEFAULT 'installing',
-    info TEXT NOT NULL DEFAULT '{}', last_seen REAL, created_at REAL NOT NULL, error TEXT
-);
-CREATE TABLE IF NOT EXISTS stats_node (
-    node TEXT NOT NULL, t INTEGER NOT NULL, cpu REAL, mem REAL, mem_total REAL, disk REAL, disk_total REAL,
-    load1 REAL, PRIMARY KEY (node, t)
-);
-"""
+
 ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,22}[a-z0-9])?$")
 _lock = threading.Lock()
 _fails = {}
 
 
-def init():
-    with db._lock:
-        db._c.executescript(SCHEMA)
-
-
-init()
 
 
 # ---------------------------------------------------------------- registre
@@ -162,9 +146,19 @@ def _local_key():
     return priv, pub
 
 
+DOCKER_AFTER_WG = (f"[Unit]\n# Les conteneurs publient leurs ports sur l'adresse WireGuard : elle doit exister avant eux.\n"
+                   f"After=wg-quick@{WG_IF}.service\nWants=wg-quick@{WG_IF}.service\n")
+
+
 def ensure_local():
     """Crée le nœud « local » (cette machine) et son interface WireGuard au premier nœud ajouté."""
     _, pub = _local_key()
+    os.makedirs("/etc/systemd/system/docker.service.d", exist_ok=True)
+    path = "/etc/systemd/system/docker.service.d/hangar-wg.conf"
+    if not os.path.exists(path):
+        with open(path, "w") as f:
+            f.write(DOCKER_AFTER_WG)
+        subprocess.run(["systemctl", "daemon-reload"])
     if not get(LOCAL):
         s = db.settings()
         db.x("INSERT INTO nodes(id, name, address, wg_ip, wg_pubkey, state, created_at) VALUES(?, ?, ?, ?, ?, 'ok', ?)",
@@ -216,7 +210,7 @@ def apply_mesh():
             raise RuntimeError("WireGuard : " + " ; ".join(errs))
 
 
-def _wg_alive(n, within=180):
+def _wg_alive(n, within=200):
     hs = handshakes()
     return time.time() - hs.get(n.get("wg_pubkey"), 0) < within
 
@@ -295,7 +289,8 @@ def install(node_id):
         apply_mesh()
         n = get(node_id)
         for _ in range(20):
-            if _wg_alive(n, 60) and subprocess.run(["ping", "-c1", "-W1", n["wg_ip"]], capture_output=True).returncode == 0:
+            # le ping prouve le lien ; l'échange de clés WireGuard, lui, n'est refait que toutes les ~2 minutes
+            if subprocess.run(["ping", "-c1", "-W1", n["wg_ip"]], capture_output=True).returncode == 0:
                 break
             time.sleep(1)
         else:
@@ -306,9 +301,26 @@ def install(node_id):
         _update(node_id, state="ok", last_seen=time.time())
         collect(get(node_id))
         _log(n, "ok", f"nœud prêt : réseau privé {n['wg_ip']}, Docker {out.strip()}")
+        try:
+            P.apply_routing()          # Caddy du nœud : routes de toutes les applis
+            P.sync_tunnel(node_id)     # connecteur du tunnel si le nœud reçoit le trafic
+        except RuntimeError as e:
+            _log(n, "warn", str(e))
+        P.spawn(P.rebind_local_apps)   # applis de la console joignables par le réseau privé
     except Exception as e:
         _update(node_id, state="error", error=str(e)[:500])
         _log(n, "error", f"installation en échec : {e}")
+
+
+def set_ingress(node_id, on):
+    n = get(node_id)
+    if not n or node_id == LOCAL:
+        raise ValueError("Nœud inconnu.")
+    _update(node_id, ingress=1 if on else 0)
+    P.sync_tunnel(node_id)
+    P.apply_routing()
+    _log(n, "info", "reçoit le trafic Internet" if on else "ne reçoit plus le trafic Internet (applis toujours joignables "
+                                                            "par les autres nœuds)")
 
 
 def remove(node_id):
@@ -318,8 +330,8 @@ def remove(node_id):
         raise ValueError("Nœud inconnu.")
     if db.one("SELECT 1 FROM apps WHERE node = ?", (node_id,)):
         raise ValueError("Ce nœud héberge encore des applis : déplace-les ou supprime-les d'abord.")
-    ssh(n, f"systemctl disable --now wg-quick@{WG_IF} >/dev/null 2>&1; rm -f /etc/wireguard/{WG_IF}.conf", timeout=20,
-        via_wg=False)
+    ssh(n, f"systemctl disable --now cloudflared >/dev/null 2>&1; systemctl disable --now wg-quick@{WG_IF} "
+           f">/dev/null 2>&1; rm -f /etc/wireguard/{WG_IF}.conf", timeout=20, via_wg=False)
     db.x("DELETE FROM nodes WHERE id = ?", (node_id,))
     db.x("DELETE FROM stats_node WHERE node = ?", (node_id,))
     try:

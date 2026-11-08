@@ -397,7 +397,7 @@ def _dump_apps():
         path = f"{STAGING}/db/{a['slug']}.dump"
         with open(path + ".tmp", "wb") as f:
             p = subprocess.run(["docker", "exec", P.PG, "pg_dump", "-U", "platform", "-Fc", name],
-                               stdout=f, stderr=subprocess.PIPE, timeout=1800)
+                               stdout=f, stderr=subprocess.PIPE, timeout=1800, env=P.denv(a["node"]))
         if p.returncode:
             os.remove(path + ".tmp")
             raise RuntimeError(f"pg_dump {name} : {p.stderr.decode(errors='replace')[-300:]}")
@@ -566,6 +566,9 @@ def _pg_restore(slug, dump_path):
 def _apply(a, src_data, src_dump, parts, label):
     """Remplace data/ et/ou la base d'une appli existante. Appelant : tient P.op_lock."""
     slug = a["slug"]
+    if not P.is_local(a["node"]):
+        raise RuntimeError(f"appli sur le nœud {a['node']} : la restauration sur un nœud distant arrive avec les "
+                           "sauvegardes multi-nœuds. Déplace-la d'abord sur ce serveur, ou restaure-la ici depuis une archive.")
     d = P.app_dir(slug)
     safe = f"{SAFETY}/{slug}-{time.strftime('%Y%m%d-%H%M%S')}"
     if "data" in parts and not (src_data and os.path.isdir(src_data)):

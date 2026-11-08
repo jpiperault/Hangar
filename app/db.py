@@ -52,6 +52,15 @@ CREATE TABLE IF NOT EXISTS stats_host (          -- serveur, par minute
     t INTEGER PRIMARY KEY, cpu REAL, mem REAL, mem_total REAL, swap REAL, disk REAL, disk_total REAL,
     load1 REAL, rx REAL, tx REAL
 );
+CREATE TABLE IF NOT EXISTS nodes (
+    id TEXT PRIMARY KEY, name TEXT NOT NULL, address TEXT, ssh_port INTEGER NOT NULL DEFAULT 22,
+    wg_ip TEXT NOT NULL UNIQUE, wg_pubkey TEXT, state TEXT NOT NULL DEFAULT 'installing',
+    info TEXT NOT NULL DEFAULT '{}', last_seen REAL, created_at REAL NOT NULL, error TEXT
+);
+CREATE TABLE IF NOT EXISTS stats_node (
+    node TEXT NOT NULL, t INTEGER NOT NULL, cpu REAL, mem REAL, mem_total REAL, disk REAL, disk_total REAL,
+    load1 REAL, PRIMARY KEY (node, t)
+);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, ts REAL NOT NULL);
 """
 
@@ -90,6 +99,9 @@ def init():
         if "dest" not in bcols:   # destination de la sauvegarde : gdrive, nas… (NULL = locale)
             _c.execute("ALTER TABLE backups ADD COLUMN dest TEXT")
             _c.execute("UPDATE backups SET dest = 'gdrive' WHERE remote = 1")
+        ncols = {r["name"] for r in _c.execute("PRAGMA table_info(nodes)").fetchall()}
+        if "ingress" not in ncols:   # 1 : le nœud reçoit le trafic Internet (Caddy + connecteur du tunnel)
+            _c.execute("ALTER TABLE nodes ADD COLUMN ingress INTEGER NOT NULL DEFAULT 1")
         if "node" not in cols:   # nœud qui héberge l'appli ('local' = la machine de la console)
             _c.execute("ALTER TABLE apps ADD COLUMN node TEXT NOT NULL DEFAULT 'local'")
         if "latest_version" not in cols:  # dernière version trouvée sur le registre

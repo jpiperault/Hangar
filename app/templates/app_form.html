@@ -63,6 +63,11 @@
 
   <div class="group">
     <span class="lbl">Exécution</span>
+    {% if new %}
+    <div class="field {{ 'bad' if errors.node }}"><label for="node">Nœud</label>
+      <select id="node" name="node">{% for c in node_choices %}<option value="{{ c.id }}" {{ 'selected' if a.node == c.id }}>{{ c.name }} · {{ '%.0f' % c.free }} Mo libres{{ ' (conseillé)' if c.id == best and node_choices | length > 1 }}</option>{% endfor %}</select>
+      {{ err('node') }}<span class="hint">La machine qui fait tourner l'appli et sa base. Conseillé : celle qui a le plus de mémoire libre (total moins la RAM réservée par les applis).</span></div>
+    {% endif %}
     <div class="row3">
       <div class="field {{ 'bad' if errors.port }}"><label for="port">Port interne</label><input id="port" name="port" type="number" min="1" max="65535" value="{{ a.port }}">{{ err('port') }}</div>
       <div class="field {{ 'bad' if errors.health_path }}"><label for="health_path">Healthcheck</label><input id="health_path" name="health_path" value="{{ a.health_path }}" spellcheck="false">{{ err('health_path') }}</div>
@@ -88,9 +93,10 @@
   <section class="panel">
     <h2>État</h2>
     <dl class="facts">
+      <dt>Nœud</dt><dd><a href="/nodes/{{ a.node }}">{{ a.node }}</a></dd>
       <dt>Conteneur</dt><dd>{{ a.container or 'absent' }}</dd>
       <dt>RAM</dt><dd>{{ a.ram }} Mo / {{ a.mem_mb }} Mo</dd>
-      <dt>Port local</dt><dd>127.0.0.1:{{ a.host_port }}</dd>
+      <dt>Port</dt><dd>{{ a.host_port }}</dd>
       <dt>/data</dt><dd>{{ ('propriétaire ' ~ a.data_owner) if a.data_owner else '—' }}</dd>
       <dt>Déployée</dt><dd>{{ a.deployed_at | when }}</dd>
     </dl>
@@ -189,6 +195,9 @@
 {% endif %}
 </div>
 
+{% if not new and a.node != 'local' %}
+<p class="flash warn" style="margin-top:20px">Cette appli tourne sur le nœud {{ a.node }}. Sa base est exportée chaque nuit avec les autres, mais son dossier data/ n'est pas encore sauvegardé, et sa restauration depuis une sauvegarde n'est pas encore possible : cela arrive avec les sauvegardes multi-nœuds.</p>
+{% endif %}
 {% if not new %}
 <section class="panel" id="stats" style="margin-top:20px">
   <div class="bar">

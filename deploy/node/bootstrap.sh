@@ -20,8 +20,19 @@ install -m 0755 -d /etc/apt/keyrings
 [ -f /etc/apt/keyrings/docker.asc ] || curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $VERSION_CODENAME stable" \
   > /etc/apt/sources.list.d/docker.list
+[ -f /usr/share/keyrings/caddy-stable-archive-keyring.gpg ] || \
+  curl -fsSL https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/caddy-stable-archive-keyring.gpg] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main" \
+  > /etc/apt/sources.list.d/caddy-stable.list
+[ -f /usr/share/keyrings/cloudflare-main.gpg ] || curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg -o /usr/share/keyrings/cloudflare-main.gpg
+echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" \
+  > /etc/apt/sources.list.d/cloudflared.list
 $APT update >/dev/null
-$APT install --no-upgrade docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-buildx-plugin >/dev/null
+$APT install --no-upgrade docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-buildx-plugin caddy cloudflared >/dev/null
+# Docker après WireGuard : les conteneurs publient leurs ports sur l'adresse privée du nœud
+install -d /etc/systemd/system/docker.service.d
+printf '[Unit]\nAfter=wg-quick@wg-hangar.service\nWants=wg-quick@wg-hangar.service\n' > /etc/systemd/system/docker.service.d/hangar-wg.conf
+systemctl daemon-reload
 if ! cmp -s daemon.json /etc/docker/daemon.json 2>/dev/null; then
   install -m 0644 daemon.json /etc/docker/daemon.json
   systemctl restart docker
@@ -40,6 +51,13 @@ install -m 0644 platform-compose.yml /srv/platform/compose.yml
 (cd /srv/platform && docker compose up -d --quiet-pull >/dev/null 2>&1)
 for _ in $(seq 1 60); do docker exec platform-postgres-1 pg_isready -U platform >/dev/null 2>&1 && break; sleep 2; done
 docker exec platform-postgres-1 pg_isready -U platform >/dev/null 2>&1 || { echo "HANGAR_ERROR=PostgreSQL ne démarre pas"; exit 1; }
+
+say "Caddy"
+install -d /srv/platform/public/.well-known
+[ -f /srv/platform/Caddyfile ] || echo "# généré par la console Hangar" > /srv/platform/Caddyfile
+printf '# Caddy lit la configuration poussée par la console Hangar\nimport /srv/platform/Caddyfile\n' > /etc/caddy/Caddyfile
+systemctl enable caddy >/dev/null 2>&1
+systemctl restart caddy
 
 say "pare-feu"
 install -d /etc/nftables.d /etc/systemd/system/nftables.service.d
@@ -73,7 +91,7 @@ EOF
 cat > /etc/apt/apt.conf.d/52platform-unattended <<'EOF'
 // Sécurité Debian uniquement. Docker reste manuel (via la console Hangar).
 Unattended-Upgrade::Origins-Pattern { "origin=Debian,codename=${distro_codename}-security,label=Debian-Security"; };
-Unattended-Upgrade::Package-Blacklist { "docker-ce"; "docker-ce-cli"; "containerd.io"; };
+Unattended-Upgrade::Package-Blacklist { "docker-ce"; "docker-ce-cli"; "containerd.io"; "caddy"; "cloudflared"; };
 Unattended-Upgrade::Automatic-Reboot "false";
 EOF
 

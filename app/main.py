@@ -200,7 +200,29 @@ def validate(f, cur=None):
     elif "DATABASE_URL" in env and f.get("db") == "on":
         e["env"] = "DATABASE_URL est injectée automatiquement quand la base est activée."
     d["db"] = 1 if f.get("db") == "on" else 0
+    if not cur:
+        choices = {c["id"] for c in node_choices()}
+        d["node"] = f.get("node") or "local"
+        if d["node"] not in choices:
+            e["node"] = "Nœud indisponible."
     return d, e
+
+
+def node_choices():
+    """Nœuds où déployer : la console et les nœuds installés, avec la RAM encore libre (total - réservée)."""
+    out = []
+    reserved = {}
+    for a in db.apps():
+        if a["desired"] == "running":
+            reserved[a["node"]] = reserved.get(a["node"], 0) + a["mem_mb"]
+    local_total = stats.host_now()["mem_total"]
+    out.append({"id": "local", "name": "Ce serveur (console)", "free": local_total - reserved.get("local", 0)})
+    for n in nodes.all_nodes():
+        if n["id"] == "local" or n["state"] != "ok":
+            continue
+        total = (n["info"] or {}).get("mem_total") or 0
+        out.append({"id": n["id"], "name": n["name"], "free": total - reserved.get(n["id"], 0)})
+    return out
 
 
 async def apply_registry(f, d):
@@ -267,11 +289,13 @@ async def home(request: Request):
 
 @app.get("/apps/new")
 async def new_app(request: Request):
+    ch = node_choices()
+    best = max(ch, key=lambda c: c["free"])["id"]
     blank = {"name": "", "pkg": "fr.piperault.", "expose": "sub", "slug": "", "sub": "", "port": 8080,
              "health_path": "/", "mem_mb": 256, "source": "image", "image": "", "version": "", "env": "", "db": 0,
-             "data_user": ""}
+             "data_user": "", "node": best}
     return render(request, "app_form.html", title="Nouvelle application", nav="apps", a=blank, new=True, errors={},
-                  registries=P.registry_logins())
+                  registries=P.registry_logins(), node_choices=ch, best=best)
 
 
 @app.post("/apps/new")
@@ -282,7 +306,8 @@ async def create_app(request: Request):
         _, errors = await apply_registry(f, d)
     if errors:
         return render(request, "app_form.html", 400, title="Nouvelle application", nav="apps", a=d, new=True,
-                      errors=errors, registries=P.registry_logins(), reg_user=f.get("reg_user") or "")
+                      errors=errors, registries=P.registry_logins(), reg_user=f.get("reg_user") or "",
+                      node_choices=node_choices(), best=None)
     slug = d.pop("slug")
     d.update(host_port=P.next_host_port(), state="deploying", desired="running", created_at=time.time(),
              db_password=secrets.token_hex(16) if d["db"] else None)
@@ -476,6 +501,8 @@ async def save_settings(request: Request):
             db.set_setting(k, old[k])
         flash(request, f"{e} Les réglages précédents sont conservés.", "error")
         return go("/settings")
+    if mode != old["mode"]:
+        P.spawn(P.sync_all_tunnels)   # connecteurs des nœuds : actifs en mode tunnel seulement
     mode_txt = "mode tunnel Cloudflare" if mode == "tunnel" else "mode direct"
     P.log("ok", "caddy", f"domaine {hub}.{base}, {mode_txt}" + (f", alias {', '.join(aliases)}" if aliases else "") + ", Caddy rechargé")
     msg = f"Caddy rechargé en {mode_txt}. {hub}.{base} est actif" + (", anciens domaines toujours servis." if aliases else ".")
@@ -988,21 +1015,23 @@ def _services():
 
 
 def _containers():
-    rc, out = P.run(["docker", "ps", "-a", "--filter", "label=fr.hangar.app", "--format", "{{.ID}}"], timeout=20)
-    ids = out.split()
-    if not ids:
-        return {}
-    rc, out = P.run(["docker", "inspect", "-f", '{{index .Config.Labels "fr.hangar.app"}}\t{{.RestartCount}}\t{{.State.StartedAt}}\t{{.State.OOMKilled}}', *ids], timeout=20)
+    def one(node):
+        rc, out = P.dk(node, "ps", "-a", "--filter", "label=fr.hangar.app", "--format", "{{.ID}}", timeout=20)
+        ids = out.split() if rc == 0 else []
+        if not ids:
+            return ""
+        return P.dk(node, "inspect", "-f", '{{index .Config.Labels "fr.hangar.app"}}\t{{.RestartCount}}\t'
+                    '{{.State.StartedAt}}\t{{.State.OOMKilled}}', *ids, timeout=20)[1]
     res = {}
-    for line in out.splitlines():
-        parts = line.split("\t")
-        if len(parts) == 4:
-            started = parts[2][:19]
-            try:
-                ts = calendar.timegm(time.strptime(started, "%Y-%m-%dT%H:%M:%S"))   # Docker donne l'heure UTC
-            except ValueError:
-                ts = None
-            res[parts[0]] = {"restarts": int(parts[1] or 0), "started": ts, "oom": parts[3] == "true"}
+    for out in P._on_nodes(one).values():
+        for line in out.splitlines():
+            parts = line.split("\t")
+            if len(parts) == 4:
+                try:
+                    ts = calendar.timegm(time.strptime(parts[2][:19], "%Y-%m-%dT%H:%M:%S"))   # Docker donne l'heure UTC
+                except ValueError:
+                    ts = None
+                res[parts[0]] = {"restarts": int(parts[1] or 0), "started": ts, "oom": parts[3] == "true"}
     return res
 
 

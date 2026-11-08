@@ -20,7 +20,7 @@ _started = False
 
 
 def _probe(a):
-    url = f"http://127.0.0.1:{a['host_port']}{a['health_path']}"
+    url = f"http://{P.app_host(a)}:{a['host_port']}{a['health_path']}"
     try:
         with urllib.request.urlopen(url, timeout=5):
             return True, ""
@@ -50,7 +50,7 @@ def check_apps():
         _fails[slug] = _fails.get(slug, 0) + 1
         if _fails[slug] == 2 and slug not in _down:
             _down.add(slug)
-            report = P.container_report(f"app-{slug}-app-1", lines=4)
+            report = P.container_report(f"app-{slug}-app-1", lines=4, node=a["node"])
             P.log("error", slug, f"ne répond plus depuis 2 minutes ({why})\n{report}")
             alerts.send(f"{a['name']} ne répond plus", f"{a['health_path']} : {why}\n{report}", priority=5,
                         tags=["rotating_light"])

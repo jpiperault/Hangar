@@ -13,7 +13,7 @@
     <tbody>
     {% for a in apps %}
       <tr>
-        <td><div class="nm"><a href="/apps/{{ a.slug }}">{{ a.name }}</a></div><div class="pk">{{ a.pkg or a.slug }}</div></td>
+        <td><div class="nm"><a href="/apps/{{ a.slug }}">{{ a.name }}</a></div><div class="pk">{{ a.pkg or a.slug }}{% if a.node != 'local' %} · nœud {{ a.node }}{% endif %}</div></td>
         <td><div class="urls">{% for k, u in a.urls %}<span class="route"><i>{{ k }}</i><a href="{{ u }}" target="_blank" rel="noopener">{{ u }}</a></span>{% endfor %}</div></td>
         <td><span class="pill s-{{ a.status }}">{{ LABELS[a.status] }}</span></td>
         <td><div class="mono">{{ a.version }}</div>{% if a.latest_version %}<div><span class="pill s-deploying" title="Nouvelle version sur le registre">{{ a.latest_version }} disponible</span></div>{% else %}<div class="pk">{{ a.deployed_at | when }}</div>{% endif %}</td>

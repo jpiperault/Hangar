@@ -35,9 +35,9 @@ MASK = "••••••"
 
 # ---------------------------------------------------------------- utilitaires
 
-def run(cmd, cwd=None, timeout=600, input=None):
+def run(cmd, cwd=None, timeout=600, input=None, env=None):
     try:
-        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, input=input)
+        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, input=input, env=env)
     except subprocess.TimeoutExpired:
         return 124, f"délai dépassé ({timeout} s) : {' '.join(cmd)}"
     return p.returncode, (p.stdout + p.stderr).strip()
@@ -69,6 +69,49 @@ def write_private(path, text):
     with os.fdopen(fd, "w") as f:
         f.write(text)
     os.replace(tmp, path)
+
+
+# ---------------------------------------------------------------- nœuds (exécution locale ou distante)
+
+LOCAL = "local"
+NODE_SSH = "/srv/platform/nodes/ssh_config"
+
+
+def node_row(node_id):
+    return db.one("SELECT * FROM nodes WHERE id = ?", (node_id or LOCAL,))
+
+
+def is_local(node_id):
+    return (node_id or LOCAL) == LOCAL
+
+
+def node_wg(node_id):
+    """Adresse privée WireGuard d'un nœud (None si le réseau privé n'existe pas encore)."""
+    r = node_row(node_id)
+    return r["wg_ip"] if r else None
+
+
+def denv(node_id):
+    """Environnement pour piloter le Docker d'un nœud (None = Docker local)."""
+    if is_local(node_id):
+        return None
+    return {**os.environ, "DOCKER_HOST": f"ssh://root@{node_wg(node_id)}"}
+
+
+def dk(node_id, *args, cwd=None, timeout=600, input=None):
+    return run(["docker", *args], cwd=cwd, timeout=timeout, input=input, env=denv(node_id))
+
+
+def nsh(node_id, cmd, timeout=120, input=None):
+    """Commande shell sur un nœud (root)."""
+    if is_local(node_id):
+        return run(["bash", "-c", cmd], timeout=timeout, input=input)
+    return run(["ssh", "-F", NODE_SSH, f"root@{node_wg(node_id)}", cmd], timeout=timeout, input=input)
+
+
+def app_host(a):
+    """Adresse à laquelle la console joint le port d'une appli."""
+    return "127.0.0.1" if is_local(a.get("node")) else node_wg(a["node"])
 
 
 def recover():
@@ -153,10 +196,12 @@ def next_host_port():
 
 # ---------------------------------------------------------------- Caddy
 
-def _upstream(a, prefix, ind):
+def _upstream(a, prefix, ind, here=LOCAL):
     if a["desired"] == "stopped":
         return [f'{ind}respond "Service arrêté" 503']
-    lines = [f"{ind}reverse_proxy 127.0.0.1:{a['host_port']} {{",
+    # appli sur ce nœud : en local ; sur un autre nœud : par le réseau privé WireGuard
+    host = "127.0.0.1" if (a.get("node") or LOCAL) == here else node_wg(a["node"])
+    lines = [f"{ind}reverse_proxy {host}:{a['host_port']} {{",
              f"{ind}\theader_up X-Real-IP {{client_ip}}"]
     if prefix:
         lines.append(f"{ind}\theader_up X-Forwarded-Prefix {prefix}")
@@ -164,7 +209,7 @@ def _upstream(a, prefix, ind):
     return lines
 
 
-def render_caddyfile(s, apps):
+def render_caddyfile(s, apps, here=LOCAL):
     """Mode tunnel : HTTP en local derrière cloudflared, TLS terminé chez Cloudflare.
     Mode direct : Caddy écoute 80/443 et obtient lui-même les certificats Let's Encrypt."""
     domains = [s["base_domain"]] + [d for d in s["aliases"] if d != s["base_domain"]]
@@ -207,7 +252,7 @@ def render_caddyfile(s, apps):
         slug = a["slug"]
         L += ["", f"\t# appli {slug}", f"\tredir /{slug} /{slug}/ 308", f"\thandle_path /{slug}/* {{",
               f"\t\tlog_append hangar_app {slug}"]
-        L += _upstream(a, f"/{slug}", "\t\t")
+        L += _upstream(a, f"/{slug}", "\t\t", here)
         L.append("\t}")
     L += ["", "\thandle {", '\t\trespond "Not found" 404', "\t}", "}"]
     for a in apps:
@@ -215,7 +260,7 @@ def render_caddyfile(s, apps):
             L += ["", f"# appli {a['slug']}", names(a["sub"]) + " {",
                   "\timport hangar_log", f"\tlog_append hangar_app {a['slug']}",
                   "\tencode zstd gzip"]
-            L += _upstream(a, None, "\t")
+            L += _upstream(a, None, "\t", here)
             L.append("}")
     if tunnel:
         L += ["", "# Tout autre nom arrivant par le tunnel", "http:// {", '\trespond "Not found" 404', "}"]
@@ -339,6 +384,7 @@ def set_tunnel_token(tok):
     ok, err = _tunnel_connected(since)
     if ok:
         log("ok", "tunnel", f"jeton du tunnel remplacé, tunnel {p['tunnel_id']} connecté")
+        sync_all_tunnels()   # les connecteurs des nœuds suivent le même tunnel
         return p["tunnel_id"]
     if old is not None:
         write_private(TUNNEL_TOKEN, old)
@@ -419,6 +465,117 @@ def apply_routing():
         os.chmod(tmp, 0o644)
         os.replace(tmp, APPS_JSON)
         _sync_env_file(s)
+        push_routing(s, apps, json.dumps(manifest, indent=2, ensure_ascii=False))
+
+
+# ---------------------------------------------------------------- entrée du trafic sur les nœuds
+
+def ingress_nodes(s=None):
+    """Nœuds distants qui reçoivent le trafic Internet : mode tunnel, nœud installé et option activée."""
+    s = s or db.settings()
+    if s.get("mode") != "tunnel":
+        return []
+    return db.q("SELECT * FROM nodes WHERE id != 'local' AND state IN ('ok', 'offline') AND ingress = 1")
+
+
+PUSH_CADDY = r"""set -e
+install -d /srv/platform/public/.well-known /var/log/caddy
+[ -f /var/log/caddy/access.log ] || install -m 640 /dev/null /var/log/caddy/access.log
+chown caddy:caddy /var/log/caddy /var/log/caddy/access.log
+cat > /srv/platform/Caddyfile.new
+if ! caddy validate --config /srv/platform/Caddyfile.new --adapter caddyfile >/tmp/hangar-caddy.err 2>&1; then
+  rm -f /srv/platform/Caddyfile.new; tail -3 /tmp/hangar-caddy.err; exit 3
+fi
+mv /srv/platform/Caddyfile.new /srv/platform/Caddyfile
+systemctl reload caddy 2>/dev/null || systemctl restart caddy
+"""
+
+
+def push_routing(s, apps, apps_json):
+    """Envoie à chaque nœud d'entrée sa propre configuration Caddy et apps.json (en parallèle, erreurs journalisées)."""
+    targets = ingress_nodes(s)
+    if not targets:
+        return
+
+    def one(n):
+        rc, out = nsh(n["id"], PUSH_CADDY, timeout=60, input=render_caddyfile(s, apps, here=n["id"]))
+        if rc:
+            return f"{n['id']} : " + tail(out, 2)
+        rc, out = nsh(n["id"], f"cat > {APPS_JSON}.tmp && chmod 644 {APPS_JSON}.tmp && mv {APPS_JSON}.tmp {APPS_JSON}",
+                      timeout=30, input=apps_json)
+        return f"{n['id']} : " + tail(out, 2) if rc else None
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(targets)) as ex:
+        errs = [e for e in ex.map(one, targets) if e]
+    for e in errs:
+        log("warn", "caddy", f"routes non mises à jour sur le nœud {e}")
+
+
+TUNNEL_UNIT = """[Unit]
+Description=Cloudflare Tunnel client (connecteur Hangar)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run --token-file /etc/cloudflared/token
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def sync_tunnel(node_id):
+    """Connecteur cloudflared sur un nœud : même jeton que la console si le nœud reçoit le trafic, sinon arrêté."""
+    n = node_row(node_id)
+    if not n or is_local(node_id):
+        return
+    want = bool(n["ingress"]) and db.settings().get("mode") == "tunnel" and os.path.exists(TUNNEL_TOKEN)
+    if want:
+        token = open(TUNNEL_TOKEN).read().strip()
+        rc, out = nsh(node_id, "install -d -m 0755 /etc/cloudflared && umask 077 && cat > /etc/cloudflared/token.new && "
+                               "mv /etc/cloudflared/token.new /etc/cloudflared/token", timeout=30, input=token + "\n")
+        if rc == 0:
+            rc, out = nsh(node_id, "cat > /etc/systemd/system/cloudflared.service && systemctl daemon-reload && "
+                                   "systemctl enable cloudflared >/dev/null 2>&1 && systemctl restart cloudflared",
+                          timeout=60, input=TUNNEL_UNIT)
+        if rc:
+            raise RuntimeError(f"connecteur du tunnel non démarré sur {node_id} : " + tail(out, 2))
+        log("ok", f"nœud {node_id}", "connecteur du tunnel Cloudflare actif : ce nœud reçoit aussi le trafic Internet")
+    else:
+        nsh(node_id, "systemctl disable --now cloudflared >/dev/null 2>&1; true", timeout=30)
+
+
+def sync_all_tunnels():
+    for n in db.q("SELECT id FROM nodes WHERE id != 'local' AND state IN ('ok', 'offline')"):
+        try:
+            sync_tunnel(n["id"])
+        except RuntimeError as e:
+            log("warn", f"nœud {n['id']}", str(e))
+
+
+def rebind_local_apps():
+    """Après la création du réseau privé : republie les applis locales aussi sur 10.88.0.1, pour que les Caddy des
+    autres nœuds les joignent. Recrée chaque conteneur (quelques secondes), une seule fois."""
+    wg = node_wg(LOCAL)
+    if not wg:
+        return
+    for a in db.apps():
+        if not is_local(a["node"]) or a["desired"] != "running":
+            continue
+        d = app_dir(a["slug"])
+        if not os.path.exists(f"{d}/compose.yml"):
+            continue
+        rc, ports = dk(LOCAL, "port", f"app-{a['slug']}-app-1", timeout=15)
+        if rc or f"{wg}:{a['host_port']}" in ports:   # conteneur absent, ou déjà publié sur le réseau privé
+            continue
+        with op_lock:
+            write_compose(a, a["version"])
+            rc, out = dk(LOCAL, "compose", "up", "-d", "--no-build", cwd=d, timeout=300)
+            ok, detail = (False, tail(out)) if rc else wait_health(a)
+            log("ok" if ok else "error", a["slug"], "publiée aussi sur le réseau privé " + wg
+                if ok else f"republication sur le réseau privé en échec : {detail}")
 
 
 # ---------------------------------------------------------------- fichiers d'une appli
@@ -503,6 +660,14 @@ def registry_logout(registry):
     return rc == 0
 
 
+def _ports(a):
+    ports = [f"127.0.0.1:{a['host_port']}:{a['port']}"]
+    wg = node_wg(a.get("node"))
+    if wg and os.path.exists("/etc/wireguard/wg-hangar.conf"):
+        ports.append(f"{wg}:{a['host_port']}:{a['port']}")
+    return ports
+
+
 def write_compose(a, version):
     env, _ = parse_env(a["env"])
     if a["db"]:
@@ -511,7 +676,7 @@ def write_compose(a, version):
     svc = {
         "image": image_ref(a, version),
         "restart": "unless-stopped",
-        "ports": [f"127.0.0.1:{a['host_port']}:{a['port']}"],
+        "ports": _ports(a),
         "networks": ["platform"],
         "volumes": ["./data:/data"],
         "environment": {k: v.replace("$", "$$") for k, v in env.items()},
@@ -523,8 +688,14 @@ def write_compose(a, version):
     doc = {"name": f"app-{a['slug']}", "services": {"app": svc},
            "networks": {"platform": {"external": True}}}
     d = app_dir(a["slug"])
-    os.makedirs(f"{d}/data", exist_ok=True)
+    os.makedirs(d, mode=0o700, exist_ok=True)
     os.chmod(d, 0o700)
+    if is_local(a.get("node")):
+        os.makedirs(f"{d}/data", exist_ok=True)
+    else:   # le dossier data/ vit sur le nœud ; compose y résout ./data en /srv/apps/<id>/data
+        rc, out = nsh(a["node"], f"install -d -m 0700 {d} && install -d {d}/data", timeout=60)
+        if rc:
+            raise RuntimeError(f"nœud {a['node']} injoignable : " + tail(out, 2))
     # JSON est du YAML valide : aucune valeur saisie ne peut casser la structure du fichier
     write_private(f"{d}/compose.yml",
                   "# Généré par Hangar. Ne pas éditer à la main.\n" + json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
@@ -532,41 +703,47 @@ def write_compose(a, version):
 
 # ---------------------------------------------------------------- PostgreSQL
 
-def _psql(sql):
-    return run(["docker", "exec", "-i", PG, "psql", "-U", "platform", "-v", "ON_ERROR_STOP=1", "-qtA"],
-               input=sql, timeout=60)
+def _psql(sql, node=None):
+    return dk(node, "exec", "-i", PG, "psql", "-U", "platform", "-v", "ON_ERROR_STOP=1", "-qtA",
+              input=sql, timeout=60)
 
 
 def ensure_db(a):
-    n, pw = db_name(a["slug"]), a["db_password"]
+    n, pw, node = db_name(a["slug"]), a["db_password"], a.get("node")
     rc, out = _psql(f"""
 DO $$ BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{n}') THEN CREATE ROLE {n} LOGIN; END IF;
 END $$;
 ALTER ROLE {n} WITH LOGIN PASSWORD '{pw}';
 SELECT 1 FROM pg_database WHERE datname = '{n}';
-""")
+""", node)
     if rc:
         raise RuntimeError("création du rôle PostgreSQL impossible : " + tail(out, 2))
     if "1" not in out.split():
-        rc, out = _psql(f"CREATE DATABASE {n} OWNER {n};")
+        rc, out = _psql(f"CREATE DATABASE {n} OWNER {n};", node)
         if rc:
             raise RuntimeError("création de la base impossible : " + tail(out, 2))
-        log("ok", a["slug"], f"base PostgreSQL {n} créée")
+        log("ok", a["slug"], f"base PostgreSQL {n} créée" + ("" if is_local(node) else f" sur le nœud {node}"))
 
 
-def dump_db(slug, dest):
+def app_node(slug):
+    a = db.app(slug)
+    return a["node"] if a else LOCAL
+
+
+def dump_db(slug, dest, node=None):
     n = db_name(slug)
-    p = subprocess.run(["docker", "exec", PG, "pg_dump", "-U", "platform", n], capture_output=True, timeout=600)
+    p = subprocess.run(["docker", "exec", PG, "pg_dump", "-U", "platform", n], capture_output=True, timeout=600,
+                       env=denv(node or app_node(slug)))
     if p.returncode:
         raise RuntimeError("dump impossible : " + p.stderr.decode(errors="replace")[-300:])
     with gzip.open(dest, "wb") as f:
         f.write(p.stdout)
 
 
-def drop_db(slug):
+def drop_db(slug, node=None):
     n = db_name(slug)
-    _psql(f"DROP DATABASE IF EXISTS {n} WITH (FORCE); DROP ROLE IF EXISTS {n};")
+    _psql(f"DROP DATABASE IF EXISTS {n} WITH (FORCE); DROP ROLE IF EXISTS {n};", node or app_node(slug))
 
 
 # ---------------------------------------------------------------- état des conteneurs
@@ -574,14 +751,35 @@ def drop_db(slug):
 _stats_cache = {"ts": 0, "data": {}}
 
 
+def app_nodes():
+    """Nœuds qui hébergent au moins une appli (le local toujours)."""
+    return sorted({LOCAL} | {r["node"] for r in db.q("SELECT DISTINCT node FROM apps")})
+
+
+def _on_nodes(fn):
+    """Exécute fn(node) sur chaque nœud hébergeant des applis, en parallèle (un nœud lent ne bloque pas les autres)."""
+    ids = app_nodes()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(ids))) as ex:
+        return dict(zip(ids, ex.map(fn, ids)))
+
+
 def container_states():
-    rc, out = run(["docker", "ps", "-a", "--filter", "label=fr.hangar.app",
-                   "--format", '{{.Label "fr.hangar.app"}}\t{{.State}}\t{{.Status}}'], timeout=20)
+    def one(node):
+        rc, out = dk(node, "ps", "-a", "--filter", "label=fr.hangar.app",
+                     "--format", '{{.Label "fr.hangar.app"}}\t{{.State}}\t{{.Status}}', timeout=15)
+        res = {}
+        for line in out.splitlines() if rc == 0 else []:
+            parts = line.split("\t")
+            if len(parts) == 3:
+                res[parts[0]] = (parts[1], parts[2])
+        return res if rc == 0 else None
     states = {}
-    for line in out.splitlines() if rc == 0 else []:
-        parts = line.split("\t")
-        if len(parts) == 3:
-            states[parts[0]] = (parts[1], parts[2])
+    for node, res in _on_nodes(one).items():
+        if res is None:
+            for a in db.q("SELECT slug FROM apps WHERE node = ?", (node,)):
+                states[a["slug"]] = ("unknown", f"nœud {node} injoignable")
+        else:
+            states.update(res)
     return states
 
 
@@ -596,9 +794,11 @@ def _to_mb(v):
 def mem_usage():
     if time.time() - _stats_cache["ts"] < 15:
         return _stats_cache["data"]
-    rc, out = run(["docker", "stats", "--no-stream", "--format", "{{.Name}}\t{{.MemUsage}}"], timeout=30)
+    def one(node):
+        return dk(node, "stats", "--no-stream", "--format", "{{.Name}}\t{{.MemUsage}}", timeout=30)
+    out = "\n".join(o for rc, o in _on_nodes(one).values() if rc == 0)
     data = {}
-    for line in out.splitlines() if rc == 0 else []:
+    for line in out.splitlines():
         name, _, usage = line.partition("\t")
         m = re.match(r"app-(.+)-app-1$", name)
         if m:
@@ -639,18 +839,18 @@ def apps_with_status():
 LOG_TS = re.compile(r"^\s*\[?\d{4}-\d{2}-\d{2}[T ][\d:.,]+(?:Z|[+-]\d{2}:?\d{2})?\]?\s*")
 
 
-def _container_state(name):
-    rc, st = run(["docker", "inspect", "-f",
-                  "{{.State.Status}} {{.State.ExitCode}} {{.RestartCount}} {{.State.OOMKilled}}", name], timeout=10)
+def _container_state(name, node=None):
+    rc, st = dk(node, "inspect", "-f",
+                "{{.State.Status}} {{.State.ExitCode}} {{.RestartCount}} {{.State.OOMKilled}}", name, timeout=15)
     if rc:
         return None
     status, code, restarts, oom = (st.split() + ["", "0", "0", "false"])[:4]
     return {"status": status, "code": code, "restarts": int(restarts or 0), "oom": oom == "true"}
 
 
-def container_report(name, lines=6):
+def container_report(name, lines=6, node=None):
     """État du conteneur et dernières lignes de ses logs, sans horodatage, répétitions regroupées."""
-    st = _container_state(name)
+    st = _container_state(name, node)
     out = []
     if st is None:
         return "Conteneur introuvable."
@@ -659,7 +859,7 @@ def container_report(name, lines=6):
     elif st["status"] in ("exited", "dead", "restarting") and st["code"] not in ("", "0"):
         out.append(f"Le conteneur s'arrête avec le code {st['code']}"
                    + (f" ({st['restarts']} redémarrages)." if st["restarts"] else "."))
-    rc, logs = run(["docker", "logs", "--tail", "80", name], timeout=15)
+    rc, logs = dk(node, "logs", "--tail", "80", name, timeout=20)
     groups = []
     for l in logs.splitlines():
         l = LOG_TS.sub("", l).rstrip()
@@ -679,17 +879,18 @@ def container_report(name, lines=6):
 
 
 def wait_health(a, timeout=90):
-    url = f"http://127.0.0.1:{a['host_port']}{a['health_path']}"
+    node = a.get("node")
+    url = f"http://{app_host(a)}:{a['host_port']}{a['health_path']}"
     name = f"app-{a['slug']}-app-1"
     deadline, last = time.time() + timeout, "pas de réponse"
-    st0 = _container_state(name)
+    st0 = _container_state(name, node)
     base = st0["restarts"] if st0 else 0
     time.sleep(1)
     while time.time() < deadline:
-        st = _container_state(name)
+        st = _container_state(name, node)
         if st and (st["status"] in ("exited", "dead") or st["restarts"] - base >= 3):
             why = "s'est arrêté" if st["status"] in ("exited", "dead") else "redémarre en boucle"
-            return False, f"le conteneur {why}.\n{container_report(name)}"
+            return False, f"le conteneur {why}.\n{container_report(name, node=node)}"
         try:
             with urllib.request.urlopen(url, timeout=3) as r:
                 return True, f"HTTP {r.status}"
@@ -700,7 +901,7 @@ def wait_health(a, timeout=90):
         except Exception as e:
             last = str(getattr(e, "reason", e))
         time.sleep(2)
-    return False, f"{url} → {last} après {timeout} s.\n{container_report(name)}"
+    return False, f"{url} → {last} après {timeout} s.\n{container_report(name, node=node)}"
 
 
 USER_RE = re.compile(r"^(\d{1,10})(?::(\d{1,10}))?$")
@@ -712,8 +913,8 @@ def image_user(a, version):
         m = USER_RE.match(a["data_user"])
         if m:
             return int(m[1]), int(m[2] or m[1]), "réglé dans la console"
-    ref = image_ref(a, version)
-    rc, u = run(["docker", "image", "inspect", "-f", "{{.Config.User}}", ref], timeout=20)
+    ref, node = image_ref(a, version), a.get("node")
+    rc, u = dk(node, "image", "inspect", "-f", "{{.Config.User}}", ref, timeout=30)
     u = u.strip() if rc == 0 else ""
     if u in ("", "root", "0", "0:0", "root:root"):
         return 0, 0, "image en root"
@@ -723,8 +924,8 @@ def image_user(a, version):
     # USER donné par son nom : on demande l'UID à l'image elle-même
     ids = []
     for flag in ("-u", "-g"):
-        rc, out = run(["docker", "run", "--rm", "--pull", "never", "--network", "none",
-                       "--entrypoint", "id", ref, flag], timeout=60)
+        rc, out = dk(node, "run", "--rm", "--pull", "never", "--network", "none",
+                     "--entrypoint", "id", ref, flag, timeout=60)
         ids.append(out.strip() if rc == 0 and out.strip().isdigit() else None)
     if all(ids):
         return int(ids[0]), int(ids[1]), f"USER {u} de l'image"
@@ -733,15 +934,17 @@ def image_user(a, version):
 
 def prepare_data(a, version):
     d = f"{app_dir(a['slug'])}/data"
-    os.makedirs(d, exist_ok=True)
+    node = a.get("node")
     uid, gid, src = image_user(a, version)
     if uid is None:
         log("warn", a["slug"], f"UID de l'utilisateur « {src} » introuvable (pas de commande id dans l'image) : "
             "/data reste à root. Indique l'UID dans « Propriétaire de /data ».")
         return
-    st = os.stat(d)
-    if (st.st_uid, st.st_gid) != (uid, gid):
-        rc, out = run(["chown", "-R", f"{uid}:{gid}", d], timeout=600)
+    rc, cur = nsh(node, f"install -d {d} && stat -c '%u %g' {d}", timeout=60)
+    if rc:
+        raise RuntimeError(f"dossier {d} inaccessible : {tail(cur, 2)}")
+    if cur.split()[-2:] != [str(uid), str(gid)]:
+        rc, out = nsh(node, f"chown -R {uid}:{gid} {d}", timeout=600)
         if rc:
             raise RuntimeError(f"impossible d'attribuer /data à {uid}:{gid} : {tail(out, 2)}")
         log("info", a["slug"], f"/data attribué à {uid}:{gid} ({src})")
@@ -749,19 +952,19 @@ def prepare_data(a, version):
 
 
 def _up(a, version):
-    d = app_dir(a["slug"])
+    d, node = app_dir(a["slug"]), a.get("node")
     write_compose(a, version)
     if a["source"] == "git":
-        rc, _ = run(["docker", "image", "inspect", image_ref(a, version)], timeout=20)
+        rc, _ = dk(node, "image", "inspect", image_ref(a, version), timeout=30)
         if rc:
             log("info", a["slug"], f"build de {a['image']}#{version}")
-            rc, out = run(["docker", "compose", "build", "--pull"], cwd=d, timeout=1800)
+            rc, out = dk(node, "compose", "build", "--pull", cwd=d, timeout=1800)
             if rc:
                 return False, "build impossible : " + tail(out)
     else:
-        rc, out = run(["docker", "compose", "pull", "--quiet"], cwd=d, timeout=900)
+        rc, out = dk(node, "compose", "pull", "--quiet", cwd=d, timeout=900)
         if rc:
-            rc2, _ = run(["docker", "image", "inspect", image_ref(a, version)], timeout=20)
+            rc2, _ = dk(node, "image", "inspect", image_ref(a, version), timeout=30)
             if rc2:
                 hint = ""
                 if re.search(r"unauthorized|denied|authentication required", out, re.I):
@@ -775,7 +978,7 @@ def _up(a, version):
                     f"téléchargement de {image_ref(a, version)} impossible : " + tail(out)
             log("warn", a["slug"], f"registre injoignable pour {image_ref(a, version)}, image déjà présente utilisée")
     prepare_data(a, version)
-    rc, out = run(["docker", "compose", "up", "-d", "--remove-orphans", "--no-build"], cwd=d, timeout=300)
+    rc, out = dk(node, "compose", "up", "-d", "--remove-orphans", "--no-build", cwd=d, timeout=300)
     if rc:
         return False, "démarrage impossible : " + tail(out)
     ok, detail = wait_health(a)
@@ -842,7 +1045,7 @@ def start(slug):
     with op_lock:
         a = db.app(slug)
         db.update_app(slug, state="deploying", desired="running")
-        rc, out = run(["docker", "compose", "up", "-d", "--no-build"], cwd=app_dir(slug), timeout=300)
+        rc, out = dk(a["node"], "compose", "up", "-d", "--no-build", cwd=app_dir(slug), timeout=300)
         ok, detail = (False, tail(out)) if rc else wait_health(a)
         db.update_app(slug, state="ok" if ok else "error")
         log("ok" if ok else "error", slug, "démarrée" if ok else f"démarrage en échec : {detail}")
@@ -852,7 +1055,7 @@ def start(slug):
 def stop(slug):
     with op_lock:
         db.update_app(slug, desired="stopped")
-        rc, out = run(["docker", "compose", "stop"], cwd=app_dir(slug), timeout=120)
+        rc, out = dk(app_node(slug), "compose", "stop", cwd=app_dir(slug), timeout=120)
         db.update_app(slug, state="ok" if rc == 0 else "error")
         log("info" if rc == 0 else "error", slug, "arrêtée" if rc == 0 else "arrêt en échec : " + tail(out))
     apply_routing()
@@ -862,7 +1065,7 @@ def restart(slug):
     with op_lock:
         a = db.app(slug)
         db.update_app(slug, state="deploying", desired="running")
-        rc, out = run(["docker", "compose", "restart"], cwd=app_dir(slug), timeout=180)
+        rc, out = dk(a["node"], "compose", "restart", cwd=app_dir(slug), timeout=180)
         ok, detail = (False, tail(out)) if rc else wait_health(a)
         db.update_app(slug, state="ok" if ok else "error")
         log("ok" if ok else "error", slug, "redémarrée" if ok else f"redémarrage en échec : {detail}")
@@ -878,15 +1081,22 @@ def delete(slug):
         keep = f"{BACKUPS}/deleted/{slug}-{stamp}"
         os.makedirs(keep, exist_ok=True)
         os.chmod(keep, 0o700)
-        d = app_dir(slug)
+        d, node = app_dir(slug), a["node"]
         if os.path.exists(f"{d}/compose.yml"):
-            run(["docker", "compose", "down", "--remove-orphans"], cwd=d, timeout=180)
+            dk(node, "compose", "down", "--remove-orphans", cwd=d, timeout=180)
         if a["db"]:
             try:
-                dump_db(slug, f"{keep}/{db_name(slug)}.sql.gz")
+                dump_db(slug, f"{keep}/{db_name(slug)}.sql.gz", node)
             except Exception as e:
                 log("warn", slug, f"dump avant suppression impossible : {e}")
-            drop_db(slug)
+            drop_db(slug, node)
+        if not is_local(node):   # rapatrie data/ du nœud avant de l'y effacer
+            rc, out = run(["rsync", "-a", "-e", f"ssh -F {NODE_SSH}", f"root@{node_wg(node)}:{d}/data/",
+                           f"{d}/data/"], timeout=3600)
+            if rc:
+                log("warn", slug, f"data/ non rapatrié depuis le nœud {node} (laissé sur place) : {tail(out, 2)}")
+            else:
+                nsh(node, f"rm -rf {d}", timeout=600)
         if os.path.isdir(d):
             shutil.move(d, f"{keep}/files")
         db.x("DELETE FROM apps WHERE slug = ?", (slug,))
@@ -898,8 +1108,8 @@ def logs(slug, lines=300):
     d = app_dir(slug)
     if not os.path.exists(f"{d}/compose.yml"):
         return "Aucun conteneur pour l'instant."
-    rc, out = run(["docker", "compose", "logs", "--no-color", "--no-log-prefix", "--timestamps", "--tail", str(lines)],
-                  cwd=d, timeout=30)
+    rc, out = dk(app_node(slug), "compose", "logs", "--no-color", "--no-log-prefix", "--timestamps", "--tail",
+                 str(lines), cwd=d, timeout=40)
     return out or "Aucune ligne de log."
 
 

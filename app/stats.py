@@ -1,6 +1,7 @@
 """Statistiques par appli : requêtes (journal JSON de Caddy) et ressources (docker stats), par minute."""
 import json
 import os
+import subprocess
 import time
 
 from . import db
@@ -17,44 +18,72 @@ def _p95(values):
     return v[min(len(v) - 1, int(round(0.95 * (len(v) - 1))))]
 
 
+def _ingest(chunk, buckets):
+    """Agrège des lignes JSON du journal de Caddy ; retourne le nombre d'octets entièrement lus."""
+    end = chunk.rfind(b"\n") + 1
+    for line in chunk[:end].splitlines():
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        app = d.get("hangar_app")
+        if not app:
+            continue
+        t = int(d.get("ts", time.time()) // 60 * 60)
+        b = buckets.setdefault((app, t), {"n": 0, "e4": 0, "e5": 0, "dur": [], "bytes": 0})
+        status = int(d.get("status") or 0)
+        b["n"] += 1
+        b["e4"] += 400 <= status < 500
+        b["e5"] += status >= 500
+        b["dur"].append(float(d.get("duration") or 0))
+        b["bytes"] += int(d.get("size") or 0)
+    return end
+
+
+def _new_offset(saved, ino, size):
+    off = saved.get("off", 0)
+    if saved.get("ino") != ino or off > size:   # fichier tourné ou recréé : on repart du début
+        off = 0 if saved.get("ino") is not None else size   # tout premier passage : on ignore l'historique
+    return off
+
+
+CHUNK = 32 * 1024 * 1024
+
+
 def collect_requests():
-    """Lit les nouvelles lignes du journal de Caddy et les agrège par appli et par minute."""
+    """Lit les nouvelles lignes des journaux de Caddy (console et nœuds d'entrée), agrégées par appli et par minute."""
+    buckets = {}
     path = P.ACCESS_LOG
     try:
         st = os.stat(path)
+        saved = db.kv_get("stats_pos") or {}
+        off = _new_offset(saved, st.st_ino, st.st_size)
+        with open(path, "rb") as f:
+            f.seek(off)
+            end = _ingest(f.read(CHUNK), buckets)
+        db.kv_set("stats_pos", {"ino": st.st_ino, "off": off + end})
     except OSError:
-        return 0
-    saved = db.kv_get("stats_pos") or {}
-    ino, off = saved.get("ino"), saved.get("off", 0)
-    if ino != st.st_ino or off > st.st_size:   # fichier tourné ou recréé : on repart du début
-        off = 0 if ino is not None else st.st_size   # tout premier passage : on ignore l'historique
-    buckets = {}
-    with open(path, "rb") as f:
-        f.seek(off)
-        chunk = f.read(32 * 1024 * 1024)
-        end = chunk.rfind(b"\n") + 1
-        for line in chunk[:end].splitlines():
-            try:
-                d = json.loads(line)
-            except ValueError:
+        pass
+    for n in P.ingress_nodes():
+        key = f"stats_pos_{n['id']}"
+        rc, out = P.nsh(n["id"], f"stat -c '%i %s' {path}", timeout=20)
+        if rc or len(out.split()) != 2:
+            continue
+        ino, size = (int(x) for x in out.split())
+        saved = db.kv_get(key) or {}
+        off = _new_offset(saved, ino, size)
+        if size > off:
+            p = subprocess.run(["ssh", "-F", P.NODE_SSH, f"root@{n['wg_ip']}",
+                                f"tail -c +{off + 1} {path} | head -c {CHUNK}"], capture_output=True, timeout=60)
+            if p.returncode:
                 continue
-            app = d.get("hangar_app")
-            if not app:
-                continue
-            t = int(d.get("ts", time.time()) // 60 * 60)
-            b = buckets.setdefault((app, t), {"n": 0, "e4": 0, "e5": 0, "dur": [], "bytes": 0})
-            status = int(d.get("status") or 0)
-            b["n"] += 1
-            b["e4"] += 400 <= status < 500
-            b["e5"] += status >= 500
-            b["dur"].append(float(d.get("duration") or 0))
-            b["bytes"] += int(d.get("size") or 0)
+            off += _ingest(p.stdout, buckets)
+        db.kv_set(key, {"ino": ino, "off": off})
     for (app, t), b in buckets.items():
         db.x("""INSERT INTO stats_req(app, t, n, e4, e5, dur_sum, p95, bytes) VALUES(?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(app, t) DO UPDATE SET n = n + excluded.n, e4 = e4 + excluded.e4, e5 = e5 + excluded.e5,
                 dur_sum = dur_sum + excluded.dur_sum, p95 = max(p95, excluded.p95), bytes = bytes + excluded.bytes""",
              (app, t, b["n"], b["e4"], b["e5"], sum(b["dur"]), _p95(b["dur"]), b["bytes"]))
-    db.kv_set("stats_pos", {"ino": st.st_ino, "off": off + end})
     return len(buckets)
 
 
@@ -71,9 +100,9 @@ def _mem_mb(text):
 
 
 def collect_resources():
-    rc, out = P.run(["docker", "stats", "--no-stream", "--format", "{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"], timeout=30)
-    if rc:
-        return
+    res = P._on_nodes(lambda node: P.dk(node, "stats", "--no-stream", "--format",
+                                        "{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}", timeout=30))
+    out = "\n".join(o for rc, o in res.values() if rc == 0)
     t = int(time.time() // 60 * 60)
     for line in out.splitlines():
         parts = line.split("\t")

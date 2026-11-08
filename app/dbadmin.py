@@ -11,22 +11,23 @@ SAFETY = "/srv/backups/avant-import"
 
 
 def info(slug):
-    n = P.db_name(slug)
-    rc, out = P._psql(f"SELECT pg_database_size('{n}');")
+    n, node = P.db_name(slug), P.app_node(slug)
+    env = P.denv(node)
+    rc, out = P._psql(f"SELECT pg_database_size('{n}');", node)
     if rc:
         return None
     size = int(out.strip() or 0)
     q = ("SELECT schemaname || '.' || relname, n_live_tup, pg_total_relation_size(relid) "
          "FROM pg_stat_user_tables ORDER BY pg_total_relation_size(relid) DESC LIMIT 12;")
     p = subprocess.run(["docker", "exec", "-i", P.PG, "psql", "-U", "platform", "-d", n, "-qtA", "-F", "\t"],
-                       input=q, capture_output=True, text=True, timeout=30)
+                       input=q, capture_output=True, text=True, timeout=30, env=env)
     tables = []
     for line in p.stdout.splitlines():
         parts = line.split("\t")
         if len(parts) == 3:
             tables.append({"name": parts[0].removeprefix("public."), "rows": int(parts[1]), "size": int(parts[2])})
-    rc, cnt = P.run(["docker", "exec", P.PG, "psql", "-U", "platform", "-d", n, "-qtA", "-c",
-                     "SELECT count(*) FROM pg_stat_user_tables"], timeout=30)
+    rc, cnt = P.dk(node, "exec", P.PG, "psql", "-U", "platform", "-d", n, "-qtA", "-c",
+                     "SELECT count(*) FROM pg_stat_user_tables", timeout=30)
     return {"name": n, "size": size, "tables": tables, "count": int(cnt.strip() or 0) if rc == 0 else len(tables)}
 
 
@@ -34,7 +35,7 @@ def export_stream(slug):
     """Générateur : dump SQL compressé (gzip) en flux, sans fichier temporaire."""
     n = P.db_name(slug)
     proc = subprocess.Popen(["docker", "exec", P.PG, "pg_dump", "-U", "platform", "--no-owner", "--no-acl", n],
-                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=P.denv(P.app_node(slug)))
     comp = gzip.compress
     try:
         buf = []
@@ -67,16 +68,16 @@ def _safety_dump(slug):
 def _recreate(slug):
     """Vide la base : DROP + CREATE, propriétaire = rôle de l'appli."""
     n = P.db_name(slug)
-    rc, out = P._psql(f"DROP DATABASE IF EXISTS {n} WITH (FORCE); CREATE DATABASE {n} OWNER {n};")
+    rc, out = P._psql(f"DROP DATABASE IF EXISTS {n} WITH (FORCE); CREATE DATABASE {n} OWNER {n};", P.app_node(slug))
     if rc:
         raise RuntimeError("recréation de la base impossible : " + P.tail(out))
 
 
-def _psql_file(n, path, compressed):
+def _psql_file(n, path, compressed, node=None):
     """Joue un fichier SQL (éventuellement gzip) en tant que rôle de l'appli, décompressé au fil de l'eau."""
     proc = subprocess.Popen(["docker", "exec", "-i", P.PG, "psql", "-U", "platform", "-d", n, "-q",
                              "-v", "ON_ERROR_STOP=1", "-c", f"SET ROLE {n}", "-f", "-"],
-                            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=P.denv(node))
     opener = gzip.open if compressed else open
     try:
         with opener(path, "rb") as f:
@@ -95,13 +96,13 @@ def _psql_file(n, path, compressed):
 
 
 def _stop(slug):
-    P.run(["docker", "compose", "stop"], cwd=P.app_dir(slug), timeout=120)
+    P.dk(P.app_node(slug), "compose", "stop", cwd=P.app_dir(slug), timeout=120)
 
 
 def _start(a):
     if a["desired"] != "running":
         return True, "appli arrêtée, non redémarrée"
-    P.run(["docker", "compose", "up", "-d", "--no-build"], cwd=P.app_dir(a["slug"]), timeout=300)
+    P.dk(a["node"], "compose", "up", "-d", "--no-build", cwd=P.app_dir(a["slug"]), timeout=300)
     return P.wait_health(a)
 
 
@@ -118,10 +119,11 @@ def import_file(slug, path, kind):
             if kind == "dump":
                 with open(path, "rb") as f:
                     p = subprocess.run(["docker", "exec", "-i", P.PG, "pg_restore", "-U", "platform", "--no-owner",
-                                        "--no-acl", f"--role={n}", "-d", n], stdin=f, capture_output=True, timeout=3600)
+                                        "--no-acl", f"--role={n}", "-d", n], stdin=f, capture_output=True, timeout=3600,
+                                       env=P.denv(a["node"]))
                 err, code = p.stderr.decode(errors="replace"), p.returncode
             else:
-                code, err = _psql_file(n, path, kind == "sqlgz")
+                code, err = _psql_file(n, path, kind == "sqlgz", a["node"])
             if code:
                 raise RuntimeError(P.tail(err, 4) or f"code {code}")
             ok, detail = _start(a)
@@ -131,7 +133,7 @@ def import_file(slug, path, kind):
             P.log("error", slug, f"import de la base en échec : {e}. Restauration de l'état d'avant…")
             try:
                 _recreate(slug)
-                code, err = _psql_file(n, safe, True)
+                code, err = _psql_file(n, safe, True, a["node"])
                 if code:
                     raise RuntimeError(P.tail(err, 3))
                 P.log("warn", slug, "base remise dans son état d'avant l'import")
