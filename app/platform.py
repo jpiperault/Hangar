@@ -494,6 +494,8 @@ def apply_routing():
         push_routing(s, apps, files)
     from . import cloudflare      # noms publics chez Cloudflare (si un jeton d'API est enregistré)
     spawn(cloudflare.sync_quiet)
+    from . import security
+    spawn(security.reconcile)   # pare-feu des nœuds : 80/443 suivent les machines d'entrée des domaines directs
 
 
 def write_manifests():

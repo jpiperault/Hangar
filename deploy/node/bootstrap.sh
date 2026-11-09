@@ -61,7 +61,8 @@ systemctl restart caddy
 
 say "pare-feu"
 install -d /etc/nftables.d /etc/systemd/system/nftables.service.d
-install -m 0644 node.nft /etc/nftables.d/hangar-node.nft
+# pare-feu de départ ; ensuite celui de la page Sécurité de la console (posé à la fin de l'installation)
+[ -f /etc/nftables.d/hangar-node.nft ] || install -m 0644 node.nft /etc/nftables.d/hangar-node.nft
 install -m 0644 nftables-neutralise.conf /etc/systemd/system/nftables.service.d/hangar.conf
 cat > /etc/systemd/system/hangar-node-firewall.service <<'EOF'
 [Unit]
@@ -108,7 +109,8 @@ if [ -f console.authorized ]; then
   touch /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys
   k=$(awk '{print $(NF-1)}' console.authorized)
   grep -qF "from=\"10.88.0.1\" ssh-ed25519 $k" /root/.ssh/authorized_keys || cat console.authorized >> /root/.ssh/authorized_keys
-  if [ -d /etc/ssh/sshd_config.d ]; then
+  # une fois la sécurité gérée par la console, ce fichier est le sien : on n'y touche plus ici
+  if [ -d /etc/ssh/sshd_config.d ] && ! grep -qs 'Sécurité' /etc/ssh/sshd_config.d/00-hangar.conf; then
     printf '# Hangar : root par clé, seulement depuis la console (réseau privé)\nMatch Address 10.88.0.1\n    PermitRootLogin prohibit-password\n' \
       > /etc/ssh/sshd_config.d/00-hangar.conf
     install -d -m 0755 /run/sshd   # absent hors connexion quand SSH est lancé par socket : sshd -t échouerait

@@ -11,12 +11,12 @@ import time
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import access, alerts, backup, cloudflare, db, dbadmin, monitor, move, nodes, stats, system
+from . import access, alerts, backup, cloudflare, db, dbadmin, monitor, move, nodes, security, stats, system
 from . import domains as D
 from . import platform as P
 
@@ -103,10 +103,19 @@ def flash(request, msg, kind="ok"):
     request.session["flash"] = {"msg": msg, "kind": kind}
 
 
+def _sec_alerts():
+    """Nœuds avec un problème de sécurité (pastille du menu)."""
+    try:
+        return sum(1 for n in nodes.all_nodes() if n["id"] != nodes.LOCAL and n["state"] == "ok"
+                   and any(c["level"] == "error" for c in security.checks(n)))
+    except Exception:
+        return 0
+
+
 def render(request, name, status_code=200, **ctx):
     ctx.setdefault("title", "Hangar")
     ctx.update(flash=request.session.pop("flash", None), s=db.settings(),
-               user=request.session.get("user"), app_count=len(db.apps()))
+               user=request.session.get("user"), app_count=len(db.apps()), sec_alerts=_sec_alerts())
     return tpl.TemplateResponse(request, name, ctx, status_code=status_code)
 
 
@@ -1340,8 +1349,119 @@ async def nodes_remove(request: Request, node_id: str):
     return go("/nodes")
 
 
+# ---------------------------------------------------------------- sécurité des nœuds
+
+def _sec_values(p, f=None):
+    """Valeurs du formulaire de sécurité : la politique, ou ce qui a été tapé (en cas d'erreur)."""
+    v = security.to_form(p)
+    if f is not None:
+        for k in ("ssh_sources", "admin_keys", "extra", "ssh_port", "reboot"):
+            v[k] = f.get(k) or ""
+    return v
+
+
+def _sec_row(n):
+    st = security.state(n)
+    obs = st.get("obs") or {}
+    return {"n": n, "st": st, "own": bool(n.get("security")), "applying": security.applying(n),
+            "checks": security.checks(n), "banned": obs.get("banned") or [], "web": security.web_needed(n["id"]),
+            "pending": security.pending(n)}
+
+
+@app.get("/security")
+async def security_page(request: Request):
+    return await _security_render(request)
+
+
+async def _security_render(request, f=None, err=None):
+    rows = [await asyncio.to_thread(_sec_row, n) for n in nodes.all_nodes() if n["id"] != nodes.LOCAL]
+    busy = any(r["applying"] for r in rows)
+    return render(request, "security.html", title="Sécurité", nav="security", rows=rows,
+                  f=f or _sec_values(security.policy()), err=err, lan=", ".join(access.current()["nets"]),
+                  refresh=busy, status_code=400 if err else 200)
+
+
+@app.post("/security")
+async def security_save(request: Request):
+    f = await request.form()
+    p, err = security.parse_form(f)
+    if err:
+        flash(request, "Rien n'est appliqué : corrige les champs en rouge.", "error")
+        return await _security_render(request, f=_sec_values(p, f), err=err)
+    security.save_global(p, request.session.get("user"))
+    targets = [n["id"] for n in nodes.all_nodes() if n["id"] != nodes.LOCAL and not n.get("security")
+               and n["state"] == "ok"]
+    for nid in targets:
+        P.spawn(security.apply, nid, request.session.get("user"))
+    flash(request, "Politique enregistrée" + (f" : application sur {len(targets)} nœud(s), une à la fois." if targets
+                                               else ". Elle s'appliquera à chaque nœud installé."))
+    return go("/security")
+
+
+@app.post("/security/{node_id}/apply")
+async def security_apply(request: Request, node_id: str):
+    n = nodes.get(node_id)
+    if n and node_id != nodes.LOCAL:
+        P.spawn(security.apply, node_id, request.session.get("user"))
+        flash(request, f"Application sur {n['name']} lancée.")
+    return go("/security")
+
+
+@app.post("/security/{node_id}/collect")
+async def security_collect(request: Request, node_id: str):
+    n = nodes.get(node_id)
+    if n and node_id != nodes.LOCAL:
+        obs = await asyncio.to_thread(security.collect, node_id)
+        flash(request, "État relevé." if obs else "Nœud injoignable : état non relevé.", "ok" if obs else "error")
+    back = request.headers.get("referer") or "/security"
+    return go("/security" if "/security" in back else f"/nodes/{node_id}#securite")
+
+
+@app.get("/security/myip")
+async def security_myip(request: Request):
+    return JSONResponse({"ip": await asyncio.to_thread(security.public_ip)})
+
+
+@app.post("/nodes/{node_id}/security")
+async def node_security(request: Request, node_id: str):
+    n = nodes.get(node_id)
+    if not n or node_id == nodes.LOCAL:
+        return go("/nodes")
+    f = await request.form()
+    user = request.session.get("user")
+    if f.get("which") == "own":
+        p, err = security.parse_form(f)
+        if err:
+            flash(request, "Rien n'est appliqué : corrige les champs en rouge.", "error")
+            return await _node_render(request, node_id, sec_f=_sec_values(p, f), sec_err=err)
+        security.save_node(node_id, p, user)
+    else:
+        security.save_node(node_id, None, user)
+    if n["state"] == "ok":
+        P.spawn(security.apply, node_id, user)
+        flash(request, "Réglage enregistré, application en cours.")
+    else:
+        flash(request, "Réglage enregistré : il s'appliquera quand le nœud répondra.")
+    return go(f"/nodes/{node_id}#securite")
+
+
+@app.post("/nodes/{node_id}/unban")
+async def node_unban(request: Request, node_id: str):
+    f = await request.form()
+    try:
+        await asyncio.to_thread(security.unban, node_id, (f.get("ip") or "").strip())
+        flash(request, f"{f.get('ip')} débannie.")
+    except (ValueError, RuntimeError) as e:
+        flash(request, f"Débannissement impossible : {e}", "error")
+    return go(f.get("back") if f.get("back") == "/security" else f"/nodes/{node_id}#securite")
+
+
 @app.get("/nodes/{node_id}")
 async def node_page(request: Request, node_id: str):
+    return await _node_render(request, node_id)
+
+
+async def _node_render(request, node_id, sec_f=None, sec_err=None):
     n = nodes.get(node_id)
     if not n:
         return go("/nodes")
@@ -1358,6 +1478,14 @@ async def node_page(request: Request, node_id: str):
     ]
     events = db.q("SELECT * FROM events WHERE app = ? ORDER BY id DESC LIMIT 30", (f"nœud {node_id}",))
     hs = (await asyncio.to_thread(nodes.handshakes)).get(n.get("wg_pubkey") or "")
+    sec = None
+    if node_id != nodes.LOCAL:
+        sec = await asyncio.to_thread(_sec_row, n)
+        sec["f"] = sec_f or _sec_values(security.own_raw(n) or security.policy())
+        sec["err"] = sec_err
+        if sec_err:
+            sec["own"] = True
     return render(request, "node.html", title=n["name"], nav="nodes", n=n, se=se, rng=rng, ranges=list(stats.RANGES),
                   events=events, hs=hs, now=time.time(), apps=[a for a in db.apps() if a["node"] == node_id],
-                  refresh=n["state"] == "installing")
+                  sec=sec, refresh=n["state"] == "installing" or bool(sec and sec["applying"]),
+                  status_code=400 if sec_err else 200)

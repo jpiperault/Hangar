@@ -351,6 +351,11 @@ def install(node_id, sudo_password=""):
         _update(node_id, state="ok", last_seen=time.time())
         collect(get(node_id))
         _log(n, "ok", f"nœud prêt : réseau privé {n['wg_ip']}, Docker {out.strip()}")
+        from . import security
+        _log(n, "info", "sécurité : pare-feu, SSH, fail2ban, mises à jour (page Sécurité)")
+        ok, msg = security.apply(node_id, "installation")
+        if not ok:
+            _log(n, "warn", f"sécurité non appliquée : {msg}")
         try:
             P.apply_routing()          # Caddy du nœud : routes de toutes les applis
             P.sync_tunnel(node_id)     # connecteur du tunnel si le nœud reçoit le trafic

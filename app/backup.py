@@ -721,7 +721,7 @@ def create_archive(trigger="manuelle"):
         s = db.settings()
         rc, head = P.run(["git", "-C", "/opt/hangar", "log", "-1", "--format=%h"], timeout=10)
         manifest = {"format": 2, "created": time.time(), "hangar": head.strip(),
-                    "settings": {"domains": D.export()},
+                    "settings": {"domains": D.export(), "security": db.kv_get("security")},
                     "apps": [{"slug": a["slug"], "node": a["node"], "routes": D.export_routes(a["slug"]),
                               **{k: a[k] for k in APP_KEYS}} for a in apps]}
         fdp = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -956,7 +956,11 @@ def snapshot_to_archive(dest_id, snap):
 
 
 def apply_settings(st):
-    """Reprend les domaines d'une archive (ajoutés ou mis à jour ; ceux d'ici qui n'y sont pas restent)."""
+    """Reprend les domaines d'une archive (ajoutés ou mis à jour ; ceux d'ici qui n'y sont pas restent),
+    et la politique de sécurité des nœuds si elle y est (appliquée ensuite depuis la page Sécurité)."""
+    if isinstance((st or {}).get("security"), dict):
+        db.kv_set("security", st["security"])
+        P.log("info", "sécurité", "politique générale reprise de l'archive")
     doms = D.legacy_domains(st)
     if not doms:
         return

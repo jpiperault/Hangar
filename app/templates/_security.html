@@ -1,0 +1,98 @@
+{% macro checklist(cs) %}
+<ul class="seclist">
+{% for c in cs %}
+  <li class="sc-{{ c.level }}"><span class="pill {{ {'ok': 's-running', 'warn': 's-deploying', 'error': 's-error'}.get(c.level, 's-stopped') }}">{{ {'ok': 'OK', 'warn': 'À voir', 'error': 'Problème'}.get(c.level, 'Info') }}</span>
+    <span><strong>{{ c.label }}</strong> <span class="hint">{{ c.msg }}</span></span></li>
+{% endfor %}
+</ul>
+{% endmacro %}
+
+{% macro secform(f, err, prefix, port_hint) %}{% set err = err or {} %}
+<fieldset class="secgroup">
+  <legend>SSH sur l'adresse publique</legend>
+  <div class="seg" role="radiogroup" aria-label="Accès SSH public">
+    <label><input type="radio" name="ssh_mode" value="open" data-sm="{{ prefix }}" {{ 'checked' if f.ssh_mode == 'open' }}><span>Ouvert</span></label>
+    <label><input type="radio" name="ssh_mode" value="restricted" data-sm="{{ prefix }}" {{ 'checked' if f.ssh_mode == 'restricted' }}><span>Restreint à des adresses</span></label>
+    <label><input type="radio" name="ssh_mode" value="closed" data-sm="{{ prefix }}" {{ 'checked' if f.ssh_mode == 'closed' }}><span>Fermé</span></label>
+  </div>
+  <p class="hint" id="smh-{{ prefix }}-open">Tout Internet peut tenter de se connecter : chaque adresse est freinée au-delà de 10 connexions par minute et bannie par fail2ban après plusieurs échecs.</p>
+  <p class="hint" id="smh-{{ prefix }}-closed"><strong>Plus aucun accès SSH par l'adresse publique</strong>, ni pour toi ni pour la console : elle passe par le réseau privé. Garde la console d'urgence de ton hébergeur sous la main, et une réparation complète d'un nœud dont le réseau privé est coupé ne sera plus possible.</p>
+  <div class="field {{ 'bad' if err.ssh_sources }}" id="smh-{{ prefix }}-restricted"><label for="src-{{ prefix }}">Adresses autorisées</label>
+    <textarea id="src-{{ prefix }}" name="ssh_sources" spellcheck="false" style="min-height:64px" placeholder="203.0.113.7&#10;2001:db8::/48">{{ f.ssh_sources }}</textarea>
+    <span class="hint">Une par ligne (IPv4 ou IPv6, adresse ou réseau). Mets-y l'adresse publique de ta box : depuis ailleurs, plus d'accès.
+      <button type="button" class="btn sm" data-myip="src-{{ prefix }}">Ajouter l'adresse publique de la console</button></span>
+    {% if err.ssh_sources %}<span class="hint lv-error">{{ err.ssh_sources }}</span>{% endif %}</div>
+  <div class="row2">
+    <div class="field {{ 'bad' if err.ssh_port }}"><label for="port-{{ prefix }}">Port SSH public</label>
+      <input id="port-{{ prefix }}" name="ssh_port" type="number" min="1" max="65535" value="{{ f.ssh_port }}" placeholder="{{ port_hint }}">
+      <span class="hint">{% if err.ssh_port %}<span class="lv-error">{{ err.ssh_port }}</span>{% else %}Vide : le port de l'installation. Un autre port réduit le bruit des robots ; le 22 reste ouvert pour la console, mais seulement par le réseau privé.{% endif %}</span></div>
+    <div class="field"><label for="root-{{ prefix }}">Connexion root</label>
+      <select id="root-{{ prefix }}" name="ssh_root"><option value="no" {{ 'selected' if not f.ssh_root }}>Interdite (recommandé)</option><option value="key" {{ 'selected' if f.ssh_root }}>Par clé seulement</option></select>
+      <span class="hint">Toujours permise par clé si le nœud a été installé avec root. La console garde root par clé, depuis le réseau privé.</span></div>
+  </div>
+  <div class="field {{ 'bad' if err.ssh_auth }}"><span class="flabel">Authentification</span>
+    <div class="seg" role="radiogroup" aria-label="Authentification SSH">
+      <label><input type="radio" name="ssh_auth" value="keys" {{ 'checked' if not f.ssh_passwords }}><span>Clés seulement (recommandé)</span></label>
+      <label><input type="radio" name="ssh_auth" value="passwords" {{ 'checked' if f.ssh_passwords }}><span>Clés et mots de passe</span></label>
+    </div>
+    {% if err.ssh_auth %}<span class="hint lv-error">{{ err.ssh_auth }}</span>
+    <label class="check"><input type="checkbox" name="keys_ok"><span>Ma clé est déjà en place sur les nœuds</span></label>{% endif %}</div>
+  <div class="field {{ 'bad' if err.admin_keys }}"><label for="keys-{{ prefix }}">Clés SSH d'administration</label>
+    <textarea id="keys-{{ prefix }}" name="admin_keys" spellcheck="false" style="min-height:64px" placeholder="ssh-ed25519 AAAA… moi@pc">{{ f.admin_keys }}</textarea>
+    <span class="hint">{% if err.admin_keys %}<span class="lv-error">{{ err.admin_keys }}</span>{% else %}Clés publiques ajoutées au compte d'installation de chaque nœud (celui de la colonne « SSH »). Contenu de <code>~/.ssh/id_ed25519.pub</code> sur ton ordinateur. Les clés déjà présentes restent.{% endif %}</span></div>
+</fieldset>
+
+<fieldset class="secgroup">
+  <legend>Anti-force brute (fail2ban)</legend>
+  <label class="check"><input type="checkbox" name="f2b" {{ 'checked' if f.f2b }}><span>Bannir les adresses qui échouent à se connecter en SSH</span></label>
+  <div class="row3">
+    <div class="field {{ 'bad' if err.f2b_maxretry }}"><label for="mr-{{ prefix }}">Échecs permis</label><input id="mr-{{ prefix }}" name="f2b_maxretry" type="number" min="2" max="20" value="{{ f.f2b_maxretry }}"></div>
+    <div class="field {{ 'bad' if err.f2b_findtime }}"><label for="ft-{{ prefix }}">En (minutes)</label><input id="ft-{{ prefix }}" name="f2b_findtime" type="number" min="1" max="1440" value="{{ f.f2b_findtime }}"></div>
+    <div class="field {{ 'bad' if err.f2b_bantime }}"><label for="bt-{{ prefix }}">Bannie pour (minutes)</label><input id="bt-{{ prefix }}" name="f2b_bantime" type="number" min="1" max="43200" value="{{ f.f2b_bantime }}"></div>
+  </div>
+  <label class="check"><input type="checkbox" name="f2b_increment" {{ 'checked' if f.f2b_increment }}><span>Durée doublée à chaque récidive (jusqu'à 4 semaines)</span></label>
+  <span class="hint">Le réseau privé{{ ' et les adresses autorisées' if f.ssh_mode == 'restricted' }} ne sont jamais bannis.</span>
+</fieldset>
+
+<fieldset class="secgroup">
+  <legend>Mises à jour</legend>
+  <label class="check"><input type="checkbox" name="updates" {{ 'checked' if f.updates }}><span>Installer chaque jour les mises à jour de sécurité de Debian</span></label>
+  <div class="field {{ 'bad' if err.reboot }}">
+    <label class="check"><input type="checkbox" name="reboot_on" {{ 'checked' if f.reboot }}><span>Redémarrer tout seul quand une mise à jour l'exige, à</span>
+      <input name="reboot" value="{{ f.reboot or '04:30' }}" style="width:6em" pattern="[0-2][0-9]:[0-5][0-9]" aria-label="Heure du redémarrage"></label>
+    <span class="hint">{% if err.reboot %}<span class="lv-error">{{ err.reboot }}</span>{% else %}Les applis du nœud sont coupées une à deux minutes. Docker, Caddy et cloudflared se mettent à jour depuis la console, pas automatiquement.{% endif %}</span></div>
+</fieldset>
+
+<fieldset class="secgroup">
+  <legend>Ports ouverts en plus</legend>
+  <div class="field {{ 'bad' if err.extra }}"><label for="ex-{{ prefix }}">Ouvertures supplémentaires</label>
+    <textarea id="ex-{{ prefix }}" name="extra" spellcheck="false" style="min-height:52px" placeholder="tcp 25565&#10;udp 27015-27020 depuis 203.0.113.0/24">{{ f.extra }}</textarea>
+    <span class="hint">{% if err.extra %}<span class="lv-error">{{ err.extra }}</span>{% else %}Rarement utile : les applis passent par Caddy. Le pare-feu ouvre déjà le réseau privé (WireGuard, UDP 51820), SSH selon le réglage ci-dessus, et 80/443 sur les machines d'entrée d'un domaine en mode direct.{% endif %}</span></div>
+</fieldset>
+{% endmacro %}
+
+{% macro secscript() %}
+<script>
+(function () {
+  function sync(prefix) {
+    var r = document.querySelector('input[data-sm="' + prefix + '"]:checked');
+    ['open', 'restricted', 'closed'].forEach(function (m) {
+      var el = document.getElementById('smh-' + prefix + '-' + m); if (el) el.hidden = !r || r.value !== m;
+    });
+  }
+  document.querySelectorAll('input[data-sm]').forEach(function (r) {
+    r.addEventListener('change', function () { sync(r.dataset.sm); }); sync(r.dataset.sm);
+  });
+  document.querySelectorAll('[data-myip]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      b.disabled = true;
+      fetch('/security/myip').then(function (r) { return r.json(); }).then(function (d) {
+        var ta = document.getElementById(b.dataset.myip);
+        if (d.ip && ta.value.split(/\s+/).indexOf(d.ip) < 0) ta.value = (ta.value.trim() ? ta.value.trim() + '\n' : '') + d.ip;
+        if (!d.ip) alert("Adresse publique introuvable (pas d'accès à Internet ?)");
+      }).finally(function () { b.disabled = false; });
+    });
+  });
+})();
+</script>
+{% endmacro %}

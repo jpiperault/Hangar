@@ -9,7 +9,7 @@ import time
 import urllib.error
 import urllib.request
 
-from . import alerts, backup, db, nodes, registry, stats, system
+from . import alerts, backup, db, nodes, registry, security, stats, system
 from . import platform as P
 
 _fails = {}            # slug -> échecs consécutifs
@@ -156,6 +156,7 @@ def _loop():
                 P.log("warn", "système", f"surveillance {name} : {e}")
         _every("purge", 3600, stats.purge)
         _every("purge_nodes", 3600, nodes.purge)
+        _every("security", 1800, security.collect_all)
         _every("versions", 6 * 3600, check_versions)
         _every("updates", 24 * 3600, check_updates)
         _every("backup_age", 3600, check_backup_age)

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_meter.html" import meter %}
+{% from "_security.html" import secform, checklist, secscript %}
 {% block main %}{% set i = n.info or {} %}
 <div class="bar">
   <div><div class="crumb"><a href="/nodes">Nœuds</a> /</div><h1>{{ n.name }}</h1><span class="hint">{{ n.id }} · {{ n.address }}{% if n.id != 'local' %} · SSH {{ n.ssh_user or 'root' }}, port {{ n.ssh_port }} · réseau privé {{ n.wg_ip }}{% endif %}</span></div>
@@ -36,6 +37,28 @@
       {% if n.id != 'local' %}<dl class="facts"><dt>Lien privé</dt><dd>{{ ('vu ' ~ (now - hs) | dur ~ ' plus tôt') if hs else 'jamais établi' }}</dd></dl>{% endif %}
     </section>
     {% if n.id != 'local' %}
+    <form class="panel" method="post" action="/nodes/{{ n.id }}/security" id="securite" autocomplete="off" style="display:flex;flex-direction:column;gap:12px">
+      <div class="bar" style="margin:0"><h2 style="margin:0">Sécurité</h2>{% if sec.applying %}<span class="pill s-deploying">application…</span>{% endif %}</div>
+      {{ checklist(sec.checks) }}
+      {% if sec.banned %}<details><summary class="hint">{{ sec.banned | length }} adresse{{ 's' if sec.banned | length > 1 }} bannie{{ 's' if sec.banned | length > 1 }}</summary>
+        {% for ip in sec.banned[:50] %}<div class="banrow"><span class="mono">{{ ip }}</span><button class="btn sm" formaction="/nodes/{{ n.id }}/unban" formnovalidate name="ip" value="{{ ip }}">Débannir</button></div>{% endfor %}</details>{% endif %}
+      <div class="seg" role="radiogroup" aria-label="Politique du nœud">
+        <label><input type="radio" name="which" value="global" {{ 'checked' if not sec.own }} data-own="1"><span>Politique générale</span></label>
+        <label><input type="radio" name="which" value="own" {{ 'checked' if sec.own }} data-own="1"><span>Réglages propres à ce nœud</span></label>
+      </div>
+      <p class="hint" id="own-off">Les réglages de la page <a href="/security">Sécurité</a> s'appliquent à ce nœud.</p>
+      <div id="own-on" style="display:flex;flex-direction:column;gap:12px">{{ secform(sec.f, sec.err, 'n', n.ssh_port) }}</div>
+      <div class="acts" style="justify-content:flex-start">
+        <button class="btn primary sm" {{ 'disabled' if sec.applying }}>Enregistrer et appliquer</button>
+        <button class="btn sm" formaction="/security/{{ n.id }}/collect" formnovalidate>Relever l'état</button>
+      </div>
+    </form>
+    {{ secscript() }}
+    <script>
+    (function () { function s() { var o = document.querySelector('input[data-own]:checked').value === 'own';
+      document.getElementById('own-on').hidden = !o; document.getElementById('own-off').hidden = o; }
+      document.querySelectorAll('input[data-own]').forEach(function (r) { r.addEventListener('change', s); }); s(); })();
+    </script>
     <section class="panel">
       <h2>Maintenance</h2>
       <form method="post" action="/nodes/{{ n.id }}/retry" autocomplete="off">

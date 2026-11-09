@@ -155,3 +155,11 @@ Le mot de passe `sudo` ne sert que pendant l'installation. Il passe par l'entré
 L'accès root par l'adresse publique reste tel que l'hébergeur l'a réglé, généralement fermé. Les réparations (« Réinstaller / réparer ») passent par le réseau privé et ne demandent donc pas de mot de passe tant qu'il fonctionne.
 
 Si `sshd_config` contient une liste `AllowUsers`, ajoute-y `root@10.88.0.1`. Sinon l'installation s'arrête avec un message qui l'indique.
+
+### Sécurité du nœud
+
+À la fin de l'installation, la console applique la politique de la page **Sécurité** : pare-feu, SSH, fail2ban, mises à jour. Par défaut, SSH reste ouvert sur le port d'installation avec les mots de passe permis : rien ne change pour ta propre connexion.
+
+Pour durcir : ajoute ta clé publique dans **Clés SSH d'administration**, choisis **Clés seulement**, et si possible **Restreint à des adresses** avec l'adresse publique de ta box. Chaque changement revient tout seul en 2 minutes si la console ne peut plus se connecter au nœud.
+
+La console passe toujours par le réseau privé : même avec SSH fermé sur l'adresse publique, elle continue de piloter le nœud. Avant de fermer, vérifie que tu as accès à la console d'urgence de ton hébergeur. Les commandes pour débloquer un nœud sont sur la page Sécurité.
