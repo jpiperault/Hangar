@@ -149,7 +149,7 @@
     <form method="post" action="/apps/{{ a.slug }}/rollback"><button class="btn warn sm" {{ 'disabled' if a.status == 'deploying' }}>Revenir à {{ a.prev_version }}</button></form>
     {% endif %}
     <span class="hint">Avant de basculer, la console attend que {{ a.health_path }} réponde. En cas d'échec, la version actuelle est remise en ligne.{% if a.source == 'image' %} Les nouvelles versions (tags x.y.z) sont recherchées toutes les 6 h{% if a.latest_checked %}, dernière fois {{ a.latest_checked | ago }}{% endif %}.{% endif %}</span>
-    {% if a.source == 'image' %}<form method="post" action="/apps/{{ a.slug }}/versions/check"><button class="btn sm link">Vérifier maintenant</button></form>{% endif %}
+    {% if a.source == 'image' %}<form method="post" action="/apps/{{ a.slug }}/versions/check"><button class="btn sm primary">Vérifier maintenant</button></form>{% endif %}
   </section>
 
   {% if a.db %}
