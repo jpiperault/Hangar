@@ -81,9 +81,11 @@ async def guard(request: Request, call_next):
         return PlainTextResponse("Console réservée au réseau local.", status_code=403)
     if request.method not in ("GET", "HEAD", "OPTIONS"):
         # formulaires : refusés s'ils viennent d'un autre site (en plus du cookie SameSite=Strict)
-        origin = request.headers.get("origin")
-        if request.headers.get("sec-fetch-site") == "cross-site" or (
-                origin and origin != f"{request.url.scheme}://{request.url.netloc}"):
+        # Sec-Fetch-Site d'abord (envoyé par tous les navigateurs récents) ; sinon l'en-tête Origin.
+        # Avec Referrer-Policy no-referrer, Chrome envoie « Origin: null » même pour la page elle-même.
+        sfs, origin = request.headers.get("sec-fetch-site"), request.headers.get("origin")
+        if (sfs and sfs not in ("same-origin", "none")) or (
+                not sfs and origin not in (None, "null", f"{request.url.scheme}://{request.url.netloc}")):
             return PlainTextResponse("Requête d'un autre site refusée.", status_code=403)
     request.state.nonce = secrets.token_urlsafe(16)
     if not request.url.path.startswith(("/login", "/static")):
@@ -100,7 +102,7 @@ async def guard(request: Request, call_next):
             db.x("UPDATE sessions SET seen = ? WHERE id = ?", (now, sid))
     response = await call_next(request)
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Referrer-Policy"] = "same-origin"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
     response.headers["Content-Security-Policy"] = (
