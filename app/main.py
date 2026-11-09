@@ -1363,9 +1363,27 @@ def _sec_values(p, f=None):
 def _sec_row(n):
     st = security.state(n)
     obs = st.get("obs") or {}
+    cs = security.checks(n)
+    lv, count = security.level(cs)
     return {"n": n, "st": st, "own": bool(n.get("security")), "applying": security.applying(n),
-            "checks": security.checks(n), "banned": obs.get("banned") or [], "web": security.web_needed(n["id"]),
-            "pending": security.pending(n)}
+            "checks": cs, "level": lv, "count": count, "banned": obs.get("banned") or [],
+            "web": security.web_needed(n["id"]), "pending": security.pending(n),
+            "summary": security.summary(security.node_policy(n)[0])}
+
+
+JOURNAL_CATS = [("all", "Tout"), ("sec", "Sécurité"), ("install", "Installation"), ("route", "Tunnel et routage"),
+                ("other", "Autres")]
+
+
+def _event_cat(msg):
+    m = msg.lower()
+    if m.startswith("sécurité") or "bannie" in m or "redémarrage" in m:
+        return "sec"
+    if any(w in m for w in ("installation", "réparation", "préparation", "nœud prêt", "réseau privé", "wireguard")):
+        return "install"
+    if any(w in m for w in ("tunnel", "caddy", "trafic", "route")):
+        return "route"
+    return "other"
 
 
 @app.get("/security")
@@ -1378,6 +1396,7 @@ async def _security_render(request, f=None, err=None):
     busy = any(r["applying"] for r in rows)
     return render(request, "security.html", title="Sécurité", nav="security", rows=rows,
                   f=f or _sec_values(security.policy()), err=err, lan=", ".join(access.current()["nets"]),
+                  gsum=security.summary(security.policy()),
                   refresh=busy, status_code=400 if err else 200)
 
 
@@ -1414,7 +1433,7 @@ async def security_collect(request: Request, node_id: str):
         obs = await asyncio.to_thread(security.collect, node_id)
         flash(request, "État relevé." if obs else "Nœud injoignable : état non relevé.", "ok" if obs else "error")
     back = request.headers.get("referer") or "/security"
-    return go("/security" if "/security" in back else f"/nodes/{node_id}#securite")
+    return go("/security" if back.split("#")[0].rstrip("/").endswith("/security") else f"/nodes/{node_id}#securite")
 
 
 @app.get("/security/myip")
@@ -1442,6 +1461,16 @@ async def node_security(request: Request, node_id: str):
         flash(request, "Réglage enregistré, application en cours.")
     else:
         flash(request, "Réglage enregistré : il s'appliquera quand le nœud répondra.")
+    return go(f"/nodes/{node_id}#securite")
+
+
+@app.post("/nodes/{node_id}/reboot")
+async def node_reboot(request: Request, node_id: str):
+    try:
+        await asyncio.to_thread(security.reboot, node_id, request.session.get("user"))
+        flash(request, "Redémarrage lancé : le nœud et ses applis reviennent en une à deux minutes.")
+    except (ValueError, RuntimeError) as e:
+        flash(request, f"Redémarrage impossible : {e}", "error")
     return go(f"/nodes/{node_id}#securite")
 
 
@@ -1476,7 +1505,9 @@ async def _node_render(request, node_id, sec_f=None, sec_err=None):
         {"title": "Mémoire utilisée", "sub": "max sur l'intervalle (Mo)", "unit": "Mo", "kind": "line", "values": se["mem"],
          "limit": round(mem_total) or None, "limitLabel": f"total {mem_total:.0f} Mo"},
     ]
-    events = db.q("SELECT * FROM events WHERE app = ? ORDER BY id DESC LIMIT 30", (f"nœud {node_id}",))
+    events = db.q("SELECT * FROM events WHERE app = ? ORDER BY id DESC LIMIT 150", (f"nœud {node_id}",))
+    for e in events:
+        e["cat"] = _event_cat(e["msg"])
     hs = (await asyncio.to_thread(nodes.handshakes)).get(n.get("wg_pubkey") or "")
     sec = None
     if node_id != nodes.LOCAL:
@@ -1487,5 +1518,5 @@ async def _node_render(request, node_id, sec_f=None, sec_err=None):
             sec["own"] = True
     return render(request, "node.html", title=n["name"], nav="nodes", n=n, se=se, rng=rng, ranges=list(stats.RANGES),
                   events=events, hs=hs, now=time.time(), apps=[a for a in db.apps() if a["node"] == node_id],
-                  sec=sec, refresh=n["state"] == "installing" or bool(sec and sec["applying"]),
+                  sec=sec, cats=JOURNAL_CATS, refresh=n["state"] == "installing" or bool(sec and sec["applying"]),
                   status_code=400 if sec_err else 200)

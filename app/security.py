@@ -178,6 +178,57 @@ def save_node(node_id, p, by):
     P.log("info", f"nœud {node_id}", f"sécurité : {'réglages propres' if p else 'suit la politique générale'} ({by})")
 
 
+def summary(p):
+    """Résumé lisible d'une politique : [(libellé, valeur)]. Port vide : celui de chaque nœud."""
+    port = f"port {p['ssh_port']}" if p.get("ssh_port") else "port de chaque nœud"
+    src = p["ssh_sources"]
+    mode = {"open": "ouvert à tout Internet",
+            "restricted": "restreint à " + ", ".join(src[:2]) + (f" (+{len(src) - 2})" if len(src) > 2 else ""),
+            "closed": "fermé, réseau privé seulement"}[p["ssh_mode"]]
+    if p["f2b"]:
+        f2b = (f"{p['f2b_maxretry']} échecs en {p['f2b_findtime']} min → banni {p['f2b_bantime']} min"
+               + (", doublé si récidive" if p["f2b_increment"] else ""))
+    else:
+        f2b = "désactivé"
+    if not p["updates"]:
+        upd = "automatiques désactivées"
+    else:
+        upd = "sécurité chaque jour, " + (f"redémarrage auto à {p['reboot']}" if p["reboot"] else "sans redémarrage auto")
+    extra = []
+    for x in p["extra"]:
+        rng = f"{x['from']}" + (f"-{x['to']}" if x["to"] != x["from"] else "")
+        extra.append(f"{x['proto']} {rng}" + (" (filtré)" if x["src"] else ""))
+    n = len(p["admin_keys"])
+    return [("SSH public", f"{mode} · {port}"),
+            ("Connexion", ("clés seulement" if not p["ssh_passwords"] else "clés et mots de passe")
+             + (", root par clé" if p["ssh_root"] else ", root interdit")),
+            ("Clés d'admin", f"{n} clé{'s' if n > 1 else ''}" if n else "aucune"),
+            ("Fail2ban", f2b), ("Mises à jour", upd), ("Ports en plus", ", ".join(extra) or "aucun")]
+
+
+def level(cs):
+    """Bilan d'une liste de contrôle : (niveau le plus grave, nombre de points non OK)."""
+    bad = [c for c in cs if c["level"] in ("warn", "error")]
+    lv = "error" if any(c["level"] == "error" for c in bad) else "warn" if bad else "ok"
+    return lv, len(bad)
+
+
+def reboot(node_id, by):
+    n = N.get(node_id)
+    if not n or node_id == N.LOCAL or n["state"] != "ok":
+        raise ValueError("Nœud injoignable.")
+    rc, out = N.ssh(n, "systemd-run --on-active=5 --quiet systemctl reboot", timeout=20)
+    if rc:
+        raise RuntimeError(P.tail(out, 2))
+    N._fails[node_id] = -3    # pas d'alerte « injoignable » pendant le redémarrage (environ 4 min de marge)
+    P.log("warn", f"nœud {node_id}", f"redémarrage demandé par {by}")
+
+    def later():
+        time.sleep(150)
+        collect(node_id)
+    P.spawn(later)
+
+
 # ---------------------------------------------------------------- rendu des fichiers d'un nœud
 
 def web_needed(node_id):

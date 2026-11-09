@@ -1,71 +1,123 @@
 {% extends "base.html" %}
 {% from "_meter.html" import meter %}
-{% from "_security.html" import secform, checklist, secscript %}
-{% block main %}{% set i = n.info or {} %}
+{% from "_security.html" import secform, statetable, summary, badge, secscript %}
+{% block main %}{% set i = n.info or {} %}{% set remote = n.id != 'local' %}
 <div class="bar">
-  <div><div class="crumb"><a href="/nodes">Nœuds</a> /</div><h1>{{ n.name }}</h1><span class="hint">{{ n.id }} · {{ n.address }}{% if n.id != 'local' %} · SSH {{ n.ssh_user or 'root' }}, port {{ n.ssh_port }} · réseau privé {{ n.wg_ip }}{% endif %}</span></div>
-  <nav class="seg" aria-label="Période">{% for r in ranges %}<a class="segbtn {{ 'on' if rng == r }}" href="?r={{ r }}">{{ r }}</a>{% endfor %}</nav>
+  <div><div class="crumb"><a href="/nodes">Nœuds</a> /</div><h1>{{ n.name }}</h1><span class="hint">{{ n.id }} · {{ n.address }}{% if remote %} · SSH {{ n.ssh_user or 'root' }}, port {{ n.ssh_port }} · réseau privé {{ n.wg_ip }}{% endif %}</span></div>
+  {% if sec %}<a href="#securite" data-tablink="securite" style="text-decoration:none">{{ badge(sec.level, sec.count) }}</a>{% endif %}
 </div>
 {% if n.state == 'error' %}<div class="flash error" role="status">{{ n.error }}</div>{% endif %}
-{% if i.mem_total %}
-<section class="tiles">
-  <div class="tile"><span class="tl">Processeur</span><span class="tv">{{ '%.0f' % (i.cpu or 0) }} %</span><span class="hint">charge {{ i.load | map('round', 2) | join(' · ') }} ({{ i.cores }} cœur{{ 's' if i.cores > 1 }})</span>{{ meter(i.cpu or 0, 100) }}</div>
-  <div class="tile"><span class="tl">Mémoire</span><span class="tv">{{ '%.0f' % i.mem }} <small>/ {{ '%.0f' % i.mem_total }} Mo</small></span>{{ meter(i.mem, i.mem_total) }}</div>
-  <div class="tile"><span class="tl">Disque</span><span class="tv">{{ '%.1f' % i.disk }} <small>/ {{ '%.0f' % i.disk_total }} Go</small></span>{{ meter(i.disk, i.disk_total) }}</div>
-  <div class="tile"><span class="tl">Allumé depuis</span><span class="tv">{{ i.uptime | dur }}</span><span class="hint">{{ i.os }}</span></div>
-  <div class="tile"><span class="tl">Docker</span><span class="tv">{{ i.docker or '—' }}</span><span class="hint">{{ i.containers }} conteneur{{ 's' if i.containers != 1 }}{% if n.id != 'local' and i.latency_ms is not none %} · ping {{ i.latency_ms }} ms{% endif %}</span></div>
-</section>
-{% endif %}
-<section class="panel" style="margin-top:20px">
-  <h2>Ressources</h2>
-  <div class="charts" id="charts"></div>
-  <details><summary class="hint">Voir les données en tableau</summary><div class="tablebox" id="stattable"></div></details>
-</section>
-<script id="stdata" type="application/json">{{ se | tojson }}</script>
-<script src="/static/charts.js" defer></script>
 
-<div class="cols" style="margin-top:20px">
-  <section class="panel">
-    <h2>Journal du nœud</h2>
-    {% if events %}<ul class="events">{% for e in events %}<li><time>{{ e.ts | when }}</time><span class="lv-{{ e.level }}">{{ e.msg }}</span></li>{% endfor %}</ul>
-    {% else %}<p class="hint">Aucun événement.</p>{% endif %}
+<nav class="tabs" aria-label="Sections du nœud">
+  <a href="#apercu" data-tab="apercu">Vue d'ensemble</a>
+  {% if remote %}<a href="#securite" data-tab="securite">Sécurité</a>{% endif %}
+  <a href="#journal" data-tab="journal">Journal</a>
+  {% if remote %}<a href="#maintenance" data-tab="maintenance">Maintenance</a>{% endif %}
+</nav>
+
+{# ------------------------------------------------------------ vue d'ensemble #}
+<div data-pane="apercu">
+  {% if i.mem_total %}
+  <section class="tiles">
+    <div class="tile"><span class="tl">Processeur</span><span class="tv">{{ '%.0f' % (i.cpu or 0) }} %</span><span class="hint">charge {{ i.load | map('round', 2) | join(' · ') }} ({{ i.cores }} cœur{{ 's' if i.cores > 1 }})</span>{{ meter(i.cpu or 0, 100) }}</div>
+    <div class="tile"><span class="tl">Mémoire</span><span class="tv">{{ '%.0f' % i.mem }} <small>/ {{ '%.0f' % i.mem_total }} Mo</small></span>{{ meter(i.mem, i.mem_total) }}</div>
+    <div class="tile"><span class="tl">Disque</span><span class="tv">{{ '%.1f' % i.disk }} <small>/ {{ '%.0f' % i.disk_total }} Go</small></span>{{ meter(i.disk, i.disk_total) }}</div>
+    <div class="tile"><span class="tl">Allumé depuis</span><span class="tv">{{ i.uptime | dur }}</span><span class="hint">{{ i.os }}</span></div>
+    <div class="tile"><span class="tl">Docker</span><span class="tv">{{ i.docker or '—' }}</span><span class="hint">{{ i.containers }} conteneur{{ 's' if i.containers != 1 }}{% if remote and i.latency_ms is not none %} · ping {{ i.latency_ms }} ms{% endif %}</span></div>
   </section>
-  <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+  {% endif %}
+  <div class="cols" style="margin-top:20px">
+    <section class="panel">
+      <div class="bar" style="margin:0"><h2 style="margin:0">Ressources</h2>
+        <nav class="seg" aria-label="Période">{% for r in ranges %}<a class="segbtn {{ 'on' if rng == r }}" href="?r={{ r }}">{{ r }}</a>{% endfor %}</nav></div>
+      <div class="charts" id="charts"></div>
+      <details><summary class="hint">Voir les données en tableau</summary><div class="tablebox" id="stattable"></div></details>
+    </section>
     <section class="panel">
       <h2>Applications</h2>
       {% for a in apps %}<div class="cert"><a href="/apps/{{ a.slug }}">{{ a.name }}</a><span class="hint">{{ a.mem_mb }} Mo réservés</span></div>{% else %}<p class="hint">Aucune appli sur ce nœud.</p>{% endfor %}
-      {% if n.id != 'local' %}<dl class="facts"><dt>Lien privé</dt><dd>{{ ('vu ' ~ (now - hs) | dur ~ ' plus tôt') if hs else 'jamais établi' }}</dd></dl>{% endif %}
+      {% if remote %}<dl class="facts"><dt>Lien privé</dt><dd>{{ ('vu ' ~ (now - hs) | dur ~ ' plus tôt') if hs else 'jamais établi' }}</dd></dl>{% endif %}
     </section>
-    {% if n.id != 'local' %}
-    <form class="panel" method="post" action="/nodes/{{ n.id }}/security" id="securite" autocomplete="off" style="display:flex;flex-direction:column;gap:12px">
-      <div class="bar" style="margin:0"><h2 style="margin:0">Sécurité</h2>{% if sec.applying %}<span class="pill s-deploying">application…</span>{% endif %}</div>
-      {{ checklist(sec.checks) }}
-      {% if sec.banned %}<details><summary class="hint">{{ sec.banned | length }} adresse{{ 's' if sec.banned | length > 1 }} bannie{{ 's' if sec.banned | length > 1 }}</summary>
-        {% for ip in sec.banned[:50] %}<div class="banrow"><span class="mono">{{ ip }}</span><button class="btn sm" formaction="/nodes/{{ n.id }}/unban" formnovalidate name="ip" value="{{ ip }}">Débannir</button></div>{% endfor %}</details>{% endif %}
-      <div class="seg" role="radiogroup" aria-label="Politique du nœud">
-        <label><input type="radio" name="which" value="global" {{ 'checked' if not sec.own }} data-own="1"><span>Politique générale</span></label>
-        <label><input type="radio" name="which" value="own" {{ 'checked' if sec.own }} data-own="1"><span>Réglages propres à ce nœud</span></label>
-      </div>
-      <p class="hint" id="own-off">Les réglages de la page <a href="/security">Sécurité</a> s'appliquent à ce nœud.</p>
-      <div id="own-on" style="display:flex;flex-direction:column;gap:12px">{{ secform(sec.f, sec.err, 'n', n.ssh_port) }}</div>
+  </div>
+  <script id="stdata" type="application/json">{{ se | tojson }}</script>
+  <script src="/static/charts.js" defer></script>
+</div>
+
+{# ------------------------------------------------------------ sécurité #}
+{% if remote %}
+<div data-pane="securite" style="display:flex;flex-direction:column;gap:20px">
+  <section class="panel">
+    <div class="bar" style="margin:0 0 6px">
+      <h2 style="margin:0">État</h2>
+      <span class="acts" style="gap:10px;align-items:center">
+        {% if sec.applying %}<span class="pill s-deploying">application…</span>{% endif %}
+        <span class="hint">{{ ('relevé ' ~ (sec.st.obs.ts | ago)) if sec.st.obs else 'jamais relevé' }}</span>
+        <form method="post" action="/security/{{ n.id }}/collect"><button class="btn sm" {{ 'disabled' if n.state != 'ok' }}>Relever</button></form>
+      </span>
+    </div>
+    {% if n.state != 'ok' %}<p class="hint lv-error">Nœud {{ 'injoignable' if n.state == 'offline' else 'pas prêt' }} : le réglage s'appliquera quand il répondra.</p>{% endif %}
+    {{ statetable(sec.checks, n, sec.banned) }}
+  </section>
+
+  <section class="panel">
+    <div class="bar" style="margin:0 0 12px">
+      <h2 style="margin:0">Réglages <span class="pill s-stopped" style="margin-left:6px;vertical-align:middle">{{ 'propres à ce nœud' if sec.own else 'politique générale' }}</span></h2>
+      <span class="acts" style="gap:8px" data-editlabel="secedit" {{ 'hidden' if sec.err }}>
+        {% if sec.own %}
+        <form method="post" action="/nodes/{{ n.id }}/security" onsubmit="return confirm('Remplacer les réglages propres de {{ n.name }} par la politique générale ?')"><input type="hidden" name="which" value="global"><button class="btn sm">Revenir à la politique générale</button></form>
+        <button type="button" class="btn sm primary" data-edit="secedit">Modifier</button>
+        {% else %}
+        <a class="btn sm" href="/security">Modifier la politique générale</a>
+        <button type="button" class="btn sm" data-edit="secedit">Réglages propres à ce nœud</button>
+        {% endif %}
+      </span>
+    </div>
+    <div data-editlabel="secedit" {{ 'hidden' if sec.err }}>{{ summary(sec.summary) }}
+      {% if sec.web %}<p class="hint" style="margin:10px 0 0">Ports 80 et 443 ouverts : machine d'entrée de {{ sec.web | join(', ') }} (mode direct).</p>{% endif %}</div>
+    <form id="secedit" method="post" action="/nodes/{{ n.id }}/security" autocomplete="off" {{ 'hidden' if not sec.err }} style="display:flex;flex-direction:column;gap:14px">
+      <input type="hidden" name="which" value="own">
+      {% if not sec.own %}<p class="hint" style="margin:0">Pré-rempli avec la politique générale. Une fois enregistrés, ces réglages remplacent la politique générale pour ce nœud seulement.</p>{% endif %}
+      {{ secform(sec.f, sec.err, 'n', n.ssh_port) }}
+      <p class="hint" style="margin:0"><strong>Sans risque :</strong> le nœud remet son ancien réglage tout seul en 2 minutes si la console ne peut plus s'y connecter.</p>
       <div class="acts" style="justify-content:flex-start">
         <button class="btn primary sm" {{ 'disabled' if sec.applying }}>Enregistrer et appliquer</button>
-        <button class="btn sm" formaction="/security/{{ n.id }}/collect" formnovalidate>Relever l'état</button>
+        <button type="button" class="btn sm" data-edit="secedit">Annuler</button>
       </div>
     </form>
-    {{ secscript() }}
-    <script>
-    (function () { function s() { var o = document.querySelector('input[data-own]:checked').value === 'own';
-      document.getElementById('own-on').hidden = !o; document.getElementById('own-off').hidden = o; }
-      document.querySelectorAll('input[data-own]').forEach(function (r) { r.addEventListener('change', s); }); s(); })();
-    </script>
+  </section>
+</div>
+{{ secscript() }}
+{% endif %}
+
+{# ------------------------------------------------------------ journal #}
+<div data-pane="journal">
+  <section class="panel">
+    <h2>Journal du nœud</h2>
+    {% if events %}
+    <div class="chips seg" role="radiogroup" aria-label="Filtrer le journal">
+      {% for k, label in cats %}{% set nb = events | length if k == 'all' else events | selectattr('cat', 'equalto', k) | list | length %}{% if nb %}<label><input type="radio" name="jf" value="{{ k }}" {{ 'checked' if k == 'all' }}><span>{{ label }} <span class="hint">{{ nb }}</span></span></label>{% endif %}{% endfor %}
+    </div>
+    <ul class="events" id="jlist">{% for e in events %}<li data-cat="{{ e.cat }}"><time>{{ e.ts | when }}</time><span class="lv-{{ e.level }}">{{ e.msg }}</span></li>{% endfor %}</ul>
+    <p class="hint" id="jempty" hidden>Aucun événement de ce type.</p>
+    {% else %}<p class="hint">Aucun événement.</p>{% endif %}
+  </section>
+</div>
+
+{# ------------------------------------------------------------ maintenance #}
+{% if remote %}
+<div data-pane="maintenance">
+  <div class="cols">
     <section class="panel">
-      <h2>Maintenance</h2>
-      <form method="post" action="/nodes/{{ n.id }}/retry" autocomplete="off">
+      <h2>Réinstaller / réparer</h2>
+      <form method="post" action="/nodes/{{ n.id }}/retry" autocomplete="off" style="display:flex;flex-direction:column;gap:10px">
         {% if n.ssh_user and n.ssh_user != 'root' %}<div class="field"><label for="rpw">Mot de passe sudo de {{ n.ssh_user }} <span class="hint">(si sudo en demande un, non enregistré)</span></label>
           <input id="rpw" name="sudo_password" type="password" autocomplete="new-password"></div>{% endif %}
-        <button class="btn sm" {{ 'disabled' if n.state == 'installing' }}>Réinstaller / réparer</button></form>
-      <span class="hint">Relance l'installation : sans danger, rien n'est effacé.</span>
+        <span class="hint">Relance l'installation puis réapplique la sécurité : sans danger, rien n'est effacé.</span>
+        <div><button class="btn sm" {{ 'disabled' if n.state == 'installing' }}>Réinstaller / réparer</button></div></form>
+      <h2 style="margin-top:20px">Redémarrer</h2>
+      <form method="post" action="/nodes/{{ n.id }}/reboot" onsubmit="return confirm('Redémarrer {{ n.name }} maintenant ? Ses applis sont coupées une à deux minutes.')" style="display:flex;flex-direction:column;gap:10px">
+        <span class="hint">Les applis du nœud sont coupées une à deux minutes et repartent toutes seules.</span>
+        <div><button class="btn sm" {{ 'disabled' if n.state != 'ok' }}>Redémarrer le nœud</button></div></form>
     </section>
     <form class="panel danger" method="post" action="/nodes/{{ n.id }}/remove">
       <h2>Retirer le nœud</h2>
@@ -73,7 +125,29 @@
       <div class="field"><label for="rconfirm">Tape <code>{{ n.id }}</code> pour confirmer</label><input id="rconfirm" name="confirm" autocomplete="off" spellcheck="false"></div>
       <div><button class="btn danger sm">Retirer</button></div>
     </form>
-    {% endif %}
   </div>
 </div>
+{% endif %}
+
+<script>
+(function () {   // onglets : l'adresse garde l'onglet ouvert (#securite…), sans JavaScript tout reste affiché
+  var panes = document.querySelectorAll('[data-pane]'), tabs = document.querySelectorAll('[data-tab]');
+  function show() {
+    var id = (location.hash || '').slice(1);
+    if (!document.querySelector('[data-pane="' + id + '"]')) id = 'apercu';
+    panes.forEach(function (p) { p.hidden = p.dataset.pane !== id; });
+    tabs.forEach(function (t) { t.classList.toggle('on', t.dataset.tab === id); t.setAttribute('aria-current', t.dataset.tab === id ? 'page' : 'false'); });
+    if (id === 'apercu') window.dispatchEvent(new Event('resize'));   // graphiques dessinés à la bonne largeur
+  }
+  window.addEventListener('hashchange', show); show();
+  var list = document.getElementById('jlist');
+  document.querySelectorAll('input[name="jf"]').forEach(function (r) {
+    r.addEventListener('change', function () {
+      var n = 0;
+      list.querySelectorAll('li').forEach(function (li) { var on = r.value === 'all' || li.dataset.cat === r.value; li.hidden = !on; n += on; });
+      document.getElementById('jempty').hidden = n > 0;
+    });
+  });
+})();
+</script>
 {% endblock %}

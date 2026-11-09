@@ -1,57 +1,58 @@
 {% extends "base.html" %}
-{% from "_security.html" import secform, checklist, secscript %}
+{% from "_security.html" import secform, summary, badge, secscript %}
 {% block main %}
 <div class="bar"><div><h1>Sécurité des nœuds</h1>
-  <span class="hint">Pare-feu, SSH, anti-force brute et mises à jour des machines exposées sur Internet. Chaque nœud suit cette politique, ou la sienne (dans sa fiche).</span></div></div>
+  <span class="hint">Pare-feu, SSH, anti-force brute et mises à jour des machines exposées sur Internet. Chaque nœud suit la politique générale, ou ses propres réglages (onglet Sécurité de sa fiche).</span></div></div>
 
-<div class="cols">
-<form class="panel" method="post" action="/security" autocomplete="off" style="display:flex;flex-direction:column;gap:14px">
-  <h2 style="margin:0">Politique générale</h2>
-  {{ secform(f, err, 'g', 'port de chaque nœud') }}
-  <p class="hint"><strong>Sans risque :</strong> chaque nœud programme lui-même le retour à son ancien réglage, puis la console vérifie qu'elle s'y connecte encore avant de confirmer. Sinon, l'ancien réglage revient tout seul en 2 minutes.</p>
-  <div><button class="btn primary">Enregistrer et appliquer aux nœuds</button></div>
-</form>
+<section class="panel" style="display:flex;flex-direction:column;gap:12px">
+  <div class="bar" style="margin:0">
+    <h2 style="margin:0">Politique générale</h2>
+    <span data-editlabel="gedit" {{ 'hidden' if err }}><button type="button" class="btn sm primary" data-edit="gedit">Modifier</button></span>
+  </div>
+  <div data-editlabel="gedit" {{ 'hidden' if err }}>{{ summary(gsum) }}</div>
+  <form id="gedit" method="post" action="/security" autocomplete="off" {{ 'hidden' if not err }} style="display:flex;flex-direction:column;gap:14px">
+    {{ secform(f, err, 'g', 'port de chaque nœud') }}
+    <p class="hint" style="margin:0"><strong>Sans risque :</strong> chaque nœud programme lui-même le retour à son ancien réglage, puis la console vérifie qu'elle s'y connecte encore avant de confirmer. Sinon, l'ancien réglage revient tout seul en 2 minutes. Les nœuds qui ont leurs propres réglages ne changent pas.</p>
+    <div class="acts" style="justify-content:flex-start">
+      <button class="btn primary sm">Enregistrer et appliquer aux nœuds</button>
+      <button type="button" class="btn sm" data-edit="gedit">Annuler</button>
+    </div>
+  </form>
+</section>
 
-<div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+<section class="panel" style="margin-top:20px">
+  <h2>Nœuds</h2>
   {% for r in rows %}{% set n = r.n %}
-  <section class="panel">
-    <div class="bar" style="margin:0">
-      <h2 style="margin:0"><a href="/nodes/{{ n.id }}#securite">{{ n.name }}</a></h2>
-      <span>{% if r.own %}<span class="pill s-stopped">réglages propres</span> {% endif %}{% if r.applying %}<span class="pill s-deploying">application…</span>{% endif %}</span>
-    </div>
-    <span class="hint">{{ n.address }} · SSH {{ n.ssh_user or 'root' }}, port {{ n.ssh_port }}{% if r.web %} · web direct : {{ r.web | join(', ') }}{% endif %}{% if r.st.ts %} · appliquée {{ r.st.ts | ago }}{% endif %}</span>
-    {% if n.state != 'ok' %}<p class="hint lv-error">Nœud {{ 'injoignable' if n.state == 'offline' else 'pas prêt' }} : le réglage s'appliquera quand il répondra.</p>{% endif %}
-    {{ checklist(r.checks) }}
-    {% if r.banned %}
-    <details style="margin-top:8px"><summary class="hint">{{ r.banned | length }} adresse{{ 's' if r.banned | length > 1 }} bannie{{ 's' if r.banned | length > 1 }}</summary>
-      {% for ip in r.banned[:50] %}<form class="banrow" method="post" action="/nodes/{{ n.id }}/unban"><span class="mono">{{ ip }}</span>
-        <input type="hidden" name="ip" value="{{ ip }}"><input type="hidden" name="back" value="/security"><button class="btn sm">Débannir</button></form>{% endfor %}
-    </details>
-    {% endif %}
-    <div class="acts" style="justify-content:flex-start;margin-top:10px">
+  <div class="nrow">
+    <span><a href="/nodes/{{ n.id }}#securite"><strong>{{ n.name }}</strong></a><br><span class="hint">{{ n.address }} · SSH port {{ n.ssh_port }}{% if r.web %} · web direct{% endif %}</span></span>
+    <span>{% if r.applying %}<span class="pill s-deploying">application…</span>{% elif n.state != 'ok' %}<span class="pill s-error">{{ 'injoignable' if n.state == 'offline' else 'pas prêt' }}</span>{% else %}{{ badge(r.level, r.count) }}{% endif %}</span>
+    <span class="hint">{% if r.own %}<span class="pill s-stopped">réglages propres</span> {% endif %}
+      {%- set bad = r.checks | selectattr('level', 'in', ['warn', 'error']) | map(attribute='label') | list -%}
+      {{ bad | join(' · ') if bad else (('appliquée ' ~ (r.st.ts | ago)) if r.st.ts else '') }}</span>
+    <span class="acts" style="gap:6px">
       <form method="post" action="/security/{{ n.id }}/apply"><button class="btn sm {{ 'primary' if r.pending }}" {{ 'disabled' if r.applying or n.state != 'ok' }}>Appliquer</button></form>
-      <form method="post" action="/security/{{ n.id }}/collect"><button class="btn sm" {{ 'disabled' if n.state != 'ok' }}>Relever l'état</button></form>
-    </div>
-  </section>
+      <a class="btn sm" href="/nodes/{{ n.id }}#securite">Détail</a>
+    </span>
+  </div>
   {% else %}
-  <section class="panel"><h2>Aucun nœud</h2><p class="hint">La politique s'appliquera à chaque nœud dès son installation (page <a href="/nodes">Nœuds</a>).</p></section>
+  <p class="hint">Aucun nœud. La politique s'appliquera à chaque nœud dès son installation (page <a href="/nodes">Nœuds</a>).</p>
   {% endfor %}
+</section>
 
+<div class="cols" style="margin-top:20px">
   <section class="panel">
     <h2>Ce serveur (console)</h2>
     <p class="hint">La console n'est pas exposée : elle n'écoute que sur ton réseau local ({{ lan }}) et reçoit le trafic des applis par le tunnel Cloudflare. Son accès se règle dans <a href="/settings#acces">Accès et comptes</a>.</p>
   </section>
-
   <section class="panel">
     <h2>En cas de blocage</h2>
-    <p class="hint">Si tu n'arrives plus à te connecter à un nœud par SSH : ouvre la console d'urgence de l'hébergeur (KVM, IPMI, « rescue »), connecte-toi en root, puis :</p>
+    <p class="hint">Plus d'accès SSH à un nœud : ouvre la console d'urgence de l'hébergeur (KVM, IPMI, « rescue »), connecte-toi en root, puis :</p>
     <pre class="mono" style="white-space:pre-wrap;margin:0">nft delete table inet hangarnode
 rm /etc/ssh/sshd_config.d/00-hangar.conf
 systemctl restart ssh
 fail2ban-client unban --all</pre>
-    <p class="hint">Le nœud est alors ouvert : corrige la politique ici puis clique sur Appliquer.</p>
+    <p class="hint">Le nœud est alors ouvert : corrige les réglages ici puis clique sur Appliquer.</p>
   </section>
-</div>
 </div>
 {{ secscript() }}
 {% endblock %}
