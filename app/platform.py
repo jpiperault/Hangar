@@ -12,6 +12,7 @@ import subprocess
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from . import alerts, db
@@ -356,8 +357,27 @@ _dns_cache = {}
 _dns_pool = concurrent.futures.ThreadPoolExecutor(max_workers=8)
 
 
-def _resolve(name):
+def _doh(name, rtype):
+    """Réponse du résolveur public de Cloudflare (DNS sur HTTPS) : True/False, None s'il ne répond pas."""
+    url = "https://cloudflare-dns.com/dns-query?" + urllib.parse.urlencode({"name": name, "type": rtype})
     try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"Accept": "application/dns-json"}),
+                                    timeout=2.5) as r:
+            d = json.loads(r.read())
+    except (OSError, ValueError):
+        return None
+    return d.get("Status") == 0 and any(a.get("type") in (1, 28) for a in d.get("Answer") or [])
+
+
+def _resolve(name):
+    """Le nom est-il visible d'Internet ? Demandé à un résolveur public, pas à celui de la machine (souvent la box,
+    qui garde en cache un « inexistant » jusqu'à 30 minutes après la déclaration)."""
+    ok = _doh(name, "A")
+    if ok is False:
+        ok = _doh(name, "AAAA")
+    if ok is not None:
+        return ok
+    try:   # résolveur public injoignable : celui de la machine
         socket.getaddrinfo(name, 443, proto=socket.IPPROTO_TCP)
         return True
     except OSError:
