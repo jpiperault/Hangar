@@ -1,0 +1,33 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Dépendances
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q nftables shellcheck
+          pip install -r requirements-dev.txt ruff==0.13.3
+      - name: Analyse statique (Python)
+        run: ruff check app tests
+      - name: Scripts shell
+        run: |
+          for f in install.sh deploy/node/*.sh deploy/bin/hangar; do bash -n "$f"; done
+          shellcheck -S error install.sh deploy/node/*.sh deploy/bin/hangar
+      - name: Tests (pare-feu vérifiés par nft via sudo)
+        run: pytest

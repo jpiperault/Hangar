@@ -534,6 +534,8 @@ def run_backup(trigger="planifiée"):
             db.kv_set(f"snapshots_{d['id']}", None)
             if ok:
                 P.log("ok", "sauvegarde", "sauvegarde " + msg)
+                if verify_due(d):   # une fois par semaine : la sauvegarde se restaure-t-elle vraiment ?
+                    _verify(d)
             else:
                 failed += 1
                 P.log("error", "sauvegarde", f"sauvegarde en échec : {msg}")
@@ -721,7 +723,6 @@ def create_archive(trigger="manuelle"):
         _dump_apps()
         stale = _mirror_remote()
         apps = db.apps()
-        s = db.settings()
         rc, head = P.run(["git", "-C", "/opt/hangar", "log", "-1", "--format=%h"], timeout=10)
         manifest = {"format": 2, "created": time.time(), "hangar": head.strip(),
                     "settings": {"domains": D.export(), "security": db.kv_get("security")},
@@ -997,3 +998,165 @@ def start_archive_restore(name, choices):
 
 def save_upload_name():
     return f"hangar-{time.strftime('%Y%m%d-%H%M%S')}-import.tar.gz"
+
+
+# ---------------------------------------------------------------- test de restauration
+
+VERIFY = "/srv/backups/verif-restauration"   # hors des chemins sauvegardés
+VERIFY_EVERY = 7 * 86400
+
+
+class _Stop(Exception):
+    pass
+
+
+def restore_tests():
+    """Dernier test de restauration par destination : {dest_id: résultat}."""
+    return db.kv_get("restore_test") or {}
+
+
+def _verify(d):
+    """Restaure pour de vrai la dernière sauvegarde d'une destination, sans toucher à rien en place :
+    intégrité du dépôt, registre lisible, chaque base rechargée dans un PostgreSQL jetable (sans réseau),
+    data/ de chaque appli présent dans la sauvegarde."""
+    import secrets
+    import sqlite3
+    t0 = time.time()
+    res = {"ts": t0, "dest": d["id"], "name": d["name"], "ok": False, "checks": []}
+
+    def add(ok, label, detail=""):
+        res["checks"].append({"ok": bool(ok), "label": label, "detail": detail})
+
+    pg = None
+    try:
+        rc, out, err = restic("snapshots", "--json", "--tag", "hangar", "--latest", "1", timeout=300, d=d)
+        snaps = json.loads(out or "[]") if rc == 0 else []
+        if not snaps:
+            add(False, "dernière sauvegarde", P.tail(err, 2) if rc else "aucune sauvegarde")
+            raise _Stop
+        snap = max(snaps, key=lambda x: x["time"])
+        res["snap"] = snap["short_id"]
+        res["snap_ts"] = datetime.datetime.fromisoformat(re.sub(r"\.\d+", "", snap["time"])).timestamp()
+        rc, _, err = restic("check", timeout=3 * 3600, d=d)
+        add(rc == 0, "intégrité du dépôt", "" if rc == 0 else P.tail(err, 2))
+
+        shutil.rmtree(VERIFY, ignore_errors=True)
+        os.makedirs(VERIFY, mode=0o700)
+        rc, _, err = restic("restore", snap["id"], "--target", VERIFY, "--include", f"{STAGING}/db",
+                            "--include", f"{STAGING}/platform.db.copie", timeout=3 * 3600, d=d)
+        if rc:
+            add(False, "téléchargement des bases et du registre", P.tail(err, 2))
+            raise _Stop
+
+        reg = f"{VERIFY}{STAGING}/platform.db.copie"
+        apps = []
+        if not os.path.exists(reg):
+            add(False, "registre de la console", "absent de la sauvegarde")
+        else:
+            c = sqlite3.connect(f"file:{reg}?mode=ro", uri=True)
+            try:
+                integ = c.execute("PRAGMA integrity_check").fetchone()[0]
+                c.row_factory = sqlite3.Row
+                apps = [dict(r) for r in c.execute("SELECT slug, node, db FROM apps")]
+            finally:
+                c.close()
+            add(integ == "ok", "registre de la console",
+                f"{len(apps)} appli{'s' if len(apps) != 1 else ''}" if integ == "ok" else integ[:200])
+
+        ddir = f"{VERIFY}{STAGING}/db"
+        dumps = sorted(f[:-5] for f in os.listdir(ddir) if f.endswith(".dump")) if os.path.isdir(ddir) else []
+        for slug in sorted({a["slug"] for a in apps if a["db"]} - set(dumps)):
+            add(False, f"base {slug}", "absente de la sauvegarde")
+        if dumps:
+            from .ha import PG_IMAGE
+            pg = f"hangar-verif-{os.getpid()}"
+            rc, out = P.run(["docker", "run", "-d", "--rm", "--name", pg, "--network", "none",
+                             "-e", f"POSTGRES_PASSWORD={secrets.token_hex(16)}", "-v", f"{ddir}:/dumps:ro",
+                             "--memory", "512m", PG_IMAGE], timeout=300)
+            if rc:
+                add(False, "PostgreSQL jetable", P.tail(out, 2))
+                raise _Stop
+            for _ in range(60):
+                if P.run(["docker", "exec", pg, "pg_isready", "-U", "postgres"], timeout=15)[0] == 0:
+                    break
+                time.sleep(2)
+            for slug in dumps:
+                name = "v_" + slug.replace("-", "_")
+                P.run(["docker", "exec", pg, "psql", "-U", "postgres", "-qc", f"CREATE DATABASE {name}"], timeout=60)
+                rc, out = P.run(["docker", "exec", pg, "pg_restore", "-U", "postgres", "--no-owner", "--no-acl",
+                                 "--exit-on-error", "-d", name, f"/dumps/{slug}.dump"], timeout=3600)
+                if rc:
+                    add(False, f"base {slug}", P.tail(out, 2))
+                    continue
+                rc, n = P.run(["docker", "exec", pg, "psql", "-U", "postgres", "-d", name, "-tAc",
+                               "SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', "
+                               "'information_schema')"], timeout=60)
+                n = n.strip() if rc == 0 else "?"
+                add(rc == 0, f"base {slug}", f"rechargée, {n} table{'s' if n not in ('0', '1') else ''}"
+                    + (" (vide)" if n == "0" else ""))
+
+        if apps:
+            rc, out, err = restic("find", "--json", "--snapshot", snap["id"], "data", timeout=1800, d=d)
+            found = set()
+            if rc == 0:
+                for x in json.loads(out or "[]"):
+                    found |= {m["path"] for m in x.get("matches") or []}
+            for a in apps:
+                want = {f"{P.APPS_DIR}/{a['slug']}/data", f"{MIRROR}/{a['slug']}/data"}
+                add(bool(found & want), f"fichiers {a['slug']}",
+                    "data/ présent" if found & want else ("absent de la sauvegarde" if rc == 0 else P.tail(err, 2)))
+        res["ok"] = bool(res["checks"]) and all(c["ok"] for c in res["checks"])
+    except _Stop:
+        pass
+    except Exception as e:
+        add(False, "test interrompu", str(e)[:300])
+    finally:
+        if pg:
+            P.run(["docker", "rm", "-f", pg], timeout=60)
+        shutil.rmtree(VERIFY, ignore_errors=True)
+        res["duration"] = time.time() - t0
+    allr = restore_tests()
+    allr[d["id"]] = res
+    db.kv_set("restore_test", allr)
+    bad = [f"{c['label']} : {c['detail']}" for c in res["checks"] if not c["ok"]]
+    if res["ok"]:
+        P.log("ok", "sauvegarde", f"test de restauration réussi ({d['name']}, sauvegarde {res.get('snap')}) : "
+              + ", ".join(c["label"] for c in res["checks"]))
+    else:
+        msg = f"{d['name']} : " + " ; ".join(bad)[:900]
+        P.log("error", "sauvegarde", f"test de restauration en échec, {msg}")
+        alerts.send("Test de restauration en échec", msg, priority=4, tags=["floppy_disk", "warning"])
+    return res
+
+
+def verify_due(d):
+    r = restore_tests().get(d["id"])
+    return not r or time.time() - r["ts"] > VERIFY_EVERY
+
+
+def run_verify(dest_id=None):
+    """Commande « hangar backup --verify » : test de restauration de chaque destination (ou d'une seule)."""
+    fd = os.open(LOCK, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("Une sauvegarde est déjà en cours.")
+        return 1
+    try:
+        targets = [d for d in dests() if not dest_id or d["id"] == dest_id]
+        if not targets:
+            print("Aucune destination connectée.")
+            return 1
+        return 0 if all([_verify(d)["ok"] for d in targets]) else 1
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
+def start_verify():
+    P.run(["systemctl", "reset-failed", "hangar-test-restauration"], timeout=10)
+    rc, out = P.run(["systemd-run", "--unit=hangar-test-restauration", "--collect", "--quiet", "--nice=10",
+                     "--property=EnvironmentFile=/srv/platform/.env", "--working-directory=/opt/hangar",
+                     "/opt/hangar/venv/bin/python", "-m", "app", "backup", "--verify"], timeout=30)
+    if rc:
+        raise RuntimeError(out)

@@ -1,6 +1,5 @@
 """Client minimal de l'API des registres Docker (v2) : liste des tags et empreinte d'un tag.
 Utilise les identifiants de `docker login` (/root/.docker/config.json) quand il y en a."""
-import base64
 import json
 import re
 import urllib.error

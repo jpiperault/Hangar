@@ -23,7 +23,7 @@ FastAPI + Jinja, sans build front. Elle écoute en HTTPS (certificat auto-signé
 - Générateur de prompt pour préparer un projet d'appli avec Claude (Dockerfile, healthcheck, CI ghcr.io, client Android).
 - Le Caddyfile est validé avant chaque rechargement. Une configuration refusée n'est jamais appliquée.
 - Images privées : un jeton de lecture du registre (ghcr.io : `read:packages`) se saisit dans la fiche de l'appli. Il est vérifié par `docker login`, puis enregistré une fois pour tout le registre dans `/root/.docker/config.json`.
-- **Sauvegardes** chiffrées (restic) chaque nuit vers Google Drive et/ou un NAS (SMB ou SFTP) : exports des bases, `data/` des applis, configuration. Restauration d'une appli depuis la destination choisie, avec copie de l'état d'avant.
+- **Sauvegardes** chiffrées (restic) chaque nuit vers Google Drive et/ou un NAS (SMB ou SFTP) : exports des bases, `data/` des applis, configuration. Restauration d'une appli depuis la destination choisie, avec copie de l'état d'avant. **Test de restauration** chaque semaine : la dernière sauvegarde est restaurée pour de vrai à côté (bases rechargées dans un PostgreSQL jetable), alerte en cas d'échec.
 - **Nœuds** : ajout de serveurs supplémentaires (VPS, dédié, conteneur) depuis la console. Hangar les installe par SSH, avec root ou un compte `sudo` (Docker, PostgreSQL, Caddy, cloudflared, pare-feu), puis ne les pilote plus que par le réseau privé et les relie par un réseau privé WireGuard (10.88.0.0/24) qu'il initie lui-même : la box reste fermée. Mesures et alertes par nœud.
 - **Cloisonnement** : chaque appli sur son propre réseau ; une appli piratée n'atteint ni les autres applis, ni sa machine, ni le réseau local, ni les autres nœuds (pare-feu), ni les bases des autres applis. Conteneurs sans élévation de privilèges, archives importées revalidées, console protégée par une CSP stricte, des sessions révocables et une limite de tentatives de connexion.
 - **Rôle de la console** (page Nœuds) : elle héberge aussi des applis (une seule machine suffit pour démarrer) ou fait seulement la gestion. Ce second mode garde les clés des nœuds et du compte Cloudflare à l'écart des applis et permet de mettre toutes les applis en haute dispo. Elle peut rester machine de secours à chaud.
@@ -55,10 +55,11 @@ deploy/              fichiers système installés sur le serveur (copies de réf
   docker/            daemon.json (live-restore, rotation des logs), compose PostgreSQL
   nftables/          pare-feu dans une table dédiée (ne touche pas aux règles Docker)
   apt/               mises à jour de sécurité automatiques (Docker, Caddy, cloudflared exclus)
-  bin/               hangar (CLI : passwd, backup, archive, restore, routing, sysupdate)
+  bin/               hangar (CLI : passwd, backup [--verify], archive, restore, routing, segment, sysupdate)
   node/              préparation d'un nœud (bootstrap.sh, pare-feu)
 docs/                exploitation, reprise sur un nouveau serveur, prompt de déploiement d'une appli
 install.sh           installation complète (idempotente), avec restauration optionnelle d'une archive
+tests/               tests automatiques (pytest), lancés à chaque push par GitHub Actions
 ```
 
 ## Installation (Debian 13)
@@ -73,6 +74,16 @@ Le script installe Docker, Caddy, cloudflared, restic et rclone, puis PostgreSQL
 Dans un conteneur LXC Proxmox, active d'abord l'imbrication sur l'hôte : `pct set <id> --features nesting=1,keyctl=1`.
 
 Reprise complète sur un nouveau serveur, depuis une archive téléchargée, Drive ou le NAS : voir [docs/reprise.md](docs/reprise.md).
+
+## Tests
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt ruff
+.venv/bin/pytest            # validations, archives piégées, compose, pare-feu (nft -c si root ou sudo), console web
+.venv/bin/ruff check app tests
+```
+
+Sans root, Docker ni réseau : base SQLite et secret de session jetables. GitHub Actions (`.github/workflows/tests.yml`) lance aussi `shellcheck` sur les scripts et vérifie la syntaxe des pare-feu générés avec `nft`.
 
 ## Documentation
 

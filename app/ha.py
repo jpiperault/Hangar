@@ -485,7 +485,7 @@ def _enable(a, mode, nodes_, auto, delay, sync_min, by):
 
 def _rollback_enable(slug, a, nodes_):
     h = get(slug)
-    node, d = a["node"], P.app_dir(slug)
+    node = a["node"]
     try:
         for n in nodes_:
             _instance_down(slug, n)

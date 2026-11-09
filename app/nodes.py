@@ -465,7 +465,6 @@ EOF"""
 
 def collect(n):
     """Mesures d'un nœud distant (via le réseau privé). Retourne le dict ou None."""
-    t0 = time.time()
     rc, out = ssh(n, PROBE, timeout=25)
     if rc:
         return None

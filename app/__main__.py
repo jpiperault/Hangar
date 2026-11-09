@@ -42,6 +42,8 @@ def serve():
 def backup_cmd(args):
     from . import backup, db
     db.init()
+    if "--verify" in args:
+        sys.exit(backup.run_verify())
     sys.exit(backup.run_backup("manuelle" if "--manual" in args else "planifiée"))
 
 
@@ -61,7 +63,7 @@ def routing(args):
 def restore(args):
     """hangar restore <archive.tar.gz> [--apps a,b] [--no-settings] : reprise complète en ligne de commande."""
     import shutil
-    from . import backup, db, platform as P
+    from . import backup, db
     db.init()
     files, only, i = [], None, 0
     while i < len(args):

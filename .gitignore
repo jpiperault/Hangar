@@ -8,3 +8,6 @@ __pycache__/
 *.key
 *.crt
 hangar.secret
+.venv/
+.pytest_cache/
+.ruff_cache/

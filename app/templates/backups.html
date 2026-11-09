@@ -157,6 +157,21 @@
     {% endif %}
   </section>
 
+  {% if dests %}
+  <section class="panel" id="verif">
+    <div class="bar" style="margin:0 0 8px"><h2 style="margin:0">Test de restauration</h2>
+      <form method="post" action="/backups/verify"><button class="btn sm primary" {{ 'disabled' if busy }}>Tester maintenant</button></form></div>
+    <p class="hint" style="margin:0 0 10px">Chaque semaine, après une sauvegarde réussie, Hangar la restaure pour de vrai à côté : intégrité du dépôt, registre lisible, chaque base rechargée dans un PostgreSQL jetable, data/ de chaque appli présent. Rien de ce qui tourne n'est touché ; une alerte part en cas d'échec.</p>
+    {% for d in dests %}{% set t = restore_tests.get(d.id) %}
+      <div class="cert"><span><strong>{{ d.name }}</strong>
+        {% if t %}<span class="hint">· testé {{ t.ts | ago }}{% if t.snap %}, sauvegarde du {{ t.snap_ts | when }}{% endif %} · {{ '%.0f' % t.duration }} s</span>
+        <ul class="seclist" style="margin-top:6px">{% for c in t.checks %}<li><span class="{{ 'lv-ok' if c.ok else 'lv-error' }}">{{ '✓' if c.ok else '✗' }}</span><span>{{ c.label }}{% if c.detail %} <span class="hint">· {{ c.detail }}</span>{% endif %}</span></li>{% endfor %}</ul>
+        {% else %}<span class="hint">· jamais testé : le premier test suivra la prochaine sauvegarde réussie.</span>{% endif %}</span>
+        {% if t %}<span class="pill {{ 's-running' if t.ok else 's-error' }}">{{ 'restaurable' if t.ok else 'échec' }}</span>{% endif %}</div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
   <section class="panel">
     <h2>Dernières exécutions</h2>
     {% for r in runs %}

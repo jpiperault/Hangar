@@ -30,7 +30,7 @@ monitor.start()
 
 
 def _secret():
-    path = "/srv/platform/hangar.secret"
+    path = os.environ.get("HANGAR_SECRET_FILE", "/srv/platform/hangar.secret")
     if not os.path.exists(path):
         P.write_private(path, secrets.token_hex(32))
     return open(path).read().strip()
@@ -159,7 +159,6 @@ RESERVED = {"health", "static", "well-known", "admin", "confidentialite"}
 def validate(f, cur=None):
     """Retourne (données, erreurs) à partir du formulaire d'une appli."""
     d, e = {}, {}
-    s = db.settings()
     d["name"] = (f.get("name") or "").strip()[:80]
     if not d["name"]:
         e["name"] = "Donne un nom à l'application."
@@ -706,7 +705,7 @@ async def cf_token(request: Request):
     except ValueError as e:
         flash(request, str(e), "error")
         return go("/domains#cloudflare")
-    st = await asyncio.to_thread(cloudflare.sync_quiet) or cloudflare.status()
+    await asyncio.to_thread(cloudflare.sync_quiet)
     err = cloudflare.status().get("error")
     flash(request, f"Jeton accepté (zones : {', '.join(zones) or 'aucune'}). " +
           (f"Synchronisation en échec : {err}" if err else "Noms publics synchronisés."), "error" if err else "ok")
@@ -872,7 +871,6 @@ async def users_remove(request: Request, name: str):
 
 @app.get("/prompt")
 async def prompt_page(request: Request):
-    s = db.settings()
     a = db.app(request.query_params.get("app") or "")
     dft = D.default()
     hangar = {"platform": {"base": dft["name"], "hub": dft["hub"], "mode": dft["mode"],
@@ -929,7 +927,8 @@ async def backups_page(request: Request):
                   arch_busy=arch_busy, snaps=snaps, snap_err=snap_err, nas=backup.nas_info(),
                   pending=backup.auth_pending(), google_url=backup._auth.get("google_url"),
                   pw=backup.password(), keep=keep, next_run=nxt.strip(), apps=db.apps(), refresh=busy or arch_busy,
-                  folder=backup.FOLDER, own_client=backup.client_id(), archives=backup.archives())
+                  folder=backup.FOLDER, own_client=backup.client_id(), archives=backup.archives(),
+                  restore_tests=backup.restore_tests())
 
 
 @app.post("/backups/public-contact")
@@ -1159,6 +1158,19 @@ async def drive_disconnect(request: Request):
     await asyncio.to_thread(backup.disconnect)
     flash(request, "Google Drive déconnecté. Les sauvegardes déjà envoyées restent dans ton Drive.")
     return go("/backups")
+
+
+@app.post("/backups/verify")
+async def backup_verify(request: Request):
+    if backup.running():
+        flash(request, "Une sauvegarde ou un test est déjà en cours.", "error")
+    else:
+        try:
+            await asyncio.to_thread(backup.start_verify)
+            flash(request, "Test de restauration lancé : résultat dans une à quelques minutes.")
+        except RuntimeError as e:
+            flash(request, str(e), "error")
+    return go("/backups#verif")
 
 
 @app.post("/backups/run")
