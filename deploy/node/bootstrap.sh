@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prépare une machine Debian 13 comme nœud Hangar. Lancé par la console via SSH (root), idempotent.
+# Prépare une machine Debian 13 comme nœud Hangar. Lancé par la console via SSH (root, ou un compte avec sudo), idempotent.
 # Fichiers reçus dans /opt/hangar-node : ce script, compose PostgreSQL, daemon.json, pare-feu, drop-in nftables.
 # Sortie lue par la console : lignes « HANGAR_… = valeur ».
 set -euo pipefail
@@ -13,7 +13,7 @@ say() { echo "HANGAR_STEP=$*"; }
 
 say "paquets de base"
 $APT update >/dev/null
-$APT install --no-upgrade ca-certificates curl gnupg nftables wireguard-tools python3 rsync unattended-upgrades >/dev/null
+$APT install --no-upgrade ca-certificates curl gnupg nftables wireguard-tools python3 rsync openssh-server unattended-upgrades >/dev/null
 
 say "Docker"
 install -m 0755 -d /etc/apt/keyrings
@@ -100,6 +100,31 @@ install -d -m 0700 /etc/wireguard
 if [ ! -f /etc/wireguard/hangar.key ]; then
   umask 077; wg genkey > /etc/wireguard/hangar.key; umask 022
 fi
+say "accès SSH de la console"
+# La console travaille ensuite en root, par clé, et uniquement depuis son adresse sur le réseau privé (10.88.0.1).
+# L'accès root par l'adresse publique n'est pas nécessaire : il reste tel que l'hébergeur l'a configuré.
+if [ -f console.authorized ]; then
+  install -d -m 0700 /root/.ssh
+  touch /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys
+  k=$(awk '{print $(NF-1)}' console.authorized)
+  grep -qF "from=\"10.88.0.1\" ssh-ed25519 $k" /root/.ssh/authorized_keys || cat console.authorized >> /root/.ssh/authorized_keys
+  if [ -d /etc/ssh/sshd_config.d ]; then
+    printf '# Hangar : root par clé, seulement depuis la console (réseau privé)\nMatch Address 10.88.0.1\n    PermitRootLogin prohibit-password\n' \
+      > /etc/ssh/sshd_config.d/00-hangar.conf
+    install -d -m 0755 /run/sshd   # absent hors connexion quand SSH est lancé par socket : sshd -t échouerait
+    sshd -t || { rm -f /etc/ssh/sshd_config.d/00-hangar.conf; echo "HANGAR_ERROR=configuration SSH refusée par sshd"; exit 1; }
+    # les sessions ouvertes survivent à un redémarrage de sshd
+    systemctl reload ssh 2>/dev/null || systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
+  fi
+  install -d -m 0755 /run/sshd
+  t=$(sshd -T -C user=root,host=hangar,addr=10.88.0.1 2>/dev/null) || t=""
+  echo "$t" | grep -qi '^permitrootlogin \(no\|forced-commands-only\)' && \
+    { echo "HANGAR_ERROR=sshd refuse root même depuis la console (PermitRootLogin) : vérifie /etc/ssh/sshd_config"; exit 1; }
+  if echo "$t" | grep -qi '^allowusers ' && ! echo "$t" | grep -i '^allowusers ' | grep -qw root; then
+    echo "HANGAR_ERROR=AllowUsers dans sshd_config : ajoute root@10.88.0.1 à la liste"; exit 1
+  fi
+fi
+
 echo "HANGAR_WG_PUBKEY=$(wg pubkey < /etc/wireguard/hangar.key)"
 echo "HANGAR_DOCKER=$(docker version --format '{{.Server.Version}}')"
 echo "HANGAR_OS=$PRETTY_NAME"

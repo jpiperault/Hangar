@@ -2,7 +2,7 @@
 {% from "_meter.html" import meter %}
 {% block main %}{% set i = n.info or {} %}
 <div class="bar">
-  <div><div class="crumb"><a href="/nodes">Nœuds</a> /</div><h1>{{ n.name }}</h1><span class="hint">{{ n.id }} · {{ n.address }}{% if n.id != 'local' %} · SSH {{ n.ssh_port }} · réseau privé {{ n.wg_ip }}{% endif %}</span></div>
+  <div><div class="crumb"><a href="/nodes">Nœuds</a> /</div><h1>{{ n.name }}</h1><span class="hint">{{ n.id }} · {{ n.address }}{% if n.id != 'local' %} · SSH {{ n.ssh_user or 'root' }}, port {{ n.ssh_port }} · réseau privé {{ n.wg_ip }}{% endif %}</span></div>
   <nav class="seg" aria-label="Période">{% for r in ranges %}<a class="segbtn {{ 'on' if rng == r }}" href="?r={{ r }}">{{ r }}</a>{% endfor %}</nav>
 </div>
 {% if n.state == 'error' %}<div class="flash error" role="status">{{ n.error }}</div>{% endif %}
@@ -38,7 +38,10 @@
     {% if n.id != 'local' %}
     <section class="panel">
       <h2>Maintenance</h2>
-      <form method="post" action="/nodes/{{ n.id }}/retry"><button class="btn sm" {{ 'disabled' if n.state == 'installing' }}>Réinstaller / réparer</button></form>
+      <form method="post" action="/nodes/{{ n.id }}/retry" autocomplete="off">
+        {% if n.ssh_user and n.ssh_user != 'root' %}<div class="field"><label for="rpw">Mot de passe sudo de {{ n.ssh_user }} <span class="hint">(si sudo en demande un, non enregistré)</span></label>
+          <input id="rpw" name="sudo_password" type="password" autocomplete="new-password"></div>{% endif %}
+        <button class="btn sm" {{ 'disabled' if n.state == 'installing' }}>Réinstaller / réparer</button></form>
       <span class="hint">Relance l'installation : sans danger, rien n'est effacé.</span>
     </section>
     <form class="panel danger" method="post" action="/nodes/{{ n.id }}/remove">

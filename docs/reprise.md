@@ -17,7 +17,9 @@ Ce guide sert dans trois cas :
 pct set <id> --features nesting=1,keyctl=1
 ```
 
-**Serveur dédié ou VM** : Debian 13 minimal, accès root en SSH.
+**Serveur dédié ou VM** : Debian 13 minimal, avec un accès SSH. Pas besoin d'un accès root direct : ton compte habituel suffit s'il a `sudo` (c'est le cas par défaut chez la plupart des hébergeurs). Dans la suite, préfixe alors les commandes par `sudo`, par exemple `sudo ./install.sh`.
+
+Le serveur de la console doit rester sur le réseau local, car la console n'est accessible que depuis le LAN. Un VPS ou un dédié loué se branche plutôt comme **nœud** supplémentaire (page Nœuds) : voir plus bas.
 
 ## 2. Récupérer le code
 
@@ -25,7 +27,7 @@ Le dépôt est privé. Deux façons de le copier sur la nouvelle machine :
 
 - **Sans Git** : sur GitHub, ouvre « Code », puis « Download ZIP ». Ensuite :
   ```bash
-  scp Hangar-main.zip root@<ip>:
+  scp Hangar-main.zip <compte>@<ip>:
   ```
   puis, sur la machine :
   ```bash
@@ -77,19 +79,19 @@ Une appli qui existe déjà n'est pas écrasée sans filet : ses fichiers et sa 
 Copie d'abord l'archive sur la machine. Depuis ton PC :
 
 ```bash
-scp hangar-AAAAMMJJ-HHMMSS.tar.gz root@<ip-du-serveur>:
+scp hangar-AAAAMMJJ-HHMMSS.tar.gz <compte>@<ip-du-serveur>:
 ```
 
 Pendant l'installation, depuis le dossier du code :
 
 ```bash
-./install.sh --restore ~/hangar-AAAAMMJJ-HHMMSS.tar.gz
+sudo ./install.sh --restore ~/hangar-AAAAMMJJ-HHMMSS.tar.gz
 ```
 
 Ou sur un serveur déjà installé :
 
 ```bash
-hangar restore ~/hangar-AAAAMMJJ-HHMMSS.tar.gz
+sudo hangar restore ~/hangar-AAAAMMJJ-HHMMSS.tar.gz
 ```
 
 Options de `hangar restore` :
@@ -134,3 +136,22 @@ Ces éléments sont à refaire à la main :
 - les accès Drive et NAS ;
 - la clé SSH de la console pour les nœuds (une nouvelle est créée : recolle sa ligne d'autorisation sur chaque nœud) ;
 - le compte administrateur de la console.
+
+## Ajouter un VPS ou un serveur dédié comme nœud
+
+Sur la page **Nœuds** de la console :
+
+1. Sur le serveur, connecte-toi avec ton compte habituel (ou en root si l'hébergeur le permet) et colle la ligne affichée par la console. Elle ajoute la clé de Hangar dans `~/.ssh/authorized_keys`.
+2. Dans le formulaire, indique ce compte. Si son `sudo` demande un mot de passe, indique aussi ce mot de passe.
+3. Lance l'installation.
+
+Le mot de passe `sudo` ne sert que pendant l'installation. Il passe par l'entrée de `sudo` (jamais en ligne de commande) et n'est enregistré nulle part.
+
+À la fin de l'installation, la console pilote le nœud en root, mais seulement par le réseau privé WireGuard :
+
+- la clé de Hangar est autorisée pour root avec `from="10.88.0.1"`, l'adresse de la console sur ce réseau ;
+- `/etc/ssh/sshd_config.d/00-hangar.conf` ajoute `PermitRootLogin prohibit-password` pour cette seule adresse.
+
+L'accès root par l'adresse publique reste tel que l'hébergeur l'a réglé, généralement fermé. Les réparations (« Réinstaller / réparer ») passent par le réseau privé et ne demandent donc pas de mot de passe tant qu'il fonctionne.
+
+Si `sshd_config` contient une liste `AllowUsers`, ajoute-y `root@10.88.0.1`. Sinon l'installation s'arrête avec un message qui l'indique.

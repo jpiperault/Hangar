@@ -1117,7 +1117,8 @@ async def nodes_page(request: Request):
 async def nodes_add(request: Request):
     f = await request.form()
     try:
-        await asyncio.to_thread(nodes.add, f.get("id"), f.get("name"), f.get("address"), f.get("ssh_port"))
+        await asyncio.to_thread(nodes.add, f.get("id"), f.get("name"), f.get("address"), f.get("ssh_port"),
+                                f.get("ssh_user"), f.get("sudo_password") or "")
         flash(request, "Installation du nœud lancée : quelques minutes. Cette page se met à jour toute seule.")
     except (ValueError, RuntimeError) as e:
         flash(request, str(e), "error")
@@ -1126,9 +1127,10 @@ async def nodes_add(request: Request):
 
 @app.post("/nodes/{node_id}/retry")
 async def nodes_retry(request: Request, node_id: str):
+    f = await request.form()
     n = nodes.get(node_id)
     if n and node_id != nodes.LOCAL and n["state"] != "installing":
-        P.spawn(nodes.install, node_id)
+        P.spawn(nodes.install, node_id, f.get("sudo_password") or "")
         flash(request, f"Réinstallation de {n['name']} lancée. Rien n'est effacé : le script reprend là où il en était.")
     return go("/nodes")
 

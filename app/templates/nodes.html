@@ -30,8 +30,8 @@
   <h2>Ajouter un nœud</h2>
   <ol class="steps">
     <li>Prends un serveur sous <strong>Debian 13</strong> : VPS, serveur dédié ou conteneur Proxmox (avec <code>nesting</code> et <code>keyctl</code>). Il doit être joignable en SSH, et en UDP sur le port {{ 51820 }} pour le réseau privé.</li>
-    <li>Connecté en root sur ce serveur, colle cette ligne. Elle autorise uniquement la clé de Hangar :
-      <div class="cert"><code class="mono" id="authline" style="word-break:break-all">mkdir -p /root/.ssh && chmod 700 /root/.ssh && echo '{{ key }}' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys</code>
+    <li>Connecté sur ce serveur avec le compte que Hangar utilisera (<code>root</code>, ou ton compte habituel s'il a <code>sudo</code>), colle cette ligne. Elle autorise uniquement la clé de Hangar :
+      <div class="cert"><code class="mono" id="authline" style="word-break:break-all">mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '{{ key }}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys</code>
       <button type="button" class="btn sm" onclick="navigator.clipboard && navigator.clipboard.writeText(document.getElementById('authline').textContent).then(()=>{this.textContent='Copié'})">Copier</button></div></li>
     <li>Remplis puis lance l'installation. Hangar installe Docker, PostgreSQL, le pare-feu et le réseau privé, puis vérifie que tout répond. Compte 3 à 5 minutes.</li>
   </ol>
@@ -40,13 +40,20 @@
     <div class="field"><label for="nname">Nom</label><input id="nname" name="name" placeholder="VPS OVH Gravelines"></div>
     <div class="field"><label for="nport">Port SSH</label><input id="nport" name="ssh_port" type="number" min="1" max="65535" value="22"></div>
   </div>
+  <div class="row3">
+    <div class="field"><label for="nuser">Compte SSH</label><input id="nuser" name="ssh_user" value="root" spellcheck="false" required>
+      <span class="hint">root, ou un compte avec sudo.</span></div>
+    <div class="field" style="grid-column:span 2"><label for="npw">Mot de passe sudo <span class="hint">(si sudo en demande un)</span></label>
+      <input id="npw" name="sudo_password" type="password" autocomplete="new-password">
+      <span class="hint">Servi uniquement pendant l'installation, jamais enregistré. Ensuite, la console passe en root par le réseau privé, et seulement depuis son adresse 10.88.0.1 : root n'a pas besoin d'être ouvert sur Internet.</span></div>
+  </div>
   <div class="field"><label for="naddr">Adresse du serveur</label><input id="naddr" name="address" placeholder="IP publique ou nom DNS" spellcheck="false" required>
     <span class="hint">Hangar s'y connecte depuis ce serveur : ta box n'a aucun port à ouvrir.</span></div>
   <div><button class="btn primary">Installer le nœud</button></div>
 </form>
 <section class="panel">
   <h2>Répartition</h2>
-  <p class="hint">Chaque appli tourne sur un nœud, avec sa base PostgreSQL sur ce même nœud, pour éviter la latence du réseau. Le choix du nœud à la création d'une appli et son déplacement vers un autre nœud arrivent à l'étape suivante.</p>
+  <p class="hint">Chaque appli tourne sur un nœud, avec sa base PostgreSQL sur ce même nœud, pour éviter la latence du réseau. Le nœud se choisit à la création de l'appli ; pour la changer de nœud, utilise le bloc « Nœud » de sa fiche.</p>
   {% for n in rows %}<div class="cert"><span class="mono">{{ n.id }}</span><span class="hint">{{ n.apps | map(attribute='slug') | join(', ') or 'aucune appli' }}</span></div>{% endfor %}
 </section>
 </div>

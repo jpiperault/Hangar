@@ -104,11 +104,33 @@ def _ssh_args(n, via_wg=True):
         "ssh", "-i", KEY, "-o", "IdentitiesOnly=yes", "-o", f"UserKnownHostsFile={KNOWN}",
         "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
         "-p", str(n["ssh_port"])]
-    return base + [f"root@{host}"]
+    return base + [f"{'root' if via_wg else (n.get('ssh_user') or 'root')}@{host}"]
+
+
+# Mot de passe sudo : gardé en mémoire le temps d'une installation, jamais enregistré.
+_sudo_pw = {}
+USER_RE = re.compile(r"^[a-z_][a-z0-9_.-]{0,31}$")
+
+
+def _as_root(n, cmd, input):
+    """Par l'adresse publique avec un compte non root : la commande passe par sudo.
+    Avec mot de passe : sudo -k -S en lit exactement une ligne sur l'entrée, le reste va à la commande."""
+    if (n.get("ssh_user") or "root") == "root":
+        return cmd, input
+    pw = _sudo_pw.get(n["id"])
+    if pw is None:
+        return f"sudo -n bash -c {shlex.quote(cmd)}", input
+    pre = pw + "\n"
+    input = pre.encode() + input if isinstance(input, bytes) else pre + (input or "")
+    return f"sudo -k -S -p '' bash -c {shlex.quote(cmd)}", input
 
 
 def ssh(n, cmd, timeout=60, input=None, via_wg=True):
-    """Commande sur un nœud. via_wg=False : par son adresse publique (installation, avant le tunnel)."""
+    """Commande sur un nœud, en root.
+    via_wg=True : root par le réseau privé (autorisé seulement depuis la console).
+    via_wg=False : par l'adresse publique avec le compte de l'installation (root, ou sudo)."""
+    if not via_wg:
+        cmd, input = _as_root(n, cmd, input)
     try:
         p = subprocess.run(_ssh_args(n, via_wg) + [cmd], capture_output=True, timeout=timeout,
                            input=input, text=not isinstance(input, bytes))
@@ -202,7 +224,7 @@ def apply_mesh():
         for n in peers:
             if n["id"] == LOCAL:
                 continue
-            via_wg = n["state"] == "ok" and _wg_alive(n)
+            via_wg = _wg_alive(n)
             rc, out = ssh(n, f"bash -c {shlex.quote(APPLY)}", input=_conf_for(n, peers), timeout=60, via_wg=via_wg)
             if rc:
                 errs.append(f"{n['id']} : {P.tail(out, 2)}")
@@ -227,7 +249,7 @@ def handshakes():
 
 # ---------------------------------------------------------------- ajout d'un nœud
 
-def add(node_id, name, address, ssh_port):
+def add(node_id, name, address, ssh_port, ssh_user="root", sudo_password=""):
     node_id = (node_id or "").strip().lower()
     if not ID_RE.match(node_id) or node_id == LOCAL:
         raise ValueError("Identifiant : lettres minuscules, chiffres et tirets (par exemple vps-1).")
@@ -243,29 +265,52 @@ def add(node_id, name, address, ssh_port):
         assert 1 <= ssh_port <= 65535
     except (ValueError, AssertionError):
         raise ValueError("Port SSH invalide.")
+    ssh_user = (ssh_user or "root").strip()
+    if not USER_RE.match(ssh_user):
+        raise ValueError("Compte SSH invalide.")
     ensure_key()
     ensure_local()
     wg_ip = _next_ip()
-    db.x("INSERT INTO nodes(id, name, address, ssh_port, wg_ip, state, created_at) VALUES(?, ?, ?, ?, ?, 'installing', ?)",
-         (node_id, (name or node_id).strip()[:60], address, ssh_port, wg_ip, time.time()))
-    P.spawn(install, node_id)
+    db.x("INSERT INTO nodes(id, name, address, ssh_port, ssh_user, wg_ip, state, created_at) "
+         "VALUES(?, ?, ?, ?, ?, ?, 'installing', ?)",
+         (node_id, (name or node_id).strip()[:60], address, ssh_port, ssh_user, wg_ip, time.time()))
+    P.spawn(install, node_id, sudo_password)
 
 
 def _log(n, level, msg):
     P.log(level, f"nœud {n['id']}", msg)
 
 
-def install(node_id):
+def _sudo_error(out):
+    if re.search(r"a password is required|mot de passe est nécessaire", out):
+        return "sudo demande un mot de passe : indique-le dans le formulaire (il n'est pas enregistré)"
+    if re.search(r"incorrect password|Sorry, try again|essayez de nouveau|mot de passe incorrect", out, re.I):
+        return "mot de passe sudo refusé"
+    if re.search(r"not in the sudoers|n'apparaît pas dans le fichier sudoers|not allowed to execute", out):
+        return "ce compte n'a pas le droit d'utiliser sudo"
+    if re.search(r"sudo: (command )?not found|sudo : commande introuvable", out):
+        return "sudo n'est pas installé sur le serveur"
+    return None
+
+
+def install(node_id, sudo_password=""):
     """Installation (ou réparation) d'un nœud : fichiers, bootstrap, WireGuard, vérification de Docker à distance."""
     n = get(node_id)
+    user = n.get("ssh_user") or "root"
+    if sudo_password:
+        _sudo_pw[node_id] = sudo_password
+    # réparation d'un nœud dont le réseau privé répond : root par ce réseau, sans mot de passe sudo
+    wg = bool(n.get("wg_pubkey")) and _wg_alive(n)
     _update(node_id, state="installing", error=None)
-    _log(n, "info", f"installation sur {n['address']} (SSH port {n['ssh_port']})")
+    _log(n, "info", f"réparation par le réseau privé {n['wg_ip']}" if wg else
+         f"installation sur {n['address']} (SSH {user}, port {n['ssh_port']})")
     try:
-        rc, out = ssh(n, "cat /etc/os-release && nproc", timeout=30, via_wg=False)
+        rc, out = ssh(n, "cat /etc/os-release && nproc", timeout=30, via_wg=wg)
         if rc:
             if re.search(r"Permission denied|publickey", out):
-                raise RuntimeError("le serveur refuse la clé de Hangar : as-tu collé la ligne d'autorisation en root ?")
-            raise RuntimeError("connexion SSH impossible : " + P.tail(out, 2))
+                raise RuntimeError(f"le serveur refuse la clé de Hangar : as-tu collé la ligne d'autorisation "
+                                   f"dans le compte {user} ?")
+            raise RuntimeError(_sudo_error(out) or "connexion SSH impossible : " + P.tail(out, 2))
         if "ID=debian" not in out:
             raise RuntimeError("Debian requis sur le nœud")
         buf = io.BytesIO()
@@ -275,12 +320,17 @@ def install(node_id):
                              (f"{SRC}/docker/platform-compose.yml", "platform-compose.yml"),
                              (f"{SRC}/systemd/nftables-neutralise.conf", "nftables-neutralise.conf")):
                 tar.add(src, arcname=arc)
+            # accès root de la console, limité à son adresse sur le réseau privé (voir bootstrap.sh)
+            line = f'from="{WG_LOCAL}" {pubkey().strip()}\n'.encode()
+            ti = tarfile.TarInfo("console.authorized")
+            ti.size, ti.mode = len(line), 0o644
+            tar.addfile(ti, io.BytesIO(line))
         rc, out = ssh(n, "rm -rf /opt/hangar-node && mkdir -p /opt/hangar-node && tar -C /opt/hangar-node -xf -",
-                      input=buf.getvalue(), timeout=60, via_wg=False)
+                      input=buf.getvalue(), timeout=60, via_wg=wg)
         if rc:
-            raise RuntimeError("copie des fichiers impossible : " + P.tail(out, 2))
+            raise RuntimeError(_sudo_error(out) or "copie des fichiers impossible : " + P.tail(out, 2))
         _log(n, "info", "préparation du nœud (Docker, PostgreSQL, pare-feu, WireGuard) : quelques minutes")
-        rc, out = ssh(n, "bash /opt/hangar-node/bootstrap.sh", timeout=1800, via_wg=False)
+        rc, out = ssh(n, "bash /opt/hangar-node/bootstrap.sh", timeout=1800, via_wg=wg)
         vals = dict(re.findall(r"^HANGAR_([A-Z_]+)=(.*)$", out, re.M))
         if rc or vals.get("DONE") != "1":
             raise RuntimeError(vals.get("ERROR") or f"étape « {vals.get('STEP', '?')} » en échec : " + P.tail(out, 3))
@@ -310,6 +360,8 @@ def install(node_id):
     except Exception as e:
         _update(node_id, state="error", error=str(e)[:500])
         _log(n, "error", f"installation en échec : {e}")
+    finally:
+        _sudo_pw.pop(node_id, None)
 
 
 def set_ingress(node_id, on):
@@ -330,8 +382,10 @@ def remove(node_id):
         raise ValueError("Nœud inconnu.")
     if db.one("SELECT 1 FROM apps WHERE node = ?", (node_id,)):
         raise ValueError("Ce nœud héberge encore des applis : déplace-les ou supprime-les d'abord.")
-    ssh(n, f"systemctl disable --now cloudflared >/dev/null 2>&1; systemctl disable --now wg-quick@{WG_IF} "
-           f">/dev/null 2>&1; rm -f /etc/wireguard/{WG_IF}.conf", timeout=20, via_wg=False)
+    # par le réseau privé tant qu'il répond (un compte sudo avec mot de passe ne passe pas par l'adresse publique)
+    ssh(n, f"systemctl disable --now cloudflared >/dev/null 2>&1; systemd-run --on-active=2 bash -c "
+           f"'systemctl disable --now wg-quick@{WG_IF}; rm -f /etc/wireguard/{WG_IF}.conf' >/dev/null 2>&1",
+        timeout=20, via_wg=_wg_alive(n))
     db.x("DELETE FROM nodes WHERE id = ?", (node_id,))
     db.x("DELETE FROM stats_node WHERE node = ?", (node_id,))
     try:
