@@ -189,7 +189,7 @@
 
   {% if others and not ha %}
   <form class="panel" id="nodemove" method="post" action="/apps/{{ a.slug }}/node/move"
-        onsubmit="return confirm('Déplacer {{ a.name }} ? Coupure de quelques secondes pendant la bascule.')">
+        data-confirm="Déplacer {{ a.name }} ? Coupure de quelques secondes pendant la bascule.">
     <h2>Nœud</h2>
     <dl class="facts"><dt>Actuel</dt><dd><a href="/nodes/{{ a.node }}">{{ a.node }}</a></dd>
       <dt>Données</dt><dd>{{ dsize | size if dsize is not none else '?' }}{{ ' + base' if a.db }}</dd></dl>
@@ -238,11 +238,11 @@
   <details><summary class="hint">Voir les données en tableau</summary><div class="tablebox" id="stattable"></div></details>
   <span class="hint">Requêtes vues par Caddy (le healthcheck interne de la console n'est pas compté). Données gardées 8 jours.</span>
 </section>
-<script id="stdata" type="application/json">{{ st | tojson }}</script>
-<script src="/static/charts.js" defer></script>
+<script nonce="{{ csp_nonce }}" id="stdata" type="application/json">{{ st | tojson }}</script>
+<script nonce="{{ csp_nonce }}" src="/static/charts.js" defer></script>
 {% endif %}
 
-<script>
+<script nonce="{{ csp_nonce }}">
 (function () {
   var DOMS = {{ (domains or []) | map(attribute='name') | list | tojson }}, HUBS = {}, REG = {{ (registries or {}) | tojson }};
   {% for d in domains or [] %}HUBS[{{ d.name | tojson }}] = {{ d.hub | tojson }};

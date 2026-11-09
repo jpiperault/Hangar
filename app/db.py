@@ -36,6 +36,9 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS events_ts ON events(ts);
 CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, hash TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS sessions (             -- sessions ouvertes : révocables (déconnexion, mot de passe changé)
+    id TEXT PRIMARY KEY, username TEXT NOT NULL, created REAL NOT NULL, seen REAL NOT NULL, ip TEXT
+);
 CREATE TABLE IF NOT EXISTS backups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts REAL NOT NULL, duration REAL, ok INTEGER NOT NULL, remote INTEGER NOT NULL DEFAULT 0,

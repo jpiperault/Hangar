@@ -13,7 +13,7 @@
       <details class="bans"><summary class="btn sm">Bannies ({{ banned | length }})</summary>
         <div class="banbox">{% for ip in banned[:50] %}<form class="banrow" method="post" action="/nodes/{{ n.id }}/unban"><span class="mono">{{ ip }}</span><input type="hidden" name="ip" value="{{ ip }}"><button class="btn sm">Débannir</button></form>{% endfor %}</div></details>
     {%- elif c.key == 'reboot' -%}
-      <form method="post" action="/nodes/{{ n.id }}/reboot" onsubmit="return confirm('Redémarrer {{ n.name }} maintenant ? Ses applis sont coupées une à deux minutes.')"><button class="btn sm">Redémarrer</button></form>
+      <form method="post" action="/nodes/{{ n.id }}/reboot" data-confirm="Redémarrer {{ n.name }} maintenant ? Ses applis sont coupées une à deux minutes."><button class="btn sm">Redémarrer</button></form>
     {%- elif c.key == 'applied' and c.level == 'warn' -%}
       <form method="post" action="/security/{{ n.id }}/apply"><button class="btn sm primary">Appliquer</button></form>
     {%- endif -%}</span></div>
@@ -92,7 +92,7 @@
 {% endmacro %}
 
 {% macro secscript() %}
-<script>
+<script nonce="{{ csp_nonce }}">
 (function () {
   function sync(prefix) {
     var r = document.querySelector('input[data-sm="' + prefix + '"]:checked');

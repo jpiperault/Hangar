@@ -4,7 +4,7 @@
   <h1>Journal</h1>
   <form method="get" action="/journal" style="display:flex;gap:8px;align-items:center">
     <label for="app" class="hint">Filtrer</label>
-    <select id="app" name="app" onchange="this.form.submit()">
+    <select id="app" name="app" data-autosubmit>
       <option value="">Tout</option>
       {% for n in names %}<option value="{{ n }}" {{ 'selected' if n == app_filter }}>{{ n }}</option>{% endfor %}
     </select>

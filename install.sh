@@ -201,7 +201,7 @@ if [ -f /etc/nftables.d/platform.nft ]; then
   APORT=$(sed -n 's/.*ip saddr @lan tcp dport { 22, \([0-9]*\) }.*/\1/p' /etc/nftables.d/platform.nft | head -1)
   [ -n "$NETS" ] || NETS="$LAN"; [ -n "$APORT" ] || APORT=8443
 fi
-sed "s|elements = { [^}]* }|elements = { $NETS }|; s|tcp dport { 22, 8443 }|tcp dport { 22, $APORT }|" \
+sed "/set lan/ s|elements = { [^}]* }|elements = { $NETS }|; s|tcp dport { 22, 8443 }|tcp dport { 22, $APORT }|" \
   "$SRC/deploy/nftables/platform.nft" > /etc/nftables.d/platform.nft
 nft -c -f /etc/nftables.d/platform.nft || die "règles de pare-feu invalides"
 install -m 0644 "$SRC/deploy/apt/20auto-upgrades" /etc/apt/apt.conf.d/20auto-upgrades

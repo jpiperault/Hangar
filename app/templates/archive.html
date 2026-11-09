@@ -35,7 +35,7 @@
   <div class="field"><label for="confirm">Tape <code>restaurer</code> pour confirmer</label><input id="confirm" name="confirm" autocomplete="off" spellcheck="false"></div>
   <div class="bar" style="justify-content:flex-start"><button class="btn danger">Lancer la restauration</button><a class="btn" href="/backups#archives">Annuler</a></div>
 </form>
-<script>
+<script nonce="{{ csp_nonce }}">
 document.getElementById('all').addEventListener('click', function () {
   document.querySelectorAll('form input[type=checkbox]').forEach(function (c) { c.checked = true; });
 });

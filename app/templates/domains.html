@@ -37,7 +37,7 @@
     {% if d.is_default %}<input type="hidden" name="default" value="on">{% endif %}
     <div class="acts" style="justify-content:space-between">
       <button class="btn primary sm">Enregistrer et recharger Caddy</button>
-      {% if not usage[d.name] and doms | length > 1 %}<button class="btn sm danger" formaction="/domains/{{ d.name }}/remove" onclick="return confirm('Retirer {{ d.name }} ?')">Retirer</button>{% endif %}
+      {% if not usage[d.name] and doms | length > 1 %}<button class="btn sm danger" formaction="/domains/{{ d.name }}/remove" data-confirm="Retirer {{ d.name }} ?">Retirer</button>{% endif %}
     </div>
   </form>
   {% endfor %}
@@ -69,7 +69,7 @@
     <p class="hint">Hangar crée, met à jour et retire lui-même les noms publics : règles du tunnel et enregistrements DNS. Il ne touche qu'à ses propres noms ; un nom déjà utilisé ailleurs n'est jamais écrasé.</p>
     <div class="acts" style="justify-content:flex-start">
       <form method="post" action="/cloudflare/sync"><button class="btn sm primary">Synchroniser maintenant</button></form>
-      <form method="post" action="/cloudflare/remove" onsubmit="return confirm('Retirer le jeton ? Ce qui existe chez Cloudflare reste en place.')"><button class="btn sm">Retirer le jeton</button></form>
+      <form method="post" action="/cloudflare/remove" data-confirm="Retirer le jeton ? Ce qui existe chez Cloudflare reste en place."><button class="btn sm">Retirer le jeton</button></form>
     </div>
     {% else %}
     <p class="hint">Sans jeton, chaque nom se déclare à la main (liste ci-dessous). Avec un jeton, Hangar s'en charge dès que tu ajoutes un domaine ou une adresse.</p>
@@ -119,7 +119,7 @@
   </section>
 </div>
 </div>
-<script>
+<script nonce="{{ csp_nonce }}">
 document.querySelectorAll('form[id^="d-"]').forEach(function (fm) {   // vider un préfixe coupe ses routes et son apps.json
   var hub = fm.elements.hub, before = hub.value;
   fm.addEventListener('submit', function (ev) {

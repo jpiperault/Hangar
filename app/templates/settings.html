@@ -41,7 +41,7 @@
         </div>
         <div class="acts" style="justify-content:space-between">
           <button class="btn sm primary">Changer le mot de passe</button>
-          {% if u.username != user and users | length > 1 %}<button class="btn sm danger" formaction="/users/{{ u.username }}/remove" formnovalidate onclick="return confirm('Supprimer le compte {{ u.username }} ?')">Supprimer le compte</button>{% endif %}
+          {% if u.username != user and users | length > 1 %}<button class="btn sm danger" formaction="/users/{{ u.username }}/remove" formnovalidate data-confirm="Supprimer le compte {{ u.username }} ?">Supprimer le compte</button>{% endif %}
         </div>
       </form>
     </details>

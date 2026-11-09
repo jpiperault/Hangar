@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_meter.html" import meter %}
-{% from "_security.html" import secform, statetable, summary, badge, secscript %}
+{% from "_security.html" import secform, statetable, summary, badge, secscript with context %}
 {% block main %}{% set i = n.info or {} %}{% set remote = n.id != 'local' %}
 <div class="bar">
   <div><div class="crumb"><a href="/nodes">Nœuds</a> /</div><h1>{{ n.name }}</h1><span class="hint">{{ n.id }} · {{ n.address }}{% if remote %} · SSH {{ n.ssh_user or 'root' }}, port {{ n.ssh_port }} · réseau privé {{ n.wg_ip }}{% endif %}</span></div>
@@ -39,8 +39,8 @@
       {% if remote %}<dl class="facts"><dt>Lien privé</dt><dd>{{ ('vu ' ~ (now - hs) | dur ~ ' plus tôt') if hs else 'jamais établi' }}</dd></dl>{% endif %}
     </section>
   </div>
-  <script id="stdata" type="application/json">{{ se | tojson }}</script>
-  <script src="/static/charts.js" defer></script>
+  <script nonce="{{ csp_nonce }}" id="stdata" type="application/json">{{ se | tojson }}</script>
+  <script nonce="{{ csp_nonce }}" src="/static/charts.js" defer></script>
 </div>
 
 {# ------------------------------------------------------------ sécurité #}
@@ -64,7 +64,7 @@
       <h2 style="margin:0">Réglages <span class="pill s-stopped" style="margin-left:6px;vertical-align:middle">{{ 'propres à ce nœud' if sec.own else 'politique générale' }}</span></h2>
       <span class="acts" style="gap:8px" data-editlabel="secedit" {{ 'hidden' if sec.err }}>
         {% if sec.own %}
-        <form method="post" action="/nodes/{{ n.id }}/security" onsubmit="return confirm('Remplacer les réglages propres de {{ n.name }} par la politique générale ?')"><input type="hidden" name="which" value="global"><button class="btn sm">Revenir à la politique générale</button></form>
+        <form method="post" action="/nodes/{{ n.id }}/security" data-confirm="Remplacer les réglages propres de {{ n.name }} par la politique générale ?"><input type="hidden" name="which" value="global"><button class="btn sm">Revenir à la politique générale</button></form>
         <button type="button" class="btn sm primary" data-edit="secedit">Modifier</button>
         {% else %}
         <a class="btn sm" href="/security">Modifier la politique générale</a>
@@ -115,7 +115,7 @@
         <span class="hint">Relance l'installation puis réapplique la sécurité : sans danger, rien n'est effacé.</span>
         <div><button class="btn sm" {{ 'disabled' if n.state == 'installing' }}>Réinstaller / réparer</button></div></form>
       <h2 style="margin-top:20px">Redémarrer</h2>
-      <form method="post" action="/nodes/{{ n.id }}/reboot" onsubmit="return confirm('Redémarrer {{ n.name }} maintenant ? Ses applis sont coupées une à deux minutes.')" style="display:flex;flex-direction:column;gap:10px">
+      <form method="post" action="/nodes/{{ n.id }}/reboot" data-confirm="Redémarrer {{ n.name }} maintenant ? Ses applis sont coupées une à deux minutes." style="display:flex;flex-direction:column;gap:10px">
         <span class="hint">Les applis du nœud sont coupées une à deux minutes et repartent toutes seules.</span>
         <div><button class="btn sm" {{ 'disabled' if n.state != 'ok' }}>Redémarrer le nœud</button></div></form>
     </section>
@@ -129,7 +129,7 @@
 </div>
 {% endif %}
 
-<script>
+<script nonce="{{ csp_nonce }}">
 (function () {   // onglets : l'adresse garde l'onglet ouvert (#securite…), sans JavaScript tout reste affiché
   var panes = document.querySelectorAll('[data-pane]'), tabs = document.querySelectorAll('[data-tab]');
   function show() {

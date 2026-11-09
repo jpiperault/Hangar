@@ -28,6 +28,7 @@ def passwd(args):
         print("Mot de passe enregistré.")
     db.x("INSERT INTO users(username, hash) VALUES(?, ?) ON CONFLICT(username) DO UPDATE SET hash = excluded.hash",
          (user, PasswordHasher().hash(pw)))
+    db.x("DELETE FROM sessions WHERE username = ?", (user,))   # sessions ouvertes fermées
 
 
 def serve():
@@ -84,7 +85,7 @@ def restore(args):
         os.chmod(f"{backup.ARCHIVES}/{name}", 0o600)
     if "--no-settings" not in args and man.get("settings"):
         backup.apply_settings(man["settings"])
-        print("Domaines repris : " + ", ".join(f"{d['name']} ({d['mode']})" for d in man["settings"]["domains"]))
+        print("Domaines repris : " + (", ".join(f"{d['name']} ({d['mode']})" for d in man["settings"]["domains"]) or "aucun"))
     choices = {a["slug"]: [p for p in ("data", "db") if a.get(f"has_{p}")]
                for a in man["apps"] if only is None or a["slug"] in only}
     print(f"Restauration de {len(choices)} appli(s) : {', '.join(choices) or 'aucune'}")

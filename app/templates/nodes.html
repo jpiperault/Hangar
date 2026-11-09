@@ -32,7 +32,7 @@
     <li>Prends un serveur sous <strong>Debian 13</strong> : VPS, serveur dédié ou conteneur Proxmox (avec <code>nesting</code> et <code>keyctl</code>). Il doit être joignable en SSH, et en UDP sur le port {{ 51820 }} pour le réseau privé.</li>
     <li>Connecté sur ce serveur avec le compte que Hangar utilisera (<code>root</code>, ou ton compte habituel s'il a <code>sudo</code>), colle cette ligne. Elle autorise uniquement la clé de Hangar :
       <div class="cert"><code class="mono" id="authline" style="word-break:break-all">mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '{{ key }}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys</code>
-      <button type="button" class="btn sm" onclick="navigator.clipboard && navigator.clipboard.writeText(document.getElementById('authline').textContent).then(()=>{this.textContent='Copié'})">Copier</button></div></li>
+      <button type="button" class="btn sm" data-copy="authline">Copier</button></div></li>
     <li>Remplis puis lance l'installation. Hangar installe Docker, PostgreSQL, le pare-feu et le réseau privé, puis vérifie que tout répond. Compte 3 à 5 minutes.</li>
   </ol>
   <div class="row3">

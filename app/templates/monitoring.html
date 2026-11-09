@@ -34,8 +34,8 @@
   <div class="charts" id="charts"></div>
   <details><summary class="hint">Voir les données en tableau</summary><div class="tablebox" id="stattable"></div></details>
 </section>
-<script id="stdata" type="application/json">{{ hs | tojson }}</script>
-<script src="/static/charts.js" defer></script>
+<script nonce="{{ csp_nonce }}" id="stdata" type="application/json">{{ hs | tojson }}</script>
+<script nonce="{{ csp_nonce }}" src="/static/charts.js" defer></script>
 
 <section class="panel" style="margin-top:20px">
   <h2>Applications</h2>

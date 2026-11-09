@@ -25,7 +25,7 @@
       </dl>
       {% if not own_client %}<p class="hint lv-warn">L'identifiant partagé de rclone est souvent bloqué par Google. Si les sauvegardes échouent avec « rateLimitExceeded », déconnecte Drive et reconnecte-le avec ton propre identifiant.</p>{% endif %}
       <span class="hint">Chaque nuit à 3 h : un export de chaque base, le dossier data/ de chaque appli et la configuration de la plateforme. Tout est chiffré avant l'envoi : Google ne voit que des fichiers illisibles.</span>
-      <form method="post" action="/backups/drive/disconnect" onsubmit="return confirm('Déconnecter Google Drive ? Les sauvegardes déjà envoyées restent dans le Drive.')"><button class="btn sm">Déconnecter</button></form>
+      <form method="post" action="/backups/drive/disconnect" data-confirm="Déconnecter Google Drive ? Les sauvegardes déjà envoyées restent dans le Drive."><button class="btn sm">Déconnecter</button></form>
     {% elif pending and google_url %}
       <ol class="steps">
         <li><a class="btn primary sm" href="{{ google_url }}" target="_blank" rel="noopener">Ouvrir Google et autoriser l'accès</a>
@@ -70,7 +70,7 @@
         <dt>Dossier</dt><dd>{{ (nas.share ~ '/' if nas.kind == 'smb' else ('/' if nas.abs else '')) ~ nas.path }}</dd>
       </dl>
       <span class="hint">Chaque sauvegarde part aussi sur le NAS, chiffrée avec le même mot de passe que Drive.</span>
-      <form method="post" action="/backups/nas/disconnect" onsubmit="return confirm('Déconnecter le NAS ? Les sauvegardes déjà envoyées y restent.')"><button class="btn sm">Déconnecter</button></form>
+      <form method="post" action="/backups/nas/disconnect" data-confirm="Déconnecter le NAS ? Les sauvegardes déjà envoyées y restent."><button class="btn sm">Déconnecter</button></form>
     {% else %}
       <p class="hint">Une copie chez toi, pour restaurer vite sans passer par Internet. Crée sur le NAS un utilisateur dédié (par exemple « hangar ») avec accès en écriture à un dossier partagé.</p>
       <form method="post" action="/backups/nas/connect" autocomplete="off">
@@ -93,7 +93,7 @@
         <span class="hint">SMB : le nom du partage tel qu'il apparaît sur le réseau (Synology : « Dossier partagé »). SFTP : le chemin depuis le dossier de l'utilisateur, ou absolu s'il commence par /. Le mot de passe est rangé dans /srv/platform/backup (root seulement).</span>
         <div style="margin-top:10px"><button class="btn primary">Tester et connecter le NAS</button></div>
       </form>
-      <script>
+      <script nonce="{{ csp_nonce }}">
       (function(){var f=document.getElementById('nsharef');function u(){var k=document.querySelector('input[name=kind]:checked').value;f.hidden=k!=='smb';}
       document.querySelectorAll('input[name=kind]').forEach(function(r){r.addEventListener('change',u)});u();})();
       </script>
@@ -108,7 +108,7 @@
         <span class="acts">
           <a class="btn sm" href="/backups/archive/{{ x.name }}/download" download>Télécharger</a>
           <a class="btn sm" href="/backups/archive/{{ x.name }}">Restaurer…</a>
-          <form class="inline" method="post" action="/backups/archive/{{ x.name }}/delete" onsubmit="return confirm('Supprimer cette archive du serveur ?')"><button class="btn sm link">Supprimer</button></form>
+          <form class="inline" method="post" action="/backups/archive/{{ x.name }}/delete" data-confirm="Supprimer cette archive du serveur ?"><button class="btn sm link">Supprimer</button></form>
         </span></div>
     {% else %}<p class="hint">Aucune archive pour l'instant : clique sur « Créer une archive à télécharger ».</p>{% endfor %}
     <form method="post" action="/backups/archive/upload" enctype="multipart/form-data" class="inlinefield">
@@ -123,7 +123,7 @@
     {% if pw %}
     <p class="hint"><strong>Sans ce mot de passe, les sauvegardes Drive et NAS sont illisibles, même pour toi.</strong> Si ce serveur disparaît, c'est lui qui permet de tout récupérer. Garde-le dans ton gestionnaire de mots de passe, avec le nom du dossier « {{ folder }} ».</p>
     <details><summary class="btn sm">Afficher le mot de passe</summary>
-      <div class="cert"><span class="mono" id="pw">{{ pw }}</span><button type="button" class="btn sm" onclick="navigator.clipboard && navigator.clipboard.writeText(document.getElementById('pw').textContent).then(()=>{this.textContent='Copié'})">Copier</button></div>
+      <div class="cert"><span class="mono" id="pw">{{ pw }}</span><button type="button" class="btn sm" data-copy="pw">Copier</button></div>
     </details>
     {% endif %}
     {% if not dests %}

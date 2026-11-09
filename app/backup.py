@@ -795,9 +795,17 @@ def read_manifest(path):
         raise ValueError(f"archive illisible : {e}")
     if not manifest or manifest.get("format") not in (1, 2) or not isinstance(manifest.get("apps"), list):
         raise ValueError("ce fichier n'est pas une archive Hangar (manifest.json absent ou inconnu)")
+    for a in manifest["apps"]:   # rien d'une archive n'est sûr : mêmes règles que le formulaire, sinon refus
+        bad = P.check_app_entry(a) if isinstance(a, dict) else ["format"]
+        if bad:
+            who = a.get("slug") if isinstance(a, dict) and isinstance(a.get("slug"), str) else "?"
+            raise ValueError(f"archive refusée : appli « {who[:40]} » invalide ({', '.join(bad)})")
     # archives d'avant le multi-domaine : un domaine de base + alias, expose/sub par appli
     doms = D.legacy_domains(manifest.get("settings"))
-    manifest["settings"] = {"domains": doms} if doms else None
+    raw_sec = (manifest.get("settings") or {}).get("security") if isinstance(manifest.get("settings"), dict) else None
+    from . import security
+    sec = security.validate_policy(raw_sec) if raw_sec else None
+    manifest["settings"] = {"domains": doms or [], "security": sec} if (doms or sec) else None
     for a in manifest["apps"]:
         a["routes"] = D.legacy_routes(a, doms)
         a["has_db"], a["has_data"] = a.get("slug") in has_db, a.get("slug") in has_data
@@ -961,9 +969,11 @@ def snapshot_to_archive(dest_id, snap):
 def apply_settings(st):
     """Reprend les domaines d'une archive (ajoutés ou mis à jour ; ceux d'ici qui n'y sont pas restent),
     et la politique de sécurité des nœuds si elle y est (appliquée ensuite depuis la page Sécurité)."""
-    if isinstance((st or {}).get("security"), dict):
-        db.kv_set("security", st["security"])
-        P.log("info", "sécurité", "politique générale reprise de l'archive")
+    if isinstance((st or {}).get("security"), dict):   # déjà validée par read_manifest, sans clés d'administration
+        keys = (db.kv_get("security") or {}).get("admin_keys") or []
+        db.kv_set("security", {**st["security"], "admin_keys": keys})
+        P.log("info", "sécurité", "politique générale reprise de l'archive (clés d'administration non reprises), "
+              "à appliquer depuis la page Sécurité")
     doms = D.legacy_domains(st)
     if not doms:
         return

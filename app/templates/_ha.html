@@ -24,11 +24,11 @@
     {% if not ha.busy and a.status != 'deploying' %}
     <div class="acts" style="justify-content:flex-start;flex-wrap:wrap;margin-top:8px">
       {% if h.state in ('ok',) %}
-      {% if h.mode == 'standby' %}<form method="post" action="/apps/{{ a.slug }}/ha/switch" onsubmit="return confirm('Basculer {{ a.name }} sur son secours ? Coupure de quelques secondes, sans perte de données.')"><button class="btn sm">Basculer sur le secours</button></form>
-      {% elif a.db %}<form method="post" action="/apps/{{ a.slug }}/ha/switch" onsubmit="return confirm('Déplacer la base principale de {{ a.name }} vers sa réplique ? Coupure de quelques secondes, sans perte de données.')"><button class="btn sm">Déplacer la base principale</button></form>{% endif %}
+      {% if h.mode == 'standby' %}<form method="post" action="/apps/{{ a.slug }}/ha/switch" data-confirm="Basculer {{ a.name }} sur son secours ? Coupure de quelques secondes, sans perte de données."><button class="btn sm">Basculer sur le secours</button></form>
+      {% elif a.db %}<form method="post" action="/apps/{{ a.slug }}/ha/switch" data-confirm="Déplacer la base principale de {{ a.name }} vers sa réplique ? Coupure de quelques secondes, sans perte de données."><button class="btn sm">Déplacer la base principale</button></form>{% endif %}
       {% endif %}
-      <form method="post" action="/apps/{{ a.slug }}/ha/resync" onsubmit="return confirm('Refaire le secours de zéro (copie complète de la base et de data/) ?')"><button class="btn sm">Resynchroniser</button></form>
-      <form method="post" action="/apps/{{ a.slug }}/ha/disable" onsubmit="return confirm('Retirer la haute dispo de {{ a.name }} ? La base revient dans le PostgreSQL partagé (courte coupure).')"><button class="btn sm danger">Retirer</button></form>
+      <form method="post" action="/apps/{{ a.slug }}/ha/resync" data-confirm="Refaire le secours de zéro (copie complète de la base et de data/) ?"><button class="btn sm">Resynchroniser</button></form>
+      <form method="post" action="/apps/{{ a.slug }}/ha/disable" data-confirm="Retirer la haute dispo de {{ a.name }} ? La base revient dans le PostgreSQL partagé (courte coupure)."><button class="btn sm danger">Retirer</button></form>
     </div>
     <details style="margin-top:10px"><summary class="hint">Réglages de la bascule</summary>
       <form method="post" action="/apps/{{ a.slug }}/ha/options" style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
@@ -45,7 +45,7 @@
     <p class="hint">Il faut au moins un autre nœud en ligne (page <a href="/nodes">Nœuds</a>) pour protéger cette appli.</p>
   {% else %}
   <form method="post" action="/apps/{{ a.slug }}/ha/enable" style="display:flex;flex-direction:column;gap:10px"
-        onsubmit="return confirm('Mettre en place la haute dispo ? {{ 'La base passe dans une instance dédiée : coupure de quelques secondes.' if a.db else '' }}')">
+        data-confirm="Mettre en place la haute dispo ? {{ 'La base passe dans une instance dédiée : coupure de quelques secondes.' if a.db else '' }}">
     <div class="seg" role="radiogroup" aria-label="Mode de haute disponibilité">
       <label><input type="radio" name="mode" value="standby" checked data-ham="1"><span>Secours à chaud</span></label>
       <label><input type="radio" name="mode" value="replicas" data-ham="1"><span>Instances multiples</span></label>
@@ -66,7 +66,7 @@
     <div class="field"><label for="hdl">Après (minutes d'indisponibilité)</label><input id="hdl" name="delay" type="number" min="4" max="60" value="4"></div>
     <div><button class="btn sm primary">Mettre en place</button></div>
   </form>
-  <script>
+  <script nonce="{{ csp_nonce }}">
   (function () { function s() { var m = document.querySelector('input[data-ham]:checked').value;
     document.getElementById('ham-standby').hidden = m !== 'standby'; document.getElementById('ham-replicas').hidden = m !== 'replicas'; }
     document.querySelectorAll('input[data-ham]').forEach(function (r) { r.addEventListener('change', s); }); s(); })();

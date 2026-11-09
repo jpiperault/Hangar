@@ -10,6 +10,16 @@ WorkingDirectory=/opt/hangar
 ExecStart=/opt/hangar/venv/bin/python -m app
 Restart=on-failure
 RestartSec=3
+# Confinement : la console doit rester root (Docker, nftables, WireGuard, SSH vers les nœuds),
+# mais sans gain de privilèges ni accès à ce qui ne la regarde pas.
+NoNewPrivileges=yes
+PrivateTmp=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+ProtectHostname=yes
+ProtectClock=yes
+ProtectKernelLogs=yes
 
 [Install]
 WantedBy=multi-user.target

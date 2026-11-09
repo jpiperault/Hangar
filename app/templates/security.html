@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_security.html" import secform, summary, badge, secscript %}
+{% from "_security.html" import secform, summary, badge, secscript with context %}
 {% block main %}
 <div class="bar"><div><h1>Sécurité des nœuds</h1>
   <span class="hint">Pare-feu, SSH, anti-force brute et mises à jour des machines exposées sur Internet. Chaque nœud suit la politique générale, ou ses propres réglages (onglet Sécurité de sa fiche).</span></div></div>
@@ -40,10 +40,20 @@
 </section>
 
 <div class="cols" style="margin-top:20px">
-  <section class="panel">
-    <h2>Ce serveur (console)</h2>
-    <p class="hint">La console n'est pas exposée : elle n'écoute que sur ton réseau local ({{ lan }}) et reçoit le trafic des applis par le tunnel Cloudflare. Son accès se règle dans <a href="/settings#acces">Accès et comptes</a>.</p>
-  </section>
+  <form class="panel" id="console" method="post" action="/security/console-ssh" autocomplete="off" style="display:flex;flex-direction:column;gap:10px">
+    <h2 style="margin:0">Ce serveur (console)</h2>
+    <p class="hint" style="margin:0">La console n'est pas exposée : elle n'écoute que sur ton réseau local ({{ lan }}) et reçoit le trafic des applis par le tunnel Cloudflare ; ses applis n'atteignent ni elle, ni ton réseau local, ni les nœuds. Son accès web se règle dans <a href="/settings#acces">Accès et comptes</a>.</p>
+    <div class="sectable">
+      <div class="secrow">{{ badge('ok' if not cssh.passwords else 'warn') }}<span class="sl">SSH</span><span class="hint">{{ 'clés seulement' if not cssh.passwords else 'mots de passe acceptés' }}, root {{ {'yes': 'permis avec mot de passe', 'prohibit-password': 'par clé seulement', 'without-password': 'par clé seulement', 'no': 'interdit'}.get(cssh.root, cssh.root) }} · {{ cssh.nkeys }} clé{{ 's' if cssh.nkeys != 1 }} pour root</span><span></span></div>
+      <div class="secrow">{{ badge('ok' if cssh.f2b else 'warn') }}<span class="sl">Anti-force brute</span><span class="hint">{{ 'fail2ban actif' if cssh.f2b else 'aucun' }}</span><span></span></div>
+    </div>
+    <div class="field"><label for="ckeys">Ajouter des clés publiques pour root</label>
+      <textarea id="ckeys" name="keys" spellcheck="false" style="min-height:52px" placeholder="ssh-ed25519 AAAA… moi@pc"></textarea>
+      <span class="hint">Contenu de <code>~/.ssh/id_ed25519.pub</code> sur ton ordinateur (crée-la avec <code>ssh-keygen -t ed25519</code>).</span></div>
+    <label class="check"><input type="checkbox" name="keys_only" {{ 'checked' if not cssh.passwords }}><span>Connexion par clé seulement (refusé tant que root n'a aucune clé)</span></label>
+    <label class="check"><input type="checkbox" name="f2b" {{ 'checked' if cssh.f2b or not cssh.managed }}><span>Bannir les adresses qui échouent (fail2ban)</span></label>
+    <div><button class="btn sm primary">Appliquer à la console</button></div>
+  </form>
   <section class="panel">
     <h2>En cas de blocage</h2>
     <p class="hint">Plus d'accès SSH à un nœud : ouvre la console d'urgence de l'hébergeur (KVM, IPMI, « rescue »), connecte-toi en root, puis :</p>

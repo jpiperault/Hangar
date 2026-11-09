@@ -663,8 +663,53 @@ def rebind_local_apps():
 
 # ---------------------------------------------------------------- fichiers d'une appli
 
+# Règles des champs d'une appli : formulaire de la console et manifeste d'une archive importée.
+SLUG = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$")
+PKG = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$")
+IMAGE = re.compile(r"^[a-z0-9][a-z0-9._/-]*(:[0-9]+/[a-z0-9._/-]+)?$")
+GIT = re.compile(r"^(https://[^\s#@'\"$`\\;|&<>]+|git@[^\s#'\"$`\\;|&<>]+:[^\s#'\"$`\\;|&<>]+)$")
+VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$")
+HEALTH = re.compile(r"^/[A-Za-z0-9._~/?=&%-]*$")
+
+
 def app_dir(slug):
+    # garde-fou : le chemin finit dans des commandes shell (console et nœuds), jamais d'identifiant hors règle
+    if not isinstance(slug, str) or not SLUG.match(slug):
+        raise ValueError(f"identifiant d'appli invalide : {slug!r}"[:120])
     return f"{APPS_DIR}/{slug}"
+
+
+def check_app_entry(e):
+    """Valide une appli venue d'ailleurs que le formulaire (manifeste d'archive). Retourne la liste des problèmes."""
+    bad = []
+    def chk(ok, msg):
+        if not ok:
+            bad.append(msg)
+    slug = e.get("slug")
+    chk(isinstance(slug, str) and SLUG.match(slug), "identifiant")
+    name = e.get("name")
+    chk(isinstance(name, str) and 0 < len(name) <= 80 and not re.search(r"[\x00-\x1f\x7f]", name), "nom")
+    chk(not e.get("pkg") or (isinstance(e["pkg"], str) and PKG.match(e["pkg"])), "package")
+    src = e.get("source", "image")
+    chk(src in ("image", "git"), "source")
+    img = e.get("image")
+    chk(isinstance(img, str) and (IMAGE if src == "image" else GIT).match(img), "image")
+    chk(isinstance(e.get("version"), str) and VERSION.match(e["version"]), "version")
+    for k, lo, hi in (("port", 1, 65535), ("mem_mb", 32, 4096)):
+        chk(isinstance(e.get(k), int) and not isinstance(e.get(k), bool) and lo <= e[k] <= hi, k)
+    chk(isinstance(e.get("health_path", "/"), str) and HEALTH.match(e.get("health_path", "/")), "chemin de santé")
+    chk(not e.get("data_user") or (isinstance(e["data_user"], str) and USER_RE.match(e["data_user"])), "propriétaire de /data")
+    env = e.get("env") or ""
+    chk(isinstance(env, str) and len(env) < 65536 and not parse_env(env)[1], "variables")
+    chk(e.get("db", 0) in (0, 1, True, False), "base")
+    chk(not e.get("db_password") or (isinstance(e["db_password"], str) and re.match(r"^[A-Za-z0-9]{8,128}$", e["db_password"])),
+        "mot de passe de base")
+    chk(e.get("desired", "running") in ("running", "stopped"), "état")
+    chk(e.get("expose", "path") in ("path", "sub", "both", "none", None), "exposition")
+    chk(not e.get("sub") or (isinstance(e["sub"], str) and re.match(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", e["sub"])),
+        "sous-domaine")
+    chk(e.get("node") is None or (isinstance(e["node"], str) and re.match(r"^[a-z0-9][a-z0-9-]{0,30}$", e["node"])), "nœud")
+    return bad
 
 
 def db_name(slug):
@@ -787,6 +832,10 @@ def write_compose(a, version, instance=None, role=None):
         "volumes": [f"{app_dir(a['slug'])}/data:/data"],
         "environment": {k: v.replace("$", "$$") for k, v in env.items()},
         "mem_limit": f"{a['mem_mb']}m",
+        # durcissement : pas d'élévation de privilèges, capacités rares retirées, nombre de processus borné
+        "security_opt": ["no-new-privileges:true"],
+        "cap_drop": ["NET_RAW", "MKNOD", "SYS_CHROOT", "SETFCAP", "AUDIT_WRITE"],
+        "pids_limit": 1024,
         "labels": {"fr.hangar.app": a["slug"], "fr.hangar.version": version},
     }
     if role is None:
@@ -856,6 +905,11 @@ SELECT 1 FROM pg_database WHERE datname = '{n}';
         if rc:
             raise RuntimeError("création de la base impossible : " + tail(out, 2))
         log("ok", a["slug"], f"base PostgreSQL {n} créée" + ("" if is_local(node) else f" sur le nœud {node}"))
+    # chaque appli n'ouvre que sa base (par défaut, PUBLIC peut se connecter à toutes)
+    rc, out = _psql(f"REVOKE CONNECT, TEMPORARY ON DATABASE {n} FROM PUBLIC; REVOKE CONNECT ON DATABASE postgres FROM PUBLIC;"
+                    + (" REVOKE CONNECT ON DATABASE platform FROM PUBLIC;" if container == PG else ""), node, container)
+    if rc:
+        log("warn", a["slug"], "droits de connexion PostgreSQL non restreints : " + tail(out, 2))
 
 
 def app_node(slug):

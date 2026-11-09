@@ -29,7 +29,7 @@ pre#prompt{margin:0;background:var(--surface);border:1px solid var(--line);borde
   {% if apps %}
   <form method="get" action="/prompt" style="display:flex;gap:8px;align-items:center">
     <label for="appsel" class="hint">Préremplir avec</label>
-    <select id="appsel" name="app" onchange="this.form.submit()">
+    <select id="appsel" name="app" data-autosubmit>
       <option value="">Nouvelle appli (exemple)</option>
       {% for x in apps %}<option value="{{ x.slug }}" {{ 'selected' if app and x.slug == app.slug }}>{{ x.name }}</option>{% endfor %}
     </select>
@@ -137,8 +137,8 @@ ADMIN_EMAIL : adresse de l'administrateur</textarea><span class="hint">Une par l
 </section>
 </div>
 
-<script>window.HANGAR = {{ hangar | tojson }};</script>
-<script>{% raw %}
+<script nonce="{{ csp_nonce }}">window.HANGAR = {{ hangar | tojson }};</script>
+<script nonce="{{ csp_nonce }}">{% raw %}
 (function(){
   var KEY='hangar-console-prompt-v1';
   var f=document.getElementById('f');

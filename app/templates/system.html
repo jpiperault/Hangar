@@ -19,7 +19,7 @@
               {% elif x.error %}<span class="hint lv-error">{{ x.error }}</span>{% else %}<span class="hint">à jour</span>{% endif %}</td>
           <td><div class="acts">{% if busy == cid %}<span class="pill s-deploying">En cours…</span>
             {% elif x.available %}<form class="inline" method="post" action="/system/update/{{ cid }}"
-              onsubmit="return confirm({{ ('Mettre à jour ' ~ c.name ~ ' ? ' ~ c.note) | tojson }})"><button class="btn sm primary" {{ 'disabled' if busy }}>Mettre à jour</button></form>{% endif %}</div></td></tr>
+              data-confirm="{{ 'Mettre à jour ' ~ c.name ~ ' ? ' ~ c.note }}"><button class="btn sm primary" {{ 'disabled' if busy }}>Mettre à jour</button></form>{% endif %}</div></td></tr>
       {% endfor %}
         <tr><td><div class="nm">Hangar</div><div class="pk">Code de la console (dépôt GitHub)</div></td>
           <td class="mono">{{ chk.hangar.head }}</td>

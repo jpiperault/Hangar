@@ -19,8 +19,10 @@ import hashlib
 import io
 import ipaddress
 import json
+import os
 import re
 import shlex
+import shutil
 import subprocess
 import tarfile
 import threading
@@ -158,6 +160,30 @@ def to_form(p):
             "extra": "\n".join(ex)}
 
 
+def validate_policy(raw):
+    """Politique venue d'ailleurs (archive) → politique validée par les règles du formulaire, ou None.
+    Les clés d'administration ne sont jamais reprises : une archive ne doit pas pouvoir ouvrir les nœuds."""
+    if not isinstance(raw, dict):
+        return None
+    def txt(v):
+        return "\n".join(str(x) for x in v) if isinstance(v, list) else ""
+    ex = []
+    for x in raw.get("extra") or []:
+        if isinstance(x, dict):
+            ex.append(f"{x.get('proto')} {x.get('from')}-{x.get('to')}" + (f" depuis {','.join(map(str, x['src']))}"
+                                                                           if isinstance(x.get("src"), list) and x["src"] else ""))
+    f = {"ssh_mode": raw.get("ssh_mode"), "ssh_sources": txt(raw.get("ssh_sources")),
+         "ssh_port": str(raw.get("ssh_port") or ""), "ssh_auth": "passwords" if raw.get("ssh_passwords", True) else "keys",
+         "ssh_root": "key" if raw.get("ssh_root") else "no", "admin_keys": "", "keys_ok": "on",
+         "f2b": "on" if raw.get("f2b", True) else "", "f2b_increment": "on" if raw.get("f2b_increment") else "",
+         "updates": "on" if raw.get("updates", True) else "", "reboot": str(raw.get("reboot") or ""),
+         "reboot_on": "on" if raw.get("reboot") else "", "extra": "\n".join(ex)}
+    for k in ("f2b_maxretry", "f2b_findtime", "f2b_bantime"):
+        f[k] = str(raw.get(k) or DEFAULT[k])
+    p, e = parse_form(f)
+    return None if e else p
+
+
 def save_global(p, by):
     db.kv_set("security", p)
     P.log("info", "sécurité", f"politique générale modifiée par {by}")
@@ -272,9 +298,8 @@ def render_nft(p, web):
           "\t\tct state established,related accept",
           "\t\tct state invalid drop",
           "\t\tmeta l4proto { icmp, ipv6-icmp } accept",
-          "\t\tiifname { \"docker0\", \"br-*\" } accept",
-          "\t\t# réseau privé des nœuds (console et autres nœuds) : de confiance",
-          f"\t\tiifname \"{N.WG_IF}\" accept",
+          "\t\t# réseau privé : seule la console administre le nœud (les conteneurs n'atteignent pas l'hôte)",
+          f"\t\tiifname \"{N.WG_IF}\" ip saddr {N.WG_LOCAL} accept",
           f"\t\tudp dport {N.WG_PORT} accept"]
     if p["ssh_mode"] == "open":
         L += [f"\t\t# SSH ouvert : au-delà de 10 nouvelles connexions par minute, une adresse est freinée",
@@ -300,8 +325,20 @@ def render_nft(p, web):
             L.append(f"\t\tip saddr {{ {', '.join(s4)} }} {x['proto']} dport {rng} accept")
         if s6:
             L.append(f"\t\tip6 saddr {{ {', '.join(s6)} }} {x['proto']} dport {rng} accept")
-    L += ["\t\tcounter name refused", "\t}", "}"]
+    L += ["\t\tcounter name refused", "\t}", "",
+          "\t# applis compromises : pas de rebond vers le réseau local, les nœuds ou l'hébergeur (avant Docker)",
+          "\tchain forward {",
+          "\t\ttype filter hook forward priority -1; policy accept;",
+          "\t\tiifname { \"docker0\", \"br-*\" } oifname { \"docker0\", \"br-*\" } accept",
+          "\t\tiifname { \"docker0\", \"br-*\" } meta l4proto { tcp, udp } th dport 53 accept",
+          f"\t\tiifname {{ \"docker0\", \"br-*\" }} ip daddr {N.WG_NET} tcp dport {P.HOST_PORT_MIN + 10000}-38000 accept",
+          f"\t\tiifname {{ \"docker0\", \"br-*\" }} ct state new ip daddr {{ {PRIVATE4} }} counter drop",
+          "\t\tiifname { \"docker0\", \"br-*\" } ct state new ip6 daddr { fc00::/7, fe80::/10 } counter drop",
+          "\t}", "}"]
     return "\n".join(L) + "\n"
+
+
+PRIVATE4 = "10.0.0.0/8, 100.64.0.0/10, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16"
 
 
 def render_sshd(p, n):
@@ -312,7 +349,7 @@ def render_sshd(p, n):
         L += ["PasswordAuthentication no", "KbdInteractiveAuthentication no"]
     L += [f"PermitRootLogin {'prohibit-password' if root else 'no'}",
           "PermitEmptyPasswords no", "MaxAuthTries 3", "LoginGraceTime 30", "X11Forwarding no",
-          "AllowAgentForwarding no", "ClientAliveInterval 300",
+          "AllowAgentForwarding no", "AllowTcpForwarding no", "PermitTunnel no", "ClientAliveInterval 300",
           "# root par clé depuis la console, sur le réseau privé (DOCKER_HOST, maintenance)",
           f"Match Address {N.WG_LOCAL}", "    PermitRootLogin prohibit-password"]
     return "\n".join(L) + "\n"
@@ -679,3 +716,85 @@ def public_ip():
             return m.group(1) if m else None
     except OSError:
         return None
+
+
+# ---------------------------------------------------------------- SSH de la console elle-même
+
+CONSOLE_SSHD = "/etc/ssh/sshd_config.d/00-hangar-console.conf"
+CONSOLE_F2B = "/etc/fail2ban/jail.d/hangar-console.local"
+ROOT_KEYS = "/root/.ssh/authorized_keys"
+
+
+def _root_keys():
+    try:
+        return [l.strip() for l in open(ROOT_KEYS) if KEY_RE.match(l.strip())]
+    except OSError:
+        return []
+
+
+def console_ssh():
+    """État du SSH de la console : root, mots de passe, clés de root, fail2ban."""
+    os.makedirs("/run/sshd", mode=0o755, exist_ok=True)   # SSH lancé par socket : absent hors connexion
+    rc, out = P.run(["sshd", "-T"], timeout=20)
+    conf = dict(l.split(None, 1) for l in out.splitlines() if " " in l) if rc == 0 else {}
+    f2b = P.run(["systemctl", "is-active", "fail2ban"], timeout=10)[1].strip() == "active"
+    return {"root": conf.get("permitrootlogin", "?"), "passwords": conf.get("passwordauthentication", "?") == "yes",
+            "nkeys": len(_root_keys()), "f2b": f2b, "managed": os.path.exists(CONSOLE_SSHD)}
+
+
+def console_ssh_apply(keys_only, f2b, add_keys, by):
+    """Durcit le SSH de la console. Refuse de couper les mots de passe tant que root n'a aucune clé :
+    on ne se ferme jamais la porte. Retourne un message d'erreur, ou None."""
+    new = []
+    for line in (add_keys or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if not KEY_RE.match(line) or len(line) > 2000:
+            return f"Clé publique invalide : « {line[:40]}… »."
+        new.append(line)
+    have = _root_keys()
+    if new:
+        os.makedirs("/root/.ssh", mode=0o700, exist_ok=True)
+        with open(ROOT_KEYS, "a") as fh:
+            os.chmod(ROOT_KEYS, 0o600)
+            fh.write("".join(k + "\n" for k in new if k not in have))
+    if keys_only and not _root_keys():
+        return "Ajoute d'abord ta clé publique : sans elle, couper les mots de passe te fermerait la porte."
+    L = ["# Généré par la console Hangar (Sécurité, « Ce serveur »). Ne pas modifier à la main.",
+         f"PermitRootLogin {'prohibit-password' if keys_only else 'yes'}"]
+    if keys_only:
+        L += ["PasswordAuthentication no", "KbdInteractiveAuthentication no"]
+    L += ["PermitEmptyPasswords no", "MaxAuthTries 3", "LoginGraceTime 30", "X11Forwarding no",
+          "AllowAgentForwarding no", "AllowTcpForwarding no", "PermitTunnel no"]
+    prev = open(CONSOLE_SSHD).read() if os.path.exists(CONSOLE_SSHD) else None
+    P.write_private(CONSOLE_SSHD, "\n".join(L) + "\n")
+    os.chmod(CONSOLE_SSHD, 0o644)
+    os.makedirs("/run/sshd", mode=0o755, exist_ok=True)
+    rc, out = P.run(["sshd", "-t"], timeout=20)
+    if rc:
+        if prev is None:
+            os.remove(CONSOLE_SSHD)
+        else:
+            P.write_private(CONSOLE_SSHD, prev)
+        return "Réglage SSH refusé par sshd : " + P.tail(out, 2)
+    P.run(["systemctl", "try-reload-or-restart", "ssh.service"], timeout=30)
+    if f2b:
+        if not shutil.which("fail2ban-client"):
+            rc, out = P.run(["apt-get", "install", "-y", "-q", "fail2ban"], timeout=900,
+                            env={**os.environ, "DEBIAN_FRONTEND": "noninteractive"})
+            if rc:
+                return "Installation de fail2ban impossible : " + P.tail(out, 2)
+        os.makedirs(os.path.dirname(CONSOLE_F2B), exist_ok=True)
+        with open(CONSOLE_F2B, "w") as fh:
+            fh.write("# Généré par la console Hangar.\n[DEFAULT]\nbanaction = nftables\nignoreip = 127.0.0.1/8 ::1\n"
+                     "bantime = 30m\nfindtime = 10m\nmaxretry = 5\nbantime.increment = true\n\n[sshd]\nenabled = true\n"
+                     "backend = systemd\njournalmatch = _COMM=sshd + _COMM=sshd-session\nmode = normal\n")
+        P.run(["systemctl", "enable", "--now", "fail2ban"], timeout=60)
+        P.run(["systemctl", "restart", "fail2ban"], timeout=60)
+    elif os.path.exists(CONSOLE_F2B):
+        os.remove(CONSOLE_F2B)
+        P.run(["systemctl", "restart", "fail2ban"], timeout=60)
+    P.log("ok", f"nœud {N.LOCAL}", f"sécurité : SSH de la console {'par clé seulement' if keys_only else 'mots de passe permis'}"
+          f"{', fail2ban' if f2b else ''}{f', {len(new)} clé(s) ajoutée(s)' if new else ''}, par {by}")
+    return None
