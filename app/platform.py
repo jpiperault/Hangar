@@ -222,10 +222,16 @@ def next_host_port():
 def _upstream(a, prefix, ind, here=LOCAL):
     if a["desired"] == "stopped":
         return [f'{ind}respond "Service arrêté" 503']
+    from . import ha
     # appli sur ce nœud : en local ; sur un autre nœud : par le réseau privé WireGuard
-    host = "127.0.0.1" if (a.get("node") or LOCAL) == here else node_wg(a["node"])
-    lines = [f"{ind}reverse_proxy {host}:{a['host_port']} {{",
+    nodes = ha.instance_nodes(a)
+    hosts = [f"{'127.0.0.1' if n == here else node_wg(n)}:{a['host_port']}" for n in nodes]
+    lines = [f"{ind}reverse_proxy {' '.join(hosts)} {{",
              f"{ind}\theader_up X-Real-IP {{client_ip}}"]
+    if len(hosts) > 1:   # instances multiples : répartition, et une instance qui ne répond plus est écartée
+        lines += [f"{ind}\tlb_policy round_robin", f"{ind}\tlb_try_duration 5s",
+                  f"{ind}\thealth_uri {a['health_path'] or '/'}", f"{ind}\thealth_interval 10s",
+                  f"{ind}\thealth_timeout 3s", f"{ind}\thealth_status 2xx", f"{ind}\tfail_duration 30s"]
     if prefix:
         lines.append(f"{ind}\theader_up X-Forwarded-Prefix {prefix}")
     lines.append(f"{ind}}}")
@@ -745,21 +751,49 @@ def _ports(a):
     return ports
 
 
-def write_compose(a, version):
+def db_url(a, node=None):
+    """DATABASE_URL vue d'un conteneur de l'appli sur `node` : PostgreSQL partagé du nœud, ou base dédiée (haute
+    dispo) par son nom de conteneur sur le même nœud, par le réseau privé depuis un autre."""
+    n = db_name(a["slug"])
+    hn, hc = ha_db(a["slug"])
+    if not hc:
+        host = "postgres:5432"
+    elif (hn or LOCAL) == (node or a.get("node") or LOCAL):
+        host = f"{hc}:5432"
+    else:
+        from . import ha
+        host = f"{node_wg(hn)}:{ha.get(a['slug'])['db_port']}"
+    return f"postgresql://{n}:{a['db_password']}@{host}/{n}"
+
+
+def compose_path(slug, node=None):
+    """Fichier compose (sur la console) : celui du nœud principal, ou celui d'une instance supplémentaire."""
+    d = app_dir(slug)
+    return f"{d}/compose.yml" if node is None else f"{d}/inst-{node}/compose.yml"
+
+
+def write_compose(a, version, instance=None, role=None):
+    """Compose de l'appli sur son nœud (a['node']), ou d'une instance supplémentaire sur `instance`."""
+    node = instance or a.get("node")
+    a = {**a, "node": node}
     env, _ = parse_env(a["env"])
     if a["db"]:
-        n = db_name(a["slug"])
-        env["DATABASE_URL"] = f"postgresql://{n}:{a['db_password']}@postgres:5432/{n}"
+        env["DATABASE_URL"] = db_url(a, node)
     svc = {
         "image": image_ref(a, version),
         "restart": "unless-stopped",
         "ports": _ports(a),
         "networks": ["platform"],
-        "volumes": ["./data:/data"],
+        "volumes": [f"{app_dir(a['slug'])}/data:/data"],
         "environment": {k: v.replace("$", "$$") for k, v in env.items()},
         "mem_limit": f"{a['mem_mb']}m",
         "labels": {"fr.hangar.app": a["slug"], "fr.hangar.version": version},
     }
+    if role is None:
+        from . import ha
+        role = ha.role_of(a["slug"], instance)
+    if role:   # haute dispo : l'arrêt de sécurité d'un nœud isolé vise ces conteneurs
+        svc["labels"]["fr.hangar.ha-role"] = role
     if a["source"] == "git":
         svc["build"] = {"context": f"{a['image']}#{version}"}
     doc = {"name": f"app-{a['slug']}", "services": {"app": svc},
@@ -767,37 +801,58 @@ def write_compose(a, version):
     d = app_dir(a["slug"])
     os.makedirs(d, mode=0o700, exist_ok=True)
     os.chmod(d, 0o700)
-    if is_local(a.get("node")):
+    if is_local(node):
         os.makedirs(f"{d}/data", exist_ok=True)
-    else:   # le dossier data/ vit sur le nœud ; compose y résout ./data en /srv/apps/<id>/data
-        rc, out = nsh(a["node"], f"install -d -m 0700 {d} && install -d {d}/data", timeout=60)
+    else:   # le dossier data/ vit sur le nœud (/srv/apps/<id>/data), le compose sur la console
+        rc, out = nsh(node, f"install -d -m 0700 {d} && install -d {d}/data", timeout=60)
         if rc:
-            raise RuntimeError(f"nœud {a['node']} injoignable : " + tail(out, 2))
+            raise RuntimeError(f"nœud {node} injoignable : " + tail(out, 2))
+    path = compose_path(a["slug"], instance)
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
     # JSON est du YAML valide : aucune valeur saisie ne peut casser la structure du fichier
-    write_private(f"{d}/compose.yml",
-                  "# Généré par Hangar. Ne pas éditer à la main.\n" + json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
+    write_private(path, "# Généré par Hangar. Ne pas éditer à la main.\n" + json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
+    return path
 
 
 # ---------------------------------------------------------------- PostgreSQL
 
-def _psql(sql, node=None):
-    return dk(node, "exec", "-i", PG, "psql", "-U", "platform", "-v", "ON_ERROR_STOP=1", "-qtA",
+def ha_db(slug):
+    """Base dédiée d'une appli en haute dispo : (nœud de la base primaire, conteneur), sinon (None, None)."""
+    try:
+        h = db.one("SELECT db_node FROM ha WHERE slug = ? AND db_node IS NOT NULL", (slug,))
+    except Exception:
+        h = None
+    return (h["db_node"], f"appdb-{slug}") if h else (None, None)
+
+
+def pg_where(slug):
+    """(nœud, conteneur PostgreSQL) qui porte la base d'une appli : sa base dédiée en haute dispo, sinon le
+    PostgreSQL partagé de son nœud. Le superutilisateur s'appelle « platform » dans les deux cas."""
+    n, c = ha_db(slug)
+    return (n, c) if c else (app_node(slug), PG)
+
+
+def _psql(sql, node=None, container=PG):
+    return dk(node, "exec", "-i", container, "psql", "-U", "platform", "-v", "ON_ERROR_STOP=1", "-qtA",
               input=sql, timeout=60)
 
 
-def ensure_db(a):
-    n, pw, node = db_name(a["slug"]), a["db_password"], a.get("node")
+def ensure_db(a, node=None, container=None):
+    n, pw = db_name(a["slug"]), a["db_password"]
+    if container is None:
+        hn, hc = ha_db(a["slug"])
+        node, container = (hn, hc) if hc else (a.get("node"), PG)
     rc, out = _psql(f"""
 DO $$ BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{n}') THEN CREATE ROLE {n} LOGIN; END IF;
 END $$;
 ALTER ROLE {n} WITH LOGIN PASSWORD '{pw}';
 SELECT 1 FROM pg_database WHERE datname = '{n}';
-""", node)
+""", node, container)
     if rc:
         raise RuntimeError("création du rôle PostgreSQL impossible : " + tail(out, 2))
     if "1" not in out.split():
-        rc, out = _psql(f"CREATE DATABASE {n} OWNER {n};", node)
+        rc, out = _psql(f"CREATE DATABASE {n} OWNER {n};", node, container)
         if rc:
             raise RuntimeError("création de la base impossible : " + tail(out, 2))
         log("ok", a["slug"], f"base PostgreSQL {n} créée" + ("" if is_local(node) else f" sur le nœud {node}"))
@@ -810,8 +865,9 @@ def app_node(slug):
 
 def dump_db(slug, dest, node=None):
     n = db_name(slug)
-    p = subprocess.run(["docker", "exec", PG, "pg_dump", "-U", "platform", n], capture_output=True, timeout=600,
-                       env=denv(node or app_node(slug)))
+    pn, pc = pg_where(slug)
+    p = subprocess.run(["docker", "exec", pc, "pg_dump", "-U", "platform", n], capture_output=True, timeout=600,
+                       env=denv(node or pn))
     if p.returncode:
         raise RuntimeError("dump impossible : " + p.stderr.decode(errors="replace")[-300:])
     with gzip.open(dest, "wb") as f:
@@ -820,7 +876,8 @@ def dump_db(slug, dest, node=None):
 
 def drop_db(slug, node=None):
     n = db_name(slug)
-    _psql(f"DROP DATABASE IF EXISTS {n} WITH (FORCE); DROP ROLE IF EXISTS {n};", node or app_node(slug))
+    pn, pc = pg_where(slug)
+    _psql(f"DROP DATABASE IF EXISTS {n} WITH (FORCE); DROP ROLE IF EXISTS {n};", node or pn, pc if not node else PG)
 
 
 # ---------------------------------------------------------------- état des conteneurs
@@ -829,8 +886,9 @@ _stats_cache = {"ts": 0, "data": {}}
 
 
 def app_nodes():
-    """Nœuds qui hébergent au moins une appli (le local toujours)."""
-    return sorted({LOCAL} | {r["node"] for r in db.q("SELECT DISTINCT node FROM apps")})
+    """Nœuds qui hébergent au moins une appli (le local toujours), instances de haute dispo comprises."""
+    from . import ha
+    return sorted({LOCAL} | {r["node"] for r in db.q("SELECT DISTINCT node FROM apps")} | ha.all_instance_nodes())
 
 
 def _on_nodes(fn):
@@ -851,12 +909,14 @@ def container_states():
                 res[parts[0]] = (parts[1], parts[2])
         return res if rc == 0 else None
     states = {}
+    home = {r["slug"]: r["node"] for r in db.q("SELECT slug, node FROM apps")}
     for node, res in _on_nodes(one).items():
         if res is None:
-            for a in db.q("SELECT slug FROM apps WHERE node = ?", (node,)):
-                states[a["slug"]] = ("unknown", f"nœud {node} injoignable")
-        else:
-            states.update(res)
+            for slug, n in home.items():
+                if n == node:
+                    states[slug] = ("unknown", f"nœud {node} injoignable")
+        else:   # instances multiples : l'état affiché est celui du nœud principal
+            states.update({k: v for k, v in res.items() if home.get(k, node) == node})
     return states
 
 
@@ -1112,6 +1172,9 @@ def deploy(slug, version, kind, previous=None):
             alerts.send_async(f"{a['name']} : {verb} de {version} en échec",
                               detail + ("" if state == "error" else f"\n{old} est resté en ligne."),
                               priority=4 if state == "ok" else 5, tags=["x"])
+        if ok:
+            from . import ha
+            ha.after_deploy(slug)
         try:
             apply_routing()
         except RuntimeError:
@@ -1126,6 +1189,8 @@ def start(slug):
         ok, detail = (False, tail(out)) if rc else wait_health(a)
         db.update_app(slug, state="ok" if ok else "error")
         log("ok" if ok else "error", slug, "démarrée" if ok else f"démarrage en échec : {detail}")
+    from . import ha
+    ha.instances_do(slug, "start")
     apply_routing()
 
 
@@ -1135,6 +1200,8 @@ def stop(slug):
         rc, out = dk(app_node(slug), "compose", "stop", cwd=app_dir(slug), timeout=120)
         db.update_app(slug, state="ok" if rc == 0 else "error")
         log("info" if rc == 0 else "error", slug, "arrêtée" if rc == 0 else "arrêt en échec : " + tail(out))
+    from . import ha
+    ha.instances_do(slug, "stop")
     apply_routing()
 
 
@@ -1146,6 +1213,8 @@ def restart(slug):
         ok, detail = (False, tail(out)) if rc else wait_health(a)
         db.update_app(slug, state="ok" if ok else "error")
         log("ok" if ok else "error", slug, "redémarrée" if ok else f"redémarrage en échec : {detail}")
+    from . import ha
+    ha.instances_do(slug, "restart")
     apply_routing()
 
 
@@ -1159,6 +1228,10 @@ def delete(slug):
         os.makedirs(keep, exist_ok=True)
         os.chmod(keep, 0o700)
         d, node = app_dir(slug), a["node"]
+        from . import ha
+        if ha.get(slug):   # haute dispo : base dédiée rapatriée dans le PostgreSQL partagé, secours et instances retirés
+            ha.disable(slug, "suppression", locked=True)
+            a = db.app(slug)
         if os.path.exists(f"{d}/compose.yml"):
             dk(node, "compose", "down", "--remove-orphans", cwd=d, timeout=180)
         if a["db"]:

@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import access, alerts, backup, cloudflare, db, dbadmin, monitor, move, nodes, security, stats, system
+from . import access, alerts, backup, cloudflare, db, dbadmin, ha, monitor, move, nodes, security, stats, system
 from . import domains as D
 from . import platform as P
 
@@ -339,9 +339,81 @@ async def _app_ctx(request, slug):
     others = [c for c in node_choices() if c["id"] != a["node"]]
     dsize = await asyncio.to_thread(P.dir_size, a["node"], f"{P.app_dir(slug)}/data") if others else None
     a["routes"] = D.routes(slug)
-    return dict(title=a["name"], nav="apps", a=a, new=False, errors={}, events=events, names=names,
-                refresh=a["status"] == "deploying", registries=P.registry_logins(), st=st, dbi=dbi,
+    hst = await asyncio.to_thread(ha.status, slug)
+    busy = (hst and (hst["busy"] or hst["h"]["state"] == "setup"))
+    return dict(title=a["name"], nav="apps", a=a, new=False, errors={}, events=events, names=names, ha=hst,
+                ha_nodes=[c for c in others if c["id"] != a["node"]],
+                refresh=a["status"] == "deploying" or bool(busy), registries=P.registry_logins(), st=st, dbi=dbi,
                 ranges=list(stats.RANGES), others=others, dsize=dsize, domains=D.all_domains(), cf=cloudflare.status())
+
+
+# ---------------------------------------------------------------- haute disponibilité
+
+def _int(v, lo, hi, default):
+    try:
+        return max(lo, min(hi, int(v)))
+    except (TypeError, ValueError):
+        return default
+
+
+@app.post("/apps/{slug}/ha/enable")
+async def ha_enable(request: Request, slug: str):
+    a = get_app_or_404(slug)
+    f = await request.form()
+    mode = f.get("mode")
+    chosen = [f.get("standby")] if mode == "standby" else f.getlist("inst")
+    err = await asyncio.to_thread(ha.validate, a, mode, chosen, bool(f.get("ack")))
+    if not err and (ha.get(slug) or a["state"] == "deploying"):
+        err = "Une opération est déjà en cours sur cette appli."
+    if err:
+        flash(request, err, "error")
+        return go(f"/apps/{slug}#hautedispo")
+    P.spawn(ha.enable, slug, mode, chosen, bool(f.get("auto")), _int(f.get("delay"), 4, 60, 4),
+            _int(f.get("sync_min"), 1, 1440, 5), request.session.get("user"))
+    flash(request, "Mise en place de la haute dispo lancée : suis l'avancement dans les événements.")
+    return go(f"/apps/{slug}#hautedispo")
+
+
+@app.post("/apps/{slug}/ha/options")
+async def ha_options(request: Request, slug: str):
+    get_app_or_404(slug)
+    f = await request.form()
+    if ha.get(slug):
+        ha.update_options(slug, bool(f.get("auto")), _int(f.get("delay"), 4, 60, 4), _int(f.get("sync_min"), 1, 1440, 5),
+                          request.session.get("user"))
+        flash(request, "Réglages de la bascule enregistrés.")
+    return go(f"/apps/{slug}#hautedispo")
+
+
+def _ha_job(fn, slug, user, what):
+    try:
+        fn(slug, user)
+    except Exception as e:
+        P.log("error", slug, f"{what} : {e}")
+
+
+@app.post("/apps/{slug}/ha/{action}")
+async def ha_action(request: Request, slug: str, action: str):
+    get_app_or_404(slug)
+    fns = {"switch": (ha.switchover, "bascule programmée", "Bascule lancée."),
+           "resync": (ha.resync, "resynchronisation", "Resynchronisation lancée."),
+           "disable": (ha.disable, "retrait de la haute dispo", "Retrait de la haute dispo lancé.")}
+    if action in fns and ha.get(slug):
+        fn, what, msg = fns[action]
+        P.spawn(_ha_job, fn, slug, request.session.get("user"), what)
+        flash(request, msg + " Suis l'avancement dans les événements.")
+    return go(f"/apps/{slug}#hautedispo")
+
+
+@app.post("/ha/settings")
+async def ha_settings(request: Request):
+    f = await request.form()
+    try:
+        await asyncio.to_thread(ha.save_settings, f.get("fence"), f.get("fence_after") or 180, request.session.get("user"))
+        flash(request, "Réglages de haute dispo enregistrés et envoyés aux nœuds.")
+    except (ValueError, TypeError) as e:
+        flash(request, str(e), "error")
+    return go("/nodes#hautedispo")
 
 
 @app.get("/apps/{slug}")
@@ -1308,7 +1380,14 @@ async def nodes_page(request: Request):
         n["reserved"] = sum(a["mem_mb"] for a in n["apps"] if a["desired"] == "running")
     key = await asyncio.to_thread(nodes.ensure_key)
     busy = any(n["state"] == "installing" for n in rows)
+    hrows = []
+    for h in ha.all_ha():
+        ap = db.app(h["slug"])
+        if ap:
+            hrows.append({"a": ap, "h": h})
     return render(request, "nodes.html", title="Nœuds", nav="nodes", rows=rows, key=key, now=time.time(),
+                  has=ha.settings(), hrows=hrows,
+                  fence_auto=len([n for n in nodes.all_nodes() if n["id"] != nodes.LOCAL]) >= 2,
                   refresh=busy, auto_refresh=None if busy else 60)
 
 
@@ -1467,8 +1546,10 @@ async def node_security(request: Request, node_id: str):
 @app.post("/nodes/{node_id}/reboot")
 async def node_reboot(request: Request, node_id: str):
     try:
-        await asyncio.to_thread(security.reboot, node_id, request.session.get("user"))
-        flash(request, "Redémarrage lancé : le nœud et ses applis reviennent en une à deux minutes.")
+        lxc = await asyncio.to_thread(security.reboot, node_id, request.session.get("user"))
+        flash(request, "Redémarrage lancé : le nœud et ses applis reviennent en une à deux minutes." + (
+            " C'est un conteneur LXC : selon sa configuration, Proxmox peut le laisser arrêté. "
+            "S'il ne revient pas, démarre-le depuis Proxmox." if lxc else ""))
     except (ValueError, RuntimeError) as e:
         flash(request, f"Redémarrage impossible : {e}", "error")
     return go(f"/nodes/{node_id}#securite")

@@ -57,4 +57,22 @@
   {% for n in rows %}<div class="cert"><span class="mono">{{ n.id }}</span><span class="hint">{{ n.apps | map(attribute='slug') | join(', ') or 'aucune appli' }}</span></div>{% endfor %}
 </section>
 </div>
+
+<form class="panel" method="post" action="/ha/settings" id="hautedispo" style="margin-top:20px;display:flex;flex-direction:column;gap:12px">
+  <h2 style="margin:0">Haute disponibilité</h2>
+  <p class="hint" style="margin:0">Elle se met en place appli par appli, dans sa fiche : secours à chaud (réplique de la base et copie de data/ sur un autre nœud, bascule automatique) ou instances multiples (l'appli tourne sur plusieurs nœuds à la fois). La console décide des bascules : une appli de la console elle-même ne bascule pas si la console s'éteint.</p>
+  {% for r in hrows %}<div class="cert"><a href="/apps/{{ r.a.slug }}#hautedispo">{{ r.a.name }}</a><span class="hint">{{ 'secours' if r.h.mode == 'standby' else 'instances' }} : {{ r.a.node }} → {{ r.h.nodes | join(', ') }} · {{ {'ok': 'protégée', 'degraded': 'secours à refaire', 'setup': 'mise en place', 'error': 'en erreur'}.get(r.h.state, r.h.state) }}</span></div>{% endfor %}
+  <fieldset class="secgroup"><legend>Arrêt de sécurité d'un nœud isolé</legend>
+    <p class="hint" style="margin:0">Un nœud qui ne voit plus aucun autre membre du réseau privé arrête ses applis en haute dispo et son connecteur de tunnel : si la console les a basculées ailleurs, elles ne tournent jamais en double. Il les relance dès que la console le revoit, si rien n'a basculé.</p>
+    <div class="seg" role="radiogroup" aria-label="Arrêt de sécurité">
+      <label><input type="radio" name="fence" value="auto" {{ 'checked' if has.fence == 'auto' }}><span>Automatique</span></label>
+      <label><input type="radio" name="fence" value="always" {{ 'checked' if has.fence == 'always' }}><span>Toujours</span></label>
+      <label><input type="radio" name="fence" value="never" {{ 'checked' if has.fence == 'never' }}><span>Jamais</span></label>
+    </div>
+    <span class="hint"><strong>Automatique</strong> : actif à partir de deux nœuds distants (actuellement {{ 'actif' if fence_auto else 'inactif' }}). Avec un seul, un nœud ne peut pas distinguer « je suis coupé » de « la console est éteinte » : <strong>Toujours</strong> protège les données mais arrête ses applis en haute dispo quand la console s'éteint ; <strong>Jamais</strong> les garde en ligne, et la console ne bascule alors que si le nœud ne répond plus du tout, même sur son adresse publique.</span>
+    <div class="field" style="max-width:260px"><label for="fa">Après (secondes sans aucun pair)</label><input id="fa" name="fence_after" type="number" min="90" max="1800" value="{{ has.fence_after }}">
+      <span class="hint">Doit rester plus court que le délai de bascule des applis.</span></div>
+  </fieldset>
+  <div><button class="btn sm primary">Enregistrer et envoyer aux nœuds</button></div>
+</form>
 {% endblock %}

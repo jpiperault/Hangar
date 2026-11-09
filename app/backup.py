@@ -396,9 +396,10 @@ def _dump_apps():
             continue
         name = P.db_name(a["slug"])
         path = f"{STAGING}/db/{a['slug']}.dump"
+        pnode, pg = P.pg_where(a["slug"])
         with open(path + ".tmp", "wb") as f:
-            p = subprocess.run(["docker", "exec", P.PG, "pg_dump", "-U", "platform", "-Fc", name],
-                               stdout=f, stderr=subprocess.PIPE, timeout=1800, env=P.denv(a["node"]))
+            p = subprocess.run(["docker", "exec", pg, "pg_dump", "-U", "platform", "-Fc", name],
+                               stdout=f, stderr=subprocess.PIPE, timeout=1800, env=P.denv(pnode))
         if p.returncode:
             os.remove(path + ".tmp")
             raise RuntimeError(f"pg_dump {name} : {p.stderr.decode(errors='replace')[-300:]}")
@@ -472,6 +473,7 @@ def _send(d, trigger):
                           # fichiers bruts de PostgreSQL et registre en cours d'écriture : incohérents
                           # si copiés à chaud ; remplacés par les exports et la copie du registre
                           "--exclude", f"{P.PLATFORM}/postgres", "--exclude", f"{P.PLATFORM}/platform.db*",
+                          "--exclude", "/srv/apps/*/pgdata",
                           STAGING, P.APPS_DIR, P.PLATFORM, timeout=6 * 3600, d=d)
     summary = next((json.loads(l) for l in out.splitlines()[::-1] if l.startswith("{") and '"summary"' in l), None)
     if rc not in (0, 3) or not summary:   # 3 : certains fichiers illisibles, instantané quand même créé
@@ -588,10 +590,11 @@ def snapshots(dest_id="gdrive", refresh=False):
 
 def _pg_restore(slug, dump_path):
     name = P.db_name(slug)
+    pnode, pg = P.pg_where(slug)
     with open(dump_path, "rb") as f:
-        p = subprocess.run(["docker", "exec", "-i", P.PG, "pg_restore", "-U", "platform", "--clean", "--if-exists",
+        p = subprocess.run(["docker", "exec", "-i", pg, "pg_restore", "-U", "platform", "--clean", "--if-exists",
                             "--no-owner", "--no-acl", f"--role={name}", "-d", name],
-                           stdin=f, capture_output=True, timeout=3600, env=P.denv(P.app_node(slug)))
+                           stdin=f, capture_output=True, timeout=3600, env=P.denv(pnode))
     if p.returncode:
         errs = [l for l in p.stderr.decode(errors="replace").splitlines() if "error" in l.lower()]
         if errs:

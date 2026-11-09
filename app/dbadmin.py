@@ -11,22 +11,23 @@ SAFETY = "/srv/backups/avant-import"
 
 
 def info(slug):
-    n, node = P.db_name(slug), P.app_node(slug)
+    n = P.db_name(slug)
+    node, pg = P.pg_where(slug)
     env = P.denv(node)
-    rc, out = P._psql(f"SELECT pg_database_size('{n}');", node)
+    rc, out = P._psql(f"SELECT pg_database_size('{n}');", node, pg)
     if rc:
         return None
     size = int(out.strip() or 0)
     q = ("SELECT schemaname || '.' || relname, n_live_tup, pg_total_relation_size(relid) "
          "FROM pg_stat_user_tables ORDER BY pg_total_relation_size(relid) DESC LIMIT 12;")
-    p = subprocess.run(["docker", "exec", "-i", P.PG, "psql", "-U", "platform", "-d", n, "-qtA", "-F", "\t"],
+    p = subprocess.run(["docker", "exec", "-i", pg, "psql", "-U", "platform", "-d", n, "-qtA", "-F", "\t"],
                        input=q, capture_output=True, text=True, timeout=30, env=env)
     tables = []
     for line in p.stdout.splitlines():
         parts = line.split("\t")
         if len(parts) == 3:
             tables.append({"name": parts[0].removeprefix("public."), "rows": int(parts[1]), "size": int(parts[2])})
-    rc, cnt = P.dk(node, "exec", P.PG, "psql", "-U", "platform", "-d", n, "-qtA", "-c",
+    rc, cnt = P.dk(node, "exec", pg, "psql", "-U", "platform", "-d", n, "-qtA", "-c",
                      "SELECT count(*) FROM pg_stat_user_tables", timeout=30)
     return {"name": n, "size": size, "tables": tables, "count": int(cnt.strip() or 0) if rc == 0 else len(tables)}
 
@@ -34,8 +35,9 @@ def info(slug):
 def export_stream(slug):
     """Générateur : dump SQL compressé (gzip) en flux, sans fichier temporaire."""
     n = P.db_name(slug)
-    proc = subprocess.Popen(["docker", "exec", P.PG, "pg_dump", "-U", "platform", "--no-owner", "--no-acl", n],
-                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=P.denv(P.app_node(slug)))
+    node, pg = P.pg_where(slug)
+    proc = subprocess.Popen(["docker", "exec", pg, "pg_dump", "-U", "platform", "--no-owner", "--no-acl", n],
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=P.denv(node))
     comp = gzip.compress
     try:
         buf = []
@@ -68,14 +70,14 @@ def _safety_dump(slug):
 def _recreate(slug):
     """Vide la base : DROP + CREATE, propriétaire = rôle de l'appli."""
     n = P.db_name(slug)
-    rc, out = P._psql(f"DROP DATABASE IF EXISTS {n} WITH (FORCE); CREATE DATABASE {n} OWNER {n};", P.app_node(slug))
+    rc, out = P._psql(f"DROP DATABASE IF EXISTS {n} WITH (FORCE); CREATE DATABASE {n} OWNER {n};", *P.pg_where(slug))
     if rc:
         raise RuntimeError("recréation de la base impossible : " + P.tail(out))
 
 
-def _psql_file(n, path, compressed, node=None):
+def _psql_file(n, path, compressed, node=None, pg=P.PG):
     """Joue un fichier SQL (éventuellement gzip) en tant que rôle de l'appli, décompressé au fil de l'eau."""
-    proc = subprocess.Popen(["docker", "exec", "-i", P.PG, "psql", "-U", "platform", "-d", n, "-q",
+    proc = subprocess.Popen(["docker", "exec", "-i", pg, "psql", "-U", "platform", "-d", n, "-q",
                              "-v", "ON_ERROR_STOP=1", "-c", f"SET ROLE {n}", "-f", "-"],
                             stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=P.denv(node))
     opener = gzip.open if compressed else open
@@ -116,14 +118,15 @@ def import_file(slug, path, kind):
             safe = _safety_dump(slug)
             _stop(slug)
             _recreate(slug)
+            pnode, pg = P.pg_where(slug)
             if kind == "dump":
                 with open(path, "rb") as f:
-                    p = subprocess.run(["docker", "exec", "-i", P.PG, "pg_restore", "-U", "platform", "--no-owner",
+                    p = subprocess.run(["docker", "exec", "-i", pg, "pg_restore", "-U", "platform", "--no-owner",
                                         "--no-acl", f"--role={n}", "-d", n], stdin=f, capture_output=True, timeout=3600,
-                                       env=P.denv(a["node"]))
+                                       env=P.denv(pnode))
                 err, code = p.stderr.decode(errors="replace"), p.returncode
             else:
-                code, err = _psql_file(n, path, kind == "sqlgz", a["node"])
+                code, err = _psql_file(n, path, kind == "sqlgz", pnode, pg)
             if code:
                 raise RuntimeError(P.tail(err, 4) or f"code {code}")
             ok, detail = _start(a)

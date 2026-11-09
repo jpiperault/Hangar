@@ -48,6 +48,10 @@ def _cleanup(slug, node, with_db):
 
 
 def move(slug, target):
+    from . import ha
+    if ha.get(slug):
+        P.log("error", slug, "déplacement refusé : appli en haute dispo (utilise « Basculer » ou retire la haute dispo)")
+        return
     with P.op_lock:
         a = db.app(slug)
         if not a:

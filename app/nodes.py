@@ -362,6 +362,8 @@ def install(node_id, sudo_password=""):
         except RuntimeError as e:
             _log(n, "warn", str(e))
         P.spawn(P.rebind_local_apps)   # applis de la console joignables par le réseau privé
+        from . import ha
+        P.spawn(ha.push_fence_all)     # arrêt de sécurité (haute dispo) : dépend du nombre de nœuds
     except Exception as e:
         _update(node_id, state="error", error=str(e)[:500])
         _log(n, "error", f"installation en échec : {e}")
@@ -387,6 +389,9 @@ def remove(node_id):
         raise ValueError("Nœud inconnu.")
     if db.one("SELECT 1 FROM apps WHERE node = ?", (node_id,)):
         raise ValueError("Ce nœud héberge encore des applis : déplace-les ou supprime-les d'abord.")
+    from . import ha
+    if node_id in ha.participants():
+        raise ValueError("Ce nœud sert à la haute dispo d'une appli (secours ou instance) : retire-la d'abord.")
     # par le réseau privé tant qu'il répond (un compte sudo avec mot de passe ne passe pas par l'adresse publique)
     ssh(n, f"systemctl disable --now cloudflared >/dev/null 2>&1; systemd-run --on-active=2 bash -c "
            f"'systemctl disable --now wg-quick@{WG_IF}; rm -f /etc/wireguard/{WG_IF}.conf' >/dev/null 2>&1",
@@ -398,6 +403,7 @@ def remove(node_id):
     except RuntimeError as e:
         P.log("warn", f"nœud {node_id}", str(e))
     P.log("info", f"nœud {node_id}", "nœud retiré (Docker, PostgreSQL et données restent sur la machine)")
+    P.spawn(ha.push_fence_all)
 
 
 # ---------------------------------------------------------------- mesures
@@ -463,6 +469,8 @@ def check_all():
             if _fails.get(n["id"], 0) >= 2:
                 P.log("ok", f"nœud {n['id']}", "nœud à nouveau joignable")
                 alerts.send(f"Nœud {n['name']} rétabli", "Le nœud répond à nouveau.", priority=3, tags=["white_check_mark"])
+                from . import ha
+                P.spawn(ha.on_node_back, n["id"])   # haute dispo : redevient secours, ou relance ses applis
             _fails[n["id"]] = 0
             continue
         _fails[n["id"]] = _fails.get(n["id"], 0) + 1

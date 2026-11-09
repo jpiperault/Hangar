@@ -1,0 +1,75 @@
+{# Haute disponibilité d'une appli : mise en place, état, bascule. Inclus dans la fiche de l'appli. #}
+<section class="panel" id="hautedispo">
+  <div class="bar" style="margin:0 0 8px">
+    <h2 style="margin:0">Haute disponibilité</h2>
+    {% if ha %}<span class="pill {{ {'ok': 's-running', 'degraded': 's-deploying', 'setup': 's-deploying'}.get(ha.h.state, 's-error') }}">
+      {{ {'ok': 'protégée', 'degraded': 'secours à refaire', 'setup': 'mise en place…', 'error': 'en erreur'}.get(ha.h.state, ha.h.state) }}</span>{% endif %}
+  </div>
+  {% if ha %}{% set h = ha.h %}{% set i = h.info %}
+    <p class="hint" style="margin:0 0 8px">{{ 'Secours à chaud' if h.mode == 'standby' else 'Instances multiples' }} ·
+      bascule {{ ('automatique après ' ~ h.delay ~ ' min') if h.auto else 'manuelle' }}{% if h.mode == 'standby' %} · copie de data/ toutes les {{ h.sync_min }} min{% endif %}</p>
+    <div class="sectable">
+    {% for r in ha.rows %}
+      <div class="secrow" style="grid-template-columns:minmax(0,1fr) auto">
+        <span><a href="/nodes/{{ r.node }}">{{ r.node }}</a> <span class="hint">{{ r.role }}{{ (' · ' ~ r.db) if r.db }}</span></span>
+        <span class="pill {{ 's-running' if r.state == 'ok' else 's-error' }}">{{ 'en ligne' if r.state == 'ok' else 'injoignable' }}</span>
+      </div>
+    {% endfor %}
+    </div>
+    <dl class="facts" style="margin-top:8px">
+      {% if a.db %}<dt>Réplication</dt><dd>{% if ha.rep %}{% for x in ha.rep %}{{ {'streaming': 'en continu', 'catchup': 'rattrapage', 'startup': 'démarrage'}.get(x.state, x.state) }}, {{ x.lag }} s de retard{% endfor %}{% elif ha.rep is none %}illisible{% else %}<span class="lv-error">aucune réplique connectée</span>{% endif %}</dd>{% endif %}
+      {% if h.mode == 'standby' %}<dt>Copie de data/</dt><dd>{{ (i.last_sync | ago) if i.last_sync else 'jamais' }}{% if i.sync_error %} · <span class="lv-error">{{ i.sync_error }}</span>{% endif %}</dd>{% endif %}
+      {% if i.last_failover %}<dt>Dernière bascule</dt><dd>{{ i.last_failover.ts | ago }} : {{ i.last_failover.from }} → {{ i.last_failover.to }}</dd>{% endif %}
+    </dl>
+    {% if not ha.busy and a.status != 'deploying' %}
+    <div class="acts" style="justify-content:flex-start;flex-wrap:wrap;margin-top:8px">
+      {% if h.state in ('ok',) %}
+      {% if h.mode == 'standby' %}<form method="post" action="/apps/{{ a.slug }}/ha/switch" onsubmit="return confirm('Basculer {{ a.name }} sur son secours ? Coupure de quelques secondes, sans perte de données.')"><button class="btn sm">Basculer sur le secours</button></form>
+      {% elif a.db %}<form method="post" action="/apps/{{ a.slug }}/ha/switch" onsubmit="return confirm('Déplacer la base principale de {{ a.name }} vers sa réplique ? Coupure de quelques secondes, sans perte de données.')"><button class="btn sm">Déplacer la base principale</button></form>{% endif %}
+      {% endif %}
+      <form method="post" action="/apps/{{ a.slug }}/ha/resync" onsubmit="return confirm('Refaire le secours de zéro (copie complète de la base et de data/) ?')"><button class="btn sm">Resynchroniser</button></form>
+      <form method="post" action="/apps/{{ a.slug }}/ha/disable" onsubmit="return confirm('Retirer la haute dispo de {{ a.name }} ? La base revient dans le PostgreSQL partagé (courte coupure).')"><button class="btn sm danger">Retirer</button></form>
+    </div>
+    <details style="margin-top:10px"><summary class="hint">Réglages de la bascule</summary>
+      <form method="post" action="/apps/{{ a.slug }}/ha/options" style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
+        <label class="check"><input type="checkbox" name="auto" {{ 'checked' if h.auto }}><span>Bascule automatique si le nœud principal tombe</span></label>
+        <div class="row2">
+          <div class="field"><label for="hd">Après (minutes)</label><input id="hd" name="delay" type="number" min="4" max="60" value="{{ h.delay }}"></div>
+          {% if h.mode == 'standby' %}<div class="field"><label for="hs">Copie de data/ toutes les (minutes)</label><input id="hs" name="sync_min" type="number" min="1" max="1440" value="{{ h.sync_min }}"></div>{% else %}<input type="hidden" name="sync_min" value="{{ h.sync_min }}">{% endif %}
+        </div>
+        <div><button class="btn sm">Enregistrer</button></div>
+      </form>
+    </details>
+    {% else %}<p class="hint">Opération en cours…</p>{% endif %}
+  {% elif not ha_nodes %}
+    <p class="hint">Il faut au moins un autre nœud en ligne (page <a href="/nodes">Nœuds</a>) pour protéger cette appli.</p>
+  {% else %}
+  <form method="post" action="/apps/{{ a.slug }}/ha/enable" style="display:flex;flex-direction:column;gap:10px"
+        onsubmit="return confirm('Mettre en place la haute dispo ? {{ 'La base passe dans une instance dédiée : coupure de quelques secondes.' if a.db else '' }}')">
+    <div class="seg" role="radiogroup" aria-label="Mode de haute disponibilité">
+      <label><input type="radio" name="mode" value="standby" checked data-ham="1"><span>Secours à chaud</span></label>
+      <label><input type="radio" name="mode" value="replicas" data-ham="1"><span>Instances multiples</span></label>
+    </div>
+    <div id="ham-standby" style="display:flex;flex-direction:column;gap:10px">
+      <p class="hint" style="margin:0">L'appli tourne ici ; le nœud de secours garde {{ 'une réplique de la base, à jour en continu, et ' if a.db }}une copie de data/. Si ce nœud tombe, l'appli redémarre sur le secours (environ une minute), avec au plus les dernières minutes de data/ perdues{{ ' ; la base ne perd quasiment rien' if a.db }}.</p>
+      <div class="field"><label for="hn">Nœud de secours</label>
+        <select id="hn" name="standby">{% for c in ha_nodes %}<option value="{{ c.id }}">{{ c.name }} · {{ '%.0f' % c.free }} Mo libres</option>{% endfor %}</select></div>
+      <div class="field"><label for="hsm">Copie de data/ toutes les (minutes)</label><input id="hsm" name="sync_min" type="number" min="1" max="1440" value="5"></div>
+    </div>
+    <div id="ham-replicas" hidden style="display:flex;flex-direction:column;gap:10px">
+      <p class="hint" style="margin:0">L'appli tourne en même temps ici et sur les nœuds cochés ; Caddy répartit les requêtes et écarte une instance qui ne répond plus : aucune coupure si un nœud tombe.{{ ' La base reste unique, avec une réplique sur le premier nœud coché.' if a.db }}</p>
+      <fieldset class="secgroup"><legend>Autres instances</legend>
+        {% for c in ha_nodes %}<label class="check"><input type="checkbox" name="inst" value="{{ c.id }}"><span>{{ c.name }} <span class="hint">· {{ '%.0f' % c.free }} Mo libres</span></span></label>{% endfor %}</fieldset>
+      <label class="check"><input type="checkbox" name="ack"><span>Chaque instance a son propre data/ : l'appli n'y garde rien d'important (sessions, fichiers envoyés…)</span></label>
+    </div>
+    <label class="check"><input type="checkbox" name="auto" checked><span>Bascule automatique si le nœud principal tombe</span></label>
+    <div class="field"><label for="hdl">Après (minutes d'indisponibilité)</label><input id="hdl" name="delay" type="number" min="4" max="60" value="4"></div>
+    <div><button class="btn sm primary">Mettre en place</button></div>
+  </form>
+  <script>
+  (function () { function s() { var m = document.querySelector('input[data-ham]:checked').value;
+    document.getElementById('ham-standby').hidden = m !== 'standby'; document.getElementById('ham-replicas').hidden = m !== 'replicas'; }
+    document.querySelectorAll('input[data-ham]').forEach(function (r) { r.addEventListener('change', s); }); s(); })();
+  </script>
+  {% endif %}
+</section>

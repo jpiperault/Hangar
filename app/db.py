@@ -57,6 +57,19 @@ CREATE TABLE IF NOT EXISTS nodes (
     wg_ip TEXT NOT NULL UNIQUE, wg_pubkey TEXT, state TEXT NOT NULL DEFAULT 'installing',
     info TEXT NOT NULL DEFAULT '{}', last_seen REAL, created_at REAL NOT NULL, error TEXT
 );
+CREATE TABLE IF NOT EXISTS ha (                  -- haute dispo d'une appli (absente : pas de haute dispo)
+    slug TEXT PRIMARY KEY,
+    mode TEXT NOT NULL,                           -- standby : secours à chaud · replicas : instances multiples
+    nodes TEXT NOT NULL DEFAULT '[]',             -- autres nœuds (secours, ou instances), par ordre de priorité
+    auto INTEGER NOT NULL DEFAULT 1,              -- bascule automatique si le nœud principal tombe
+    delay INTEGER NOT NULL DEFAULT 4,             -- minutes d'indisponibilité avant de basculer
+    sync_min INTEGER NOT NULL DEFAULT 5,          -- copie de data/ vers le secours (minutes)
+    db_node TEXT, db_port INTEGER,                -- base dédiée : nœud de la base primaire, port privé
+    db_admin TEXT, repl_password TEXT,
+    state TEXT NOT NULL DEFAULT 'setup',          -- setup | ok | degraded | error
+    info TEXT NOT NULL DEFAULT '{}',              -- relevés : copies, réplication, nœuds à reconstruire
+    updated_at REAL
+);
 CREATE TABLE IF NOT EXISTS stats_node (
     node TEXT NOT NULL, t INTEGER NOT NULL, cpu REAL, mem REAL, mem_total REAL, disk REAL, disk_total REAL,
     load1 REAL, PRIMARY KEY (node, t)

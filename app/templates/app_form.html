@@ -183,7 +183,9 @@
   </section>
   {% endif %}
 
-  {% if others %}
+  {% include "_ha.html" %}
+
+  {% if others and not ha %}
   <form class="panel" method="post" action="/apps/{{ a.slug }}/node/move"
         onsubmit="return confirm('Déplacer {{ a.name }} ? Coupure de quelques secondes pendant la bascule.')">
     <h2>Nœud</h2>

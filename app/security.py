@@ -217,16 +217,20 @@ def reboot(node_id, by):
     n = N.get(node_id)
     if not n or node_id == N.LOCAL or n["state"] != "ok":
         raise ValueError("Nœud injoignable.")
+    rc, virt = N.ssh(n, "systemd-detect-virt -c 2>/dev/null; true", timeout=20)
     rc, out = N.ssh(n, "systemd-run --on-active=5 --quiet systemctl reboot", timeout=20)
     if rc:
         raise RuntimeError(P.tail(out, 2))
+    lxc = virt.strip() == "lxc"
     N._fails[node_id] = -3    # pas d'alerte « injoignable » pendant le redémarrage (environ 4 min de marge)
-    P.log("warn", f"nœud {node_id}", f"redémarrage demandé par {by}")
+    P.log("warn", f"nœud {node_id}", f"redémarrage demandé par {by}" + (
+        " (conteneur LXC : s'il ne revient pas, démarre-le depuis Proxmox)" if lxc else ""))
 
     def later():
         time.sleep(150)
         collect(node_id)
     P.spawn(later)
+    return lxc
 
 
 # ---------------------------------------------------------------- rendu des fichiers d'un nœud
