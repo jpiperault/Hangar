@@ -21,6 +21,7 @@ import urllib.parse
 import urllib.request
 
 from . import alerts, db
+from . import domains as D
 from . import platform as P
 
 BK = "/srv/platform/backup"
@@ -719,9 +720,10 @@ def create_archive(trigger="manuelle"):
         apps = db.apps()
         s = db.settings()
         rc, head = P.run(["git", "-C", "/opt/hangar", "log", "-1", "--format=%h"], timeout=10)
-        manifest = {"format": 1, "created": time.time(), "hangar": head.strip(),
-                    "settings": {k: s.get(k) for k in ("base_domain", "hub", "aliases", "mode")},
-                    "apps": [{"slug": a["slug"], "node": a["node"], **{k: a[k] for k in APP_KEYS}} for a in apps]}
+        manifest = {"format": 2, "created": time.time(), "hangar": head.strip(),
+                    "settings": {"domains": D.export()},
+                    "apps": [{"slug": a["slug"], "node": a["node"], "routes": D.export_routes(a["slug"]),
+                              **{k: a[k] for k in APP_KEYS}} for a in apps]}
         fdp = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fdp, "wb") as raw, tarfile.open(fileobj=raw, mode="w:gz", compresslevel=6) as tar:
             data = json.dumps(manifest, ensure_ascii=False, indent=1).encode()
@@ -788,9 +790,13 @@ def read_manifest(path):
                         has_data.add(parts[1])
     except (tarfile.TarError, OSError, EOFError, json.JSONDecodeError) as e:
         raise ValueError(f"archive illisible : {e}")
-    if not manifest or manifest.get("format") != 1 or not isinstance(manifest.get("apps"), list):
+    if not manifest or manifest.get("format") not in (1, 2) or not isinstance(manifest.get("apps"), list):
         raise ValueError("ce fichier n'est pas une archive Hangar (manifest.json absent ou inconnu)")
+    # archives d'avant le multi-domaine : un domaine de base + alias, expose/sub par appli
+    doms = D.legacy_domains(manifest.get("settings"))
+    manifest["settings"] = {"domains": doms} if doms else None
     for a in manifest["apps"]:
+        a["routes"] = D.legacy_routes(a, doms)
         a["has_db"], a["has_data"] = a.get("slug") in has_db, a.get("slug") in has_data
         cur = db.app(a.get("slug", ""))
         a["exists"] = bool(cur)
@@ -852,12 +858,12 @@ def target_node(e):
 
 def _recreate_app(e, src_data, src_dump, parts, name):
     slug = e["slug"]
-    s = db.settings()
-    data = {k: e.get(k) for k in APP_KEYS}
-    if data["expose"] != "path" and (data["sub"] == s["hub"] or db.one(
-            "SELECT 1 FROM apps WHERE sub = ? AND expose != 'path'", (data["sub"],))):
-        P.log("warn", slug, f"sous-domaine {data['sub']} déjà pris : appli recréée en accès par chemin seulement")
-        data.update(expose="path", sub="")
+    data = {k: e.get(k) for k in APP_KEYS if k in e}
+    data.setdefault("expose", "path")
+    data.setdefault("sub", "")
+    rts, dropped = D.usable_routes(slug, e.get("routes"))
+    if dropped:
+        P.log("warn", slug, "adresses de l'archive non reprises : " + ", ".join(dropped))
     if data["pkg"] and db.one("SELECT 1 FROM apps WHERE pkg = ?", (data["pkg"],)):
         data["pkg"] = ""
     if data["db"] and not data.get("db_password"):
@@ -865,6 +871,7 @@ def _recreate_app(e, src_data, src_dump, parts, name):
     node = target_node(e)
     data.update(host_port=P.next_host_port(), state="deploying", desired="running", created_at=time.time(), node=node)
     db.insert_app(slug, data)
+    D.set_routes(slug, rts)
     a = db.app(slug)
     P.log("info", slug, f"appli recréée depuis l'archive {name}" + ("" if P.is_local(node) else f" sur le nœud {node}"))
     os.makedirs(P.app_dir(slug), mode=0o700, exist_ok=True)
@@ -903,15 +910,25 @@ def snapshot_to_archive(dest_id, snap):
         c.row_factory = sqlite3.Row
         apps = [dict(r) for r in c.execute("SELECT * FROM apps")]
         sett = {r["key"]: r["value"] for r in c.execute("SELECT key, value FROM settings")}
+        tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        if "domains" in tables:
+            doms = [{k: r[k] for k in ("name", "mode", "hub", "entry", "ip", "is_default")}
+                    for r in c.execute("SELECT * FROM domains")]
+            rts = {}
+            for r in c.execute("SELECT * FROM routes ORDER BY pos, id"):
+                rts.setdefault(r["slug"], []).append({"kind": r["kind"], "domain": r["domain"], "sub": r["sub"]})
+        else:
+            try:
+                aliases = json.loads(sett.get("aliases") or "[]")
+            except ValueError:
+                aliases = []
+            doms = D.legacy_domains({"base_domain": sett.get("base_domain"), "hub": sett.get("hub"),
+                                     "aliases": aliases, "mode": sett.get("mode")})
+            rts = {a["slug"]: D.legacy_routes(a, doms) for a in apps}
         c.close()
-        try:
-            aliases = json.loads(sett.get("aliases") or "[]")
-        except ValueError:
-            aliases = []
-        manifest = {"format": 1, "created": time.time(), "hangar": f"instantané {snap} ({d['name']})",
-                    "settings": {"base_domain": sett.get("base_domain"), "hub": sett.get("hub"),
-                                 "aliases": aliases, "mode": sett.get("mode")},
-                    "apps": [{"slug": a["slug"], "node": a.get("node") or "local",
+        manifest = {"format": 2, "created": time.time(), "hangar": f"instantané {snap} ({d['name']})",
+                    "settings": {"domains": doms},
+                    "apps": [{"slug": a["slug"], "node": a.get("node") or "local", "routes": rts.get(a["slug"], []),
                               **{k: a.get(k) for k in APP_KEYS}} for a in apps]}
         os.makedirs(ARCHIVES, mode=0o700, exist_ok=True)
         name = save_upload_name()
@@ -939,20 +956,22 @@ def snapshot_to_archive(dest_id, snap):
 
 
 def apply_settings(st):
-    """Reprend le domaine, l'hôte des chemins, les alias et le mode d'exposition d'une archive."""
-    cur = db.settings()
-    for k in ("base_domain", "hub", "mode"):
-        if st.get(k):
-            db.set_setting(k, st[k])
-    aliases = [a for a in (st.get("aliases") or []) if a and a != st.get("base_domain")]
-    db.set_setting("aliases", aliases)
+    """Reprend les domaines d'une archive (ajoutés ou mis à jour ; ceux d'ici qui n'y sont pas restent)."""
+    doms = D.legacy_domains(st)
+    if not doms:
+        return
+    before = [dict(d) for d in D.all_domains()]
+    D.import_domains(doms)
     try:
         P.apply_routing()
     except RuntimeError:
-        for k in ("base_domain", "hub", "aliases", "mode"):
-            db.set_setting(k, cur[k])
+        db.x("DELETE FROM domains")
+        for d in before:
+            db.x("INSERT INTO domains(name, mode, hub, entry, ip, is_default, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)",
+                 tuple(d[k] for k in ("name", "mode", "hub", "entry", "ip", "is_default", "created_at")))
         raise
-    P.log("ok", "caddy", f"réglages repris de l'archive : {st.get('hub')}.{st.get('base_domain')}, mode {st.get('mode')}")
+    P.sync_all_tunnels()
+    P.log("ok", "caddy", "domaines repris de l'archive : " + ", ".join(f"{d['name']} ({d['mode']})" for d in doms))
 
 
 def start_archive_restore(name, choices):

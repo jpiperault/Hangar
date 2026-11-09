@@ -1,73 +1,73 @@
 {% extends "base.html" %}
-{% from "_dns.html" import dnspill %}
 {% block main %}
-<h1>Domaine et accès</h1>
+<h1>Accès et comptes</h1>
 <div class="cols">
 <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
-  <form class="panel" method="post" action="/settings">
-    <h2>Exposition sur Internet</h2>
-    <div class="seg" role="radiogroup" aria-label="Mode d'exposition">
-      <label><input type="radio" name="mode" value="tunnel" {{ 'checked' if s.mode == 'tunnel' }}><span>Tunnel Cloudflare</span></label>
-      <label><input type="radio" name="mode" value="direct" {{ 'checked' if s.mode == 'direct' }}><span>Direct (serveur dédié)</span></label>
+  {% set f = aform or {'ip': acc.ip, 'port': acc.port, 'nets': acc.nets | join('\n')} %}
+  <form class="panel" method="post" action="/settings/access" id="acces" autocomplete="off">
+    <h2>Accès à la console</h2>
+    {% if pending %}
+    <div class="flash error" role="status">Un changement attend sa confirmation : {{ pending.url }}. Sans confirmation, retour à l'ancien réglage dans {{ pending.left }} s.</div>
+    <div class="acts" style="justify-content:flex-start">
+      <button class="btn primary sm" formaction="/settings/access/confirm">Garder ce réglage</button>
+      <button class="btn sm" formaction="/settings/access/revert">Revenir à l'ancien maintenant</button>
     </div>
-    <span class="hint">{% if s.mode == 'tunnel' %}Caddy écoute en HTTP sur {{ s.tunnel_bind }} uniquement. cloudflared reçoit le trafic de Cloudflare, qui gère le HTTPS, et le transmet à Caddy. Aucun port n'est ouvert sur la box.{% else %}Caddy écoute sur les ports 80 et 443 et obtient lui-même les certificats Let's Encrypt. Les ports doivent arriver jusqu'à cette machine.{% endif %}</span>
-
-    <h2 style="margin-top:8px">Domaine</h2>
+    {% else %}
+    <p class="hint">La console n'est jamais servie sur un domaine public : elle écoute sur une adresse de cette machine et n'accepte que les réseaux privés listés ici (pare-feu et console).</p>
     <div class="row2">
-      <div class="field"><label for="base_domain">Domaine de base</label><input id="base_domain" name="base_domain" value="{{ s.base_domain }}" spellcheck="false" required></div>
-      <div class="field"><label for="hub">Hôte des routes par chemin</label><div class="suffix"><input id="hub" name="hub" value="{{ s.hub }}" spellcheck="false" required><span>.{{ s.base_domain }}</span></div></div>
+      <div class="field {{ 'bad' if aerr and aerr.ip }}"><label for="aip">Adresse d'écoute</label>
+        <select id="aip" name="ip">{% for x in ips %}<option value="{{ x.ip }}" {{ 'selected' if x.ip == f.ip }}>{{ x.ip }} ({{ x.iface }})</option>{% endfor %}</select></div>
+      <div class="field {{ 'bad' if aerr and aerr.port }}"><label for="aport">Port</label>
+        <input id="aport" name="port" type="number" min="1024" max="65535" value="{{ f.port }}"></div>
     </div>
-    <span class="hint">Les sous-domaines des applis et l'adresse annoncée dans /.well-known/apps.json sont construits à partir du domaine de base.</span>
-    <div class="field"><label for="aliases">Anciens domaines servis en parallèle</label>
-      <textarea id="aliases" name="aliases" spellcheck="false" style="min-height:70px" placeholder="ancien-domaine.fr">{{ s.aliases | join('\n') }}</textarea>
-      <span class="hint">Un par ligne. En changeant de domaine de base, l'ancien est ajouté ici automatiquement. Retire-le quand plus aucune version installée de tes applis ne l'utilise.</span></div>
-    <div><button class="btn primary">Appliquer et recharger Caddy</button></div>
+    <div class="field {{ 'bad' if aerr and aerr.nets }}"><label for="anets">Réseaux autorisés</label>
+      <textarea id="anets" name="nets" spellcheck="false" style="min-height:70px">{{ f.nets }}</textarea>
+      <span class="hint">Un par ligne, par exemple <code>192.168.1.0/24</code>. Réseaux privés uniquement. Ton adresse actuelle ({{ client }}) doit en faire partie.</span></div>
+    <p class="hint"><strong>Sans risque :</strong> la console redémarre sur le nouveau réglage, et tu as 3 minutes pour le confirmer depuis la nouvelle adresse. Sans confirmation, l'ancien réglage revient tout seul.</p>
+    <div><button class="btn primary sm">Appliquer</button></div>
+    {% endif %}
   </form>
 
-  <section class="panel">
-    <h2>Noms publics {{ "à déclarer dans le tunnel" if s.mode == 'tunnel' else "à déclarer en DNS" }}</h2>
-    {% if s.mode == 'tunnel' %}
-    <p class="hint">Pas de joker : chaque nom est déclaré un par un dans Cloudflare Zero Trust › Networks › Tunnels › ton tunnel › Public hostnames, avec le service <code>http://{{ s.tunnel_bind }}</code>. Cloudflare crée l'enregistrement DNS tout seul. Un nom absent d'ici n'est jamais servi : Caddy répond 404.</p>
-    {% else %}
-    <p class="hint">Un enregistrement A par nom, vers l'IP publique du serveur. Chez Cloudflare, commence en « DNS only » pour que Caddy obtienne ses certificats Let's Encrypt.</p>
-    {% endif %}
-    {% for n in names %}
-    <div class="cert"><span><span class="mono">{{ n.name }}</span> <span class="hint">{{ n.what }}{{ ' · ancien domaine' if n.alias }}</span></span>{{ dnspill(n) }}</div>
+  <section class="panel" id="comptes">
+    <h2>Comptes</h2>
+    {% for u in users %}
+    <details class="cert" style="display:block">
+      <summary style="display:flex;justify-content:space-between;align-items:center;cursor:pointer"><span class="mono">{{ u.username }}{{ ' (toi)' if u.username == user }}</span><span class="btn sm">Gérer</span></summary>
+      <form method="post" action="/users/{{ u.username }}/password" autocomplete="off" style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
+        {% if u.username == user %}<div class="field"><label for="cur-{{ loop.index }}">Mot de passe actuel</label><input id="cur-{{ loop.index }}" name="current" type="password" autocomplete="current-password" required></div>{% endif %}
+        <div class="row2">
+          <div class="field"><label for="pw-{{ loop.index }}">Nouveau mot de passe</label><input id="pw-{{ loop.index }}" name="password" type="password" minlength="10" autocomplete="new-password" required></div>
+          <div class="field"><label for="pw2-{{ loop.index }}">Confirmation</label><input id="pw2-{{ loop.index }}" name="password2" type="password" minlength="10" autocomplete="new-password" required></div>
+        </div>
+        <div class="acts" style="justify-content:space-between">
+          <button class="btn sm primary">Changer le mot de passe</button>
+          {% if u.username != user and users | length > 1 %}<button class="btn sm danger" formaction="/users/{{ u.username }}/remove" formnovalidate onclick="return confirm('Supprimer le compte {{ u.username }} ?')">Supprimer le compte</button>{% endif %}
+        </div>
+      </form>
+    </details>
     {% endfor %}
-    {% if missing %}
-    <p class="hint"><strong>{{ missing | length }} nom{{ 's' if missing | length > 1 }} à déclarer.</strong> L'état est vérifié par une résolution DNS publique : après l'ajout, compte jusqu'à quelques minutes avant de le voir passer en « déclaré ». Ne publie jamais l'adresse de la console ({{ s.admin_bind }}).</p>
-    {% endif %}
-    {% if s.mode == 'tunnel' %}<p class="hint">Le certificat de Cloudflare couvre un niveau de sous-domaine : app1.piperault.fr fonctionne, pas x.app1.piperault.fr.</p>{% endif %}
+    <form method="post" action="/users/add" autocomplete="off" style="display:flex;flex-direction:column;gap:10px;margin-top:6px">
+      <h3 style="margin:0;font-size:.95rem">Ajouter un compte</h3>
+      <div class="field"><label for="nu">Identifiant</label><input id="nu" name="username" spellcheck="false" required></div>
+      <div class="row2">
+        <div class="field"><label for="npw">Mot de passe</label><input id="npw" name="password" type="password" minlength="10" autocomplete="new-password" required></div>
+        <div class="field"><label for="npw2">Confirmation</label><input id="npw2" name="password2" type="password" minlength="10" autocomplete="new-password" required></div>
+      </div>
+      <span class="hint">10 caractères au moins. Tous les comptes ont les mêmes droits. En secours, <code>hangar passwd</code> en root remet le mot de passe d'admin.</span>
+      <div><button class="btn sm">Créer le compte</button></div>
+    </form>
   </section>
 </div>
 
 <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
   <section class="panel">
-    <h2>Accès à la console</h2>
-    <dl class="facts">
-      <dt>Écoute</dt><dd>{{ s.admin_bind }}</dd>
-      <dt>Réseau autorisé</dt><dd>{{ s.lan_cidr }}</dd>
-    </dl>
-    <span class="hint">Modifiable dans /srv/platform/.env et le pare-feu (/etc/nftables.d/platform.nft). La console n'est jamais servie sur un domaine public.</span>
+    <h2>Domaines et Cloudflare</h2>
+    <p class="hint">Les domaines, leur mode d'exposition, le tunnel et le jeton d'API Cloudflare se règlent dans <a href="/domains">Domaines</a>.</p>
   </section>
-  {% if s.mode == 'tunnel' %}
-  <form class="panel" method="post" action="/settings/tunnel" autocomplete="off">
-    <h2>cloudflared</h2>
-    <dl class="facts">
-      <dt>Service</dt><dd><span class="pill {{ 's-running' if tunnel.active else 's-error' }}">{{ 'Connecté' if tunnel.active else tunnel.state }}</span></dd>
-      <dt>Tunnel</dt><dd class="mono">{{ tunnel_id or 'aucun jeton' }}</dd>
-      <dt>Cible</dt><dd>http://{{ s.tunnel_bind }}</dd>
-    </dl>
-    <div class="field"><label for="token">{{ 'Remplacer le jeton du tunnel' if tunnel_id else 'Jeton du tunnel' }}</label>
-      <input id="token" name="token" type="password" spellcheck="false" placeholder="eyJhIjoi…" required>
-      <span class="hint">Le jeton s'affiche dans Zero Trust à la création du tunnel (la longue chaîne après <code>cloudflared service install</code>). Il est rangé dans <code>/etc/cloudflared/token</code>, lisible par root seulement. Si cloudflared ne se connecte pas avec le nouveau jeton, l'ancien est remis.</span></div>
-    <div><button class="btn sm">Enregistrer et reconnecter</button></div>
-  </form>
-  {% endif %}
   <section class="panel">
     <h2>Registres d'images privés</h2>
-    {% for reg, user in registries.items() %}
-    <form class="cert" method="post" action="/settings/registry/remove"><span><span class="mono">{{ reg }}</span> <span class="hint">{{ user }}</span></span>
+    {% for reg, u in registries.items() %}
+    <form class="cert" method="post" action="/settings/registry/remove"><span><span class="mono">{{ reg }}</span> <span class="hint">{{ u }}</span></span>
       <input type="hidden" name="registry" value="{{ reg }}"><button class="btn sm">Retirer</button></form>
     {% else %}
     <p class="hint">Aucun. Les images publiques n'en ont pas besoin.</p>

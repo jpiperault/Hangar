@@ -5,14 +5,15 @@
   <span class="kpi">Créée le <strong>{{ man.created | when }}</strong></span>
   <span class="kpi"><strong>{{ man.apps | length }}</strong> appli(s)</span>
   <span class="kpi">Taille <strong>{{ size | size }}</strong></span>
-  {% if man.settings %}<span class="kpi">Domaine d'origine <strong>{{ man.settings.hub }}.{{ man.settings.base_domain }}</strong></span>{% endif %}
+  {% if man.settings %}<span class="kpi">Domaines <strong>{{ man.settings.domains | map(attribute='name') | join(', ') }}</strong></span>{% endif %}
 </div>
 <form class="panel danger" method="post" action="/backups/archive/{{ aname }}/restore" style="margin-top:16px">
   <p class="hint">Coche ce que tu veux restaurer. Pour une appli qui existe déjà, ses fichiers et sa base actuels sont d'abord copiés dans /srv/backups/avant-restauration, puis remplacés. Une appli absente de ce serveur est <strong>recréée</strong> avec sa fiche (image, version, variables), puis déployée.</p>
-  {% if man.settings and man.settings.base_domain %}
-  <label class="check"><input type="checkbox" name="settings" {{ 'checked' if man.settings.base_domain != s.base_domain or man.settings.mode != s.mode }}>
-    <span>Reprendre les réglages : <code>{{ man.settings.hub }}.{{ man.settings.base_domain }}</code>, mode {{ 'tunnel Cloudflare' if man.settings.mode == 'tunnel' else 'direct' }}{% if man.settings.aliases %}, alias {{ man.settings.aliases | join(', ') }}{% endif %}
-    <span class="hint">(actuellement {{ s.hub }}.{{ s.base_domain }}, mode {{ s.mode }})</span></span></label>
+  {% if man.settings %}
+  {% set here = s_domains | default([]) %}
+  <label class="check"><input type="checkbox" name="settings" {{ 'checked' if man.settings.domains | rejectattr('name', 'in', here) | list }}>
+    <span>Reprendre les domaines de l'archive : {% for d in man.settings.domains %}<code>{{ d.name }}</code> ({{ 'tunnel' if d.mode == 'tunnel' else 'direct' }}){{ ', ' if not loop.last }}{% endfor %}
+    <span class="hint">Ajoutés s'ils manquent, mis à jour sinon. Les domaines d'ici absents de l'archive restent. Les adresses d'une appli recréée sur un domaine absent sont écartées.</span></span></label>
   {% endif %}
   <div><button type="button" class="btn sm" id="all">Tout cocher</button></div>
   <div class="tablebox"><table>

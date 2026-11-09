@@ -62,9 +62,21 @@ CREATE TABLE IF NOT EXISTS stats_node (
     load1 REAL, PRIMARY KEY (node, t)
 );
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, ts REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS domains (              -- voir domains.py
+    name TEXT PRIMARY KEY, mode TEXT NOT NULL DEFAULT 'tunnel', hub TEXT NOT NULL DEFAULT '',
+    entry TEXT NOT NULL DEFAULT 'local', ip TEXT NOT NULL DEFAULT '', is_default INTEGER NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS routes (               -- adresses publiques des applis, dans l'ordre (pos)
+    id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL, domain TEXT NOT NULL,
+    kind TEXT NOT NULL, sub TEXT NOT NULL DEFAULT '', pos INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS routes_host ON routes(domain, sub) WHERE kind = 'sub';
+CREATE UNIQUE INDEX IF NOT EXISTS routes_path ON routes(slug, domain) WHERE kind = 'path';
 """
 
 _lock = threading.RLock()
+lock = _lock
 _c = sqlite3.connect(DB_PATH, check_same_thread=False, isolation_level=None)
 _c.row_factory = sqlite3.Row
 _c.execute("PRAGMA journal_mode=WAL")
@@ -123,6 +135,8 @@ def init():
     }
     for k, v in defaults.items():
         x("INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)", (k, v))
+    from . import domains   # base_domain / alias / mode global → table domains (une seule fois)
+    domains.migrate_from_settings()
 
 
 def settings():
@@ -131,7 +145,9 @@ def settings():
     s["lan_cidr"] = os.environ.get("LAN_CIDR", "192.168.91.0/24")
     s["admin_bind"] = os.environ.get("ADMIN_BIND", "192.168.91.93:8443")
     s["tunnel_bind"] = os.environ.get("TUNNEL_BIND", "127.0.0.1:8080")
-    s.setdefault("mode", "tunnel")
+    d = one("SELECT name, hub FROM domains ORDER BY is_default DESC, created_at LIMIT 1")
+    s["domain"] = d["name"] if d else ""
+    s["home"] = (f"{d['hub']}.{d['name']}" if d["hub"] else d["name"]) if d else ""
     return s
 
 

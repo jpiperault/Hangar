@@ -37,7 +37,7 @@ pre#prompt{margin:0;background:var(--surface);border:1px solid var(--line);borde
   </form>
   {% endif %}
 </div>
-<p class="gen-intro">Décris l'application, copie le prompt, puis colle-le dans Claude, dans le projet de l'appli. Claude prépare le Dockerfile, le healthcheck, le test local, la publication sur ghcr.io, le client Android et DEPLOY.md, avec les valeurs à saisir ici. {% if app %}Le formulaire reprend la fiche de {{ app.name }}.{% else %}Le formulaire est prérempli avec un exemple.{% endif %} Le domaine et le mode d'exposition viennent des réglages de la console.</p>
+<p class="gen-intro">Décris l'application, copie le prompt, puis colle-le dans Claude, dans le projet de l'appli. Claude prépare le Dockerfile, le healthcheck, le test local, la publication sur ghcr.io, le client Android et DEPLOY.md, avec les valeurs à saisir ici. {% if app %}Le formulaire reprend la fiche de {{ app.name }}.{% else %}Le formulaire est prérempli avec un exemple.{% endif %} Le domaine et son mode d'exposition viennent de la page Domaines.</p>
 <div class="gen-grid">
 <form id="f" autocomplete="off">
   <fieldset>
@@ -113,7 +113,7 @@ ADMIN_EMAIL : adresse de l'administrateur</textarea><span class="hint">Une par l
   <fieldset>
     <legend>Plateforme</legend>
     <div class="row2">
-      <div class="field"><label for="base">Domaine de base</label><input type="text" id="base" value="piperault.fr" spellcheck="false"></div>
+      <div class="field"><label for="base">Domaine</label><select id="base">{% for d in hangar.platform.domains %}<option value="{{ d.name }}">{{ d.name }}</option>{% endfor %}</select><span class="hint">Domaines gérés dans la page Domaines.</span></div>
       <div class="field"><label for="hub">Hôte des routes par chemin</label><input type="text" id="hub" value="apps" spellcheck="false"></div>
     </div>
     <div class="field"><span class="lbl">Exposition</span>
@@ -314,6 +314,9 @@ ADMIN_EMAIL : adresse de l'administrateur</textarea><span class="hint">Une par l
     $('sub').dataset.touched='1';
   }
   applyServer();
+  $('base').addEventListener('change',function(){ /* préfixe et mode suivent le domaine choisi */
+    var d=(H.platform&&H.platform.domains||[]).filter(function(x){return x.name===$('base').value})[0];
+    if(d){setVal('hub',d.hub||'apps');setRadio('mode',d.mode)}});
   var toastT;function toast(m){$('toast').textContent=m;clearTimeout(toastT);toastT=setTimeout(function(){$('toast').textContent=''},2500)}
   f.addEventListener('input',function(){build();save()});
   f.addEventListener('change',function(){build();save()});

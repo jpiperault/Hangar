@@ -85,7 +85,7 @@ def check_system():
     _flag("pg", not pg, "PostgreSQL arrêté", "Le conteneur des bases ne tourne plus : les applis avec base sont en panne.",
           "PostgreSQL à nouveau en ligne", priority=5)
     s = db.settings()
-    if s.get("mode") == "tunnel" and P.tunnel_status()["installed"]:
+    if P.tunnel_ready() and P.tunnel_status()["installed"]:
         _flag("tunnel", not P.tunnel_status()["active"], "Tunnel Cloudflare coupé",
               "cloudflared ne tourne plus : les applis ne sont plus joignables depuis Internet.",
               "Tunnel Cloudflare rétabli", priority=5)

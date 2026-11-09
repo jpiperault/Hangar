@@ -84,8 +84,7 @@ def restore(args):
         os.chmod(f"{backup.ARCHIVES}/{name}", 0o600)
     if "--no-settings" not in args and man.get("settings"):
         backup.apply_settings(man["settings"])
-        st = man["settings"]
-        print(f"Réglages repris : {st.get('hub')}.{st.get('base_domain')}, mode {st.get('mode')}")
+        print("Domaines repris : " + ", ".join(f"{d['name']} ({d['mode']})" for d in man["settings"]["domains"]))
     choices = {a["slug"]: [p for p in ("data", "db") if a.get(f"has_{p}")]
                for a in man["apps"] if only is None or a["slug"] in only}
     print(f"Restauration de {len(choices)} appli(s) : {', '.join(choices) or 'aucune'}")
@@ -97,6 +96,13 @@ def restore(args):
         bad += state != "ok"
         print(f"  {slug:24} {state}")
     sys.exit(1 if bad else 0)
+
+
+def access_revert(args):
+    """Appelé par le minuteur hangar-acces-retour : remet l'ancien accès à la console s'il n'a pas été confirmé."""
+    from . import access, db
+    db.init()
+    sys.exit(0 if access.revert() else 1)
 
 
 def sysupdate(args):
@@ -119,6 +125,8 @@ if __name__ == "__main__":
         restore(sys.argv[2:])
     elif cmd == ["archive"]:
         archive_cmd(sys.argv[2:])
+    elif cmd == ["access-revert"]:
+        access_revert(sys.argv[2:])
     elif cmd == ["sysupdate"]:
         sysupdate(sys.argv[2:])
     else:

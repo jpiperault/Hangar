@@ -5,7 +5,7 @@
   <span class="kpi"><strong>{{ apps | selectattr('status', 'equalto', 'running') | list | length }}</strong> en ligne</span>
   <span class="kpi"><strong>{{ apps | selectattr('status', 'equalto', 'error') | list | length }}</strong> en erreur</span>
   <span class="kpi"><strong>{{ ram_total }}</strong> Mo de RAM utilisés par les applis</span>
-  <span class="kpi">Domaine <strong>{{ s.base_domain }}</strong></span>
+  <span class="kpi">Domaine principal <strong>{{ s.domain }}</strong></span>
 </div>
 <div class="tablebox">
   <table>

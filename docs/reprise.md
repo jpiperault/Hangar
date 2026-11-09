@@ -50,7 +50,7 @@ Le dépôt est privé. Deux façons de le copier sur la nouvelle machine :
 - `--restore` : l'archive téléchargée depuis la page Sauvegardes. Elle recrée toutes les applis, leurs bases, leurs fichiers et le domaine.
 - Le script peut être relancé sans risque : il ne remplace jamais un secret ni un réglage existant.
 
-À la fin, le script affiche l'adresse de la console. L'identifiant et le mot de passe générés sont dans `/root/hangar-mot-de-passe.txt` (change-les avec `hangar passwd`).
+À la fin, le script affiche l'adresse de la console. L'identifiant et le mot de passe générés sont dans `/root/hangar-mot-de-passe.txt` (change-les dans Accès et comptes, ou avec `hangar passwd`).
 
 ## 4. Reprendre depuis un fichier téléchargé
 
@@ -59,7 +59,7 @@ Une archive `.tar.gz` téléchargée depuis **Sauvegardes › Archives à télé
 - l'export de sa base ;
 - son dossier `data/`.
 
-Elle contient aussi les réglages de la plateforme : domaine, alias et mode d'exposition.
+Elle contient aussi les domaines (mode, préfixe, machine d'entrée) et les adresses de chaque appli. Les archives d'avant le multi-domaine (domaine de base et alias) restent lisibles : chaque alias devient un domaine.
 
 ### Par le navigateur
 
@@ -116,7 +116,7 @@ La commande affiche l'état final de chaque appli. Elle se termine en erreur si 
 ## 6. Après la restauration
 
 - **Images privées** : si une appli échoue au téléchargement, colle le jeton `read:packages` dans sa fiche, puis redéploie. Les jetons de registre ne sont pas dans les sauvegardes.
-- **Cloudflare** : vérifie que les noms publics sont déclarés dans le tunnel (Domaine et accès › Noms publics).
+- **Cloudflare** : avec un jeton d'API (Domaines › Cloudflare), Hangar redéclare lui-même les noms ; sinon, vérifie qu'ils sont déclarés dans le tunnel (Domaines › Noms publics).
 - **Alertes** : abonne-toi au nouveau sujet ntfy (page Système et alertes), ou remets l'ancien.
 - **Sauvegardes** : vérifie que Drive et/ou le NAS sont connectés, puis lance une sauvegarde.
 

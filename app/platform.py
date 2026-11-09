@@ -14,12 +14,13 @@ import urllib.error
 import urllib.request
 
 from . import alerts, db
+from . import domains as D
 
 PLATFORM = "/srv/platform"
 APPS_DIR = "/srv/apps"
 BACKUPS = "/srv/backups"
 CADDYFILE = f"{PLATFORM}/Caddyfile"
-APPS_JSON = f"{PLATFORM}/public/.well-known/apps.json"
+PUBLIC = f"{PLATFORM}/public"
 ENV_FILE = f"{PLATFORM}/.env"
 ACCESS_LOG = "/var/log/caddy/access.log"
 PG = "platform-postgres-1"
@@ -37,10 +38,12 @@ MASK = "••••••"
 
 def run(cmd, cwd=None, timeout=600, input=None, env=None):
     try:
-        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, input=input, env=env)
+        binary = isinstance(input, bytes)
+        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=not binary, timeout=timeout, input=input, env=env)
     except subprocess.TimeoutExpired:
         return 124, f"délai dépassé ({timeout} s) : {' '.join(cmd)}"
-    return p.returncode, (p.stdout + p.stderr).strip()
+    out = p.stdout + p.stderr
+    return p.returncode, (out.decode(errors="replace") if binary else out).strip()
 
 
 def tail(text, n=6):
@@ -198,25 +201,12 @@ def unmask_env(new_text, old_text):
 
 # ---------------------------------------------------------------- adresses publiques
 
-def path_url(a, s):
-    return f"https://{s['hub']}.{s['base_domain']}/{a['slug']}/"
+def urls(a, s=None):
+    return D.urls(a["slug"])
 
 
-def sub_url(a, s):
-    return f"https://{a['sub']}.{s['base_domain']}/"
-
-
-def urls(a, s):
-    u = []
-    if a["expose"] in ("path", "both"):
-        u.append(("chemin", path_url(a, s)))
-    if a["expose"] in ("sub", "both") and a.get("sub"):
-        u.append(("sous-domaine", sub_url(a, s)))
-    return u
-
-
-def primary_url(a, s):
-    return sub_url(a, s) if a["expose"] in ("sub", "both") and a.get("sub") else path_url(a, s)
+def primary_url(a, s=None):
+    return D.primary_url(a["slug"])
 
 
 def next_host_port():
@@ -242,23 +232,30 @@ def _upstream(a, prefix, ind, here=LOCAL):
     return lines
 
 
+def _site_names(hosts, tunnel, port):
+    return ", ".join(f"http://{h}:{port}" if tunnel else h for h in hosts)
+
+
 def render_caddyfile(s, apps, here=LOCAL):
-    """Mode tunnel : HTTP en local derrière cloudflared, TLS terminé chez Cloudflare.
-    Mode direct : Caddy écoute 80/443 et obtient lui-même les certificats Let's Encrypt."""
-    domains = [s["base_domain"]] + [d for d in s["aliases"] if d != s["base_domain"]]
-    tunnel = s.get("mode") == "tunnel"
-    scheme = "http://" if tunnel else ""
+    """Un bloc par nom public, selon le mode de son domaine :
+    - tunnel : HTTP sur l'adresse locale de cloudflared (TUNNEL_BIND), TLS terminé chez Cloudflare ; sur la console et
+      sur chaque nœud qui reçoit le trafic du tunnel ;
+    - direct : Caddy écoute en 80/443 et obtient les certificats Let's Encrypt ; seulement sur la machine d'entrée
+      choisie pour ce domaine (celle vers qui pointe le DNS)."""
+    doms = D.by_name()
+    rts = D.all_routes()
+    bind_host, port = s["tunnel_bind"].rsplit(":", 1)
+    ingress = here == LOCAL or bool(db.one("SELECT 1 FROM nodes WHERE id = ? AND ingress = 1", (here,)))
 
-    def names(prefix):
-        return ", ".join(f"{scheme}{prefix}.{d}" for d in domains)
+    def served(d):
+        return (ingress and tunnel_ready()) if d["mode"] == "tunnel" else (d["entry"] or LOCAL) == here
+    live = {n: d for n, d in doms.items() if served(d)}
+    any_tunnel = any(d["mode"] == "tunnel" for d in live.values())
 
-    L = [f"# Généré par Hangar le {time.strftime('%Y-%m-%d %H:%M:%S')}. Ne pas éditer à la main.",
-         f"# Mode d'exposition : {'tunnel Cloudflare' if tunnel else 'direct (Let’s Encrypt)'}",
+    L = [f"# Généré par Hangar le {time.strftime('%Y-%m-%d %H:%M:%S')} pour {here}. Ne pas éditer à la main.",
          "{", "\tadmin localhost:2019"]
-    if tunnel:
-        host, port = s["tunnel_bind"].rsplit(":", 1)
-        L += ["\tauto_https off", f"\thttp_port {port}", f"\tdefault_bind {host}",
-              "\tservers {",
+    if any_tunnel:
+        L += [f"\tservers {s['tunnel_bind']} {{",
               "\t\t# cloudflared est sur la même machine : on fait confiance à l'IP client qu'il transmet",
               "\t\ttrusted_proxies static 127.0.0.1/32 ::1",
               "\t\tclient_ip_headers Cf-Connecting-IP X-Forwarded-For",
@@ -267,37 +264,71 @@ def render_caddyfile(s, apps, here=LOCAL):
           "# Journal des requêtes (JSON), lu par Hangar pour les statistiques",
           "(hangar_log) {", "\tlog {", f"\t\toutput file {ACCESS_LOG} {{", "\t\t\troll_size 20MiB",
           "\t\t\troll_keep 3", "\t\t}", "\t\tformat json", "\t}", "}", "",
-          "# Routes par chemin",
-          names(s["hub"]) + " {",
-         "\timport hangar_log",
-         "\tencode zstd gzip",
-         "\thandle /.well-known/apps.json {",
-         "\t\troot * /srv/platform/public",
-         '\t\theader Cache-Control "public, max-age=300"',
-         "\t\tfile_server",
-         "\t}",
-         "\thandle /health {",
-         '\t\trespond "ok" 200',
-         "\t}"]
-    for a in apps:
-        if a["expose"] not in ("path", "both"):
-            continue
-        slug = a["slug"]
-        L += ["", f"\t# appli {slug}", f"\tredir /{slug} /{slug}/ 308", f"\thandle_path /{slug}/* {{",
-              f"\t\tlog_append hangar_app {slug}"]
-        L += _upstream(a, f"/{slug}", "\t\t", here)
-        L.append("\t}")
-    L += ["", "\thandle {", '\t\trespond "Not found" 404', "\t}", "}"]
-    for a in apps:
-        if a["expose"] in ("sub", "both") and a["sub"]:
-            L += ["", f"# appli {a['slug']}", names(a["sub"]) + " {",
-                  "\timport hangar_log", f"\tlog_append hangar_app {a['slug']}",
-                  "\tencode zstd gzip"]
+          "# Sites servis par le tunnel : HTTP local seulement",
+          f"(tunnel) {{", f"\tbind {bind_host}", "}"]
+    by_slug = {a["slug"]: a for a in apps}
+    for name, d in sorted(live.items(), key=lambda x: (not x[1]["is_default"], x[0])):
+        tunnel = d["mode"] == "tunnel"
+        L += ["", f"# ---------------- {name} ({'tunnel Cloudflare' if tunnel else 'direct, Let’s Encrypt'})"]
+        if d["hub"]:
+            L += ["", f"# Routes par chemin sur {d['hub']}.{name}", _site_names([f"{d['hub']}.{name}"], tunnel, port) + " {"]
+            if tunnel:
+                L.append("\timport tunnel")
+            L += ["\timport hangar_log", "\tencode zstd gzip",
+                  "\thandle /.well-known/apps.json {",
+                  f"\t\troot * {PUBLIC}/{name}",
+                  '\t\theader Cache-Control "public, max-age=300"',
+                  "\t\tfile_server", "\t}",
+                  "\thandle /health {", '\t\trespond "ok" 200', "\t}"]
+            for slug, rs in rts.items():
+                a = by_slug.get(slug)
+                if not a or not any(r["kind"] == "path" and r["domain"] == name for r in rs):
+                    continue
+                L += ["", f"\t# appli {slug}", f"\tredir /{slug} /{slug}/ 308", f"\thandle_path /{slug}/* {{",
+                      f"\t\tlog_append hangar_app {slug}"]
+                L += _upstream(a, f"/{slug}", "\t\t", here)
+                L.append("\t}")
+            L += ["", "\thandle {", '\t\trespond "Not found" 404', "\t}", "}"]
+        for slug, rs in rts.items():
+            a = by_slug.get(slug)
+            hosts = [D.host_of(r, doms) for r in rs if r["kind"] == "sub" and r["domain"] == name]
+            if not a or not hosts:
+                continue
+            L += ["", f"# appli {slug}", _site_names(hosts, tunnel, port) + " {"]
+            if tunnel:
+                L.append("\timport tunnel")
+            L += ["\timport hangar_log", f"\tlog_append hangar_app {slug}", "\tencode zstd gzip"]
             L += _upstream(a, None, "\t", here)
             L.append("}")
-    if tunnel:
-        L += ["", "# Tout autre nom arrivant par le tunnel", "http:// {", '\trespond "Not found" 404', "}"]
+    if any_tunnel:
+        L += ["", "# Tout autre nom arrivant par le tunnel", f"http://:{port} {{", "\timport tunnel",
+              '\trespond "Not found" 404', "}"]
     return "\n".join(L) + "\n"
+
+
+def tunnel_ready():
+    """Le tunnel sert quelque chose : au moins un domaine en mode tunnel."""
+    return D.has_mode("tunnel")
+
+
+def manifests():
+    """apps.json de chaque domaine qui a un hôte de routes par chemin : {pkg: adresse de l'appli sur ce domaine}.
+    Une appli sans adresse sur ce domaine n'y figure pas."""
+    doms = D.by_name()
+    rts = D.all_routes()
+    out = {}
+    for name, d in doms.items():
+        if not d["hub"]:
+            continue
+        m = {}
+        for a in db.apps():
+            if not a["pkg"]:
+                continue
+            u = D.primary_url(a["slug"], rts.get(a["slug"], []), doms, domain=name)
+            if u:
+                m[a["pkg"]] = u
+        out[name] = m
+    return out
 
 
 def tunnel_status():
@@ -340,25 +371,19 @@ def resolves(names, ttl=30):
     return out
 
 
-def public_names(s, apps_list=None):
-    """Chaque nom public que Cloudflare (ou le DNS) doit connaître, sans joker."""
-    apps_list = db.apps() if apps_list is None else apps_list
-    subs = [a for a in apps_list if a["expose"] != "path" and a["sub"]]
-    names = []
-    for d in [s["base_domain"]] + s["aliases"]:
-        names.append({"name": f"{s['hub']}.{d}", "what": "routes par chemin", "slug": None, "alias": d != s["base_domain"]})
-        for a in subs:
-            names.append({"name": f"{a['sub']}.{d}", "what": a["name"], "slug": a["slug"], "alias": d != s["base_domain"]})
+def public_names(s=None, slug=None):
+    """Chaque nom public que Cloudflare (ou le DNS) doit connaître, sans joker, avec son état DNS et Cloudflare."""
+    names = D.public_names(slug)
     st = resolves([n["name"] for n in names])
+    cf = db.kv_get("cf_status") or {}
     for n in names:
         n["ok"] = st[n["name"]]
+        n["cf"] = (cf.get("names") or {}).get(n["name"])
     return names
 
 
-def app_public_names(a, s):
-    if a["expose"] == "path" or not a.get("sub"):
-        return []
-    return [n for n in public_names(s, [a]) if n["slug"]]
+def app_public_names(a, s=None):
+    return [n for n in public_names(slug=a["slug"]) if n["slug"]]
 
 
 def parse_tunnel_token(tok):
@@ -426,32 +451,6 @@ def set_tunnel_token(tok):
     raise RuntimeError(f"cloudflared n'a pas pu se connecter avec ce jeton : {err}. L'ancien jeton est remis.")
 
 
-def _sync_env_file(s):
-    try:
-        lines = open(ENV_FILE).read().splitlines()
-    except FileNotFoundError:
-        lines = []
-    wanted = {"BASE_DOMAIN": s["base_domain"], "HUB": s["hub"]}
-    out, seen = [], set()
-    for line in lines:
-        k = line.split("=", 1)[0]
-        if k in wanted:
-            out.append(f"{k}={wanted[k]}")
-            seen.add(k)
-        else:
-            out.append(line)
-    out += [f"{k}={v}" for k, v in wanted.items() if k not in seen]
-    tmp = ENV_FILE + ".tmp"
-    with open(tmp, "w") as f:
-        f.write("\n".join(out) + "\n")
-    shutil.copymode(ENV_FILE, tmp) if os.path.exists(ENV_FILE) else None
-    try:
-        shutil.chown(tmp, group="caddy")
-    except (LookupError, PermissionError):
-        pass
-    os.replace(tmp, ENV_FILE)
-
-
 def _ensure_access_log():
     """`caddy validate` tourne en root : sans ça il créerait le journal en root et Caddy ne pourrait plus y écrire."""
     import grp
@@ -491,24 +490,40 @@ def apply_routing():
             run(["systemctl", "reload", "caddy"], timeout=60)
             log("error", "caddy", "rechargement impossible, ancienne configuration restaurée : " + tail(out, 3))
             raise RuntimeError("Caddy n'a pas pu recharger la configuration. Détail dans le journal.")
-        manifest = {a["pkg"]: primary_url(a, s) for a in apps if a["pkg"]}
-        tmp = APPS_JSON + ".tmp"
+        files = write_manifests()
+        push_routing(s, apps, files)
+    from . import cloudflare      # noms publics chez Cloudflare (si un jeton d'API est enregistré)
+    spawn(cloudflare.sync_quiet)
+
+
+def write_manifests():
+    """Écrit public/<domaine>/.well-known/apps.json ; retourne {chemin relatif: contenu} pour les nœuds."""
+    files = {}
+    for name, m in manifests().items():
+        rel = f"{name}/.well-known/apps.json"
+        files[rel] = json.dumps(m, indent=2, ensure_ascii=False)
+        path = f"{PUBLIC}/{rel}"
+        os.makedirs(os.path.dirname(path), mode=0o755, exist_ok=True)
+        tmp = path + ".tmp"
         with open(tmp, "w") as f:
-            json.dump(manifest, f, indent=2, ensure_ascii=False)
+            f.write(files[rel])
         os.chmod(tmp, 0o644)
-        os.replace(tmp, APPS_JSON)
-        _sync_env_file(s)
-        push_routing(s, apps, json.dumps(manifest, indent=2, ensure_ascii=False))
+        os.replace(tmp, path)
+    keep = {rel.split("/", 1)[0] for rel in files}
+    for name in os.listdir(PUBLIC) if os.path.isdir(PUBLIC) else []:
+        if "." in name and not name.startswith(".") and name not in keep:   # domaine retiré ou sans préfixe
+            shutil.rmtree(f"{PUBLIC}/{name}", ignore_errors=True)
+    return files
 
 
 # ---------------------------------------------------------------- entrée du trafic sur les nœuds
 
 def ingress_nodes(s=None):
-    """Nœuds distants qui reçoivent le trafic Internet : mode tunnel, nœud installé et option activée."""
-    s = s or db.settings()
-    if s.get("mode") != "tunnel":
-        return []
-    return db.q("SELECT * FROM nodes WHERE id != 'local' AND state IN ('ok', 'offline') AND ingress = 1")
+    """Nœuds distants qui reçoivent du trafic Internet : par le tunnel (option « reçoit le trafic ») ou comme
+    machine d'entrée d'un domaine en mode direct."""
+    direct = {d["entry"] for d in D.all_domains() if d["mode"] == "direct"}
+    rows = db.q("SELECT * FROM nodes WHERE id != 'local' AND state IN ('ok', 'offline')")
+    return [n for n in rows if (n["ingress"] and tunnel_ready()) or n["id"] in direct]
 
 
 PUSH_CADDY = r"""set -e
@@ -524,21 +539,48 @@ systemctl reload caddy 2>/dev/null || systemctl restart caddy
 """
 
 
-def push_routing(s, apps, apps_json):
-    """Envoie à chaque nœud d'entrée sa propre configuration Caddy et apps.json (en parallèle, erreurs journalisées)."""
+PUSH_PUBLIC = r"""set -e
+rm -rf /srv/platform/public.new && mkdir -p /srv/platform/public.new
+tar -C /srv/platform/public.new -xf -
+chmod -R a+rX /srv/platform/public.new
+rm -rf /srv/platform/public.old
+[ -d /srv/platform/public ] && mv /srv/platform/public /srv/platform/public.old
+mv /srv/platform/public.new /srv/platform/public && rm -rf /srv/platform/public.old
+"""
+
+
+def push_routing(s, apps, files):
+    """Envoie à chaque nœud d'entrée sa propre configuration Caddy et les apps.json (en parallèle, erreurs journalisées).
+    Un nœud qui ne reçoit plus de trafic garde une configuration vide."""
     targets = ingress_nodes(s)
-    if not targets:
-        return
+    ids = {n["id"] for n in targets}
+    idle = [n for n in db.q("SELECT * FROM nodes WHERE id != 'local' AND state = 'ok'") if n["id"] not in ids]
+    import io
+    import tarfile
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        for rel, content in files.items():
+            data = content.encode()
+            ti = tarfile.TarInfo(rel)
+            ti.size, ti.mode = len(data), 0o644
+            tar.addfile(ti, io.BytesIO(data))
+    blob = buf.getvalue()
 
     def one(n):
         rc, out = nsh(n["id"], PUSH_CADDY, timeout=60, input=render_caddyfile(s, apps, here=n["id"]))
         if rc:
             return f"{n['id']} : " + tail(out, 2)
-        rc, out = nsh(n["id"], f"cat > {APPS_JSON}.tmp && chmod 644 {APPS_JSON}.tmp && mv {APPS_JSON}.tmp {APPS_JSON}",
-                      timeout=30, input=apps_json)
+        rc, out = nsh(n["id"], PUSH_PUBLIC, timeout=30, input=blob)
         return f"{n['id']} : " + tail(out, 2) if rc else None
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(targets)) as ex:
+
+    def empty(n):
+        nsh(n["id"], PUSH_CADDY, timeout=60, input="# Généré par Hangar : ce nœud ne reçoit pas de trafic\n"
+                                                  "{\n\tadmin localhost:2019\n}\n")
+    if not targets and not idle:
+        return
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(targets) + len(idle)) as ex:
         errs = [e for e in ex.map(one, targets) if e]
+        list(ex.map(empty, idle))
     for e in errs:
         log("warn", "caddy", f"routes non mises à jour sur le nœud {e}")
 
@@ -564,7 +606,7 @@ def sync_tunnel(node_id):
     n = node_row(node_id)
     if not n or is_local(node_id):
         return
-    want = bool(n["ingress"]) and db.settings().get("mode") == "tunnel" and os.path.exists(TUNNEL_TOKEN)
+    want = bool(n["ingress"]) and tunnel_ready() and os.path.exists(TUNNEL_TOKEN)
     if want:
         token = open(TUNNEL_TOKEN).read().strip()
         rc, out = nsh(node_id, "install -d -m 0755 /etc/cloudflared && umask 077 && cat > /etc/cloudflared/token.new && "

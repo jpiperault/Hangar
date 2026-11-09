@@ -3,16 +3,17 @@
 Serveur d'applications auto-hébergé pour les backends d'applications Android, avec une console d'administration web accessible uniquement depuis le réseau local.
 
 - Chaque backend tourne dans **un conteneur Docker** (un projet Compose par appli dans `/srv/apps/<id>`).
-- **Caddy** route le trafic par chemin (`https://apps.piperault.fr/<id>/`) ou par sous-domaine (`https://<sous-domaine>.piperault.fr/`).
+- **Caddy** route le trafic par sous-domaine (`https://<sous-domaine>.<domaine>/`, ou le domaine nu) ou par chemin (`https://apps.<domaine>/<id>/`).
+- **Multi-domaine** : autant de domaines que tu veux, chacun avec son mode d'exposition :
+  - **tunnel** : Caddy en HTTP local derrière `cloudflared`, TLS chez Cloudflare, aucun port ouvert ;
+  - **direct** : Caddy sur 80/443 avec Let's Encrypt, sur la machine d'entrée choisie (la console ou un nœud).
+- Une appli a une **liste d'adresses**, sur un ou plusieurs domaines ; la première est l'adresse principale. Les applis Android trouvent leur serveur via `https://apps.<domaine>/.well-known/apps.json`.
+- **Cloudflare automatique** avec un jeton d'API : règles du tunnel et enregistrements DNS créés, mis à jour et retirés par Hangar, sans jamais toucher aux noms qui ne viennent pas de lui.
 - **PostgreSQL 17** est partagé, avec une base et un rôle dédiés par appli, injectés dans `DATABASE_URL`.
-- **Deux modes d'exposition**, au choix dans la console :
-  - **tunnel** : Caddy en HTTP local derrière `cloudflared`, TLS chez Cloudflare ;
-  - **direct** : Caddy sur 80/443 avec Let's Encrypt, pour un serveur dédié.
-- Le domaine est interchangeable. Les anciens domaines restent servis en alias. Les applis Android trouvent leur serveur via `/.well-known/apps.json`.
 
 ## Console
 
-FastAPI + Jinja, sans build front. Elle écoute en HTTPS (certificat auto-signé) sur l'IP LAN, port 8443. L'accès est limité au réseau local par le pare-feu et par la console elle-même. Mot de passe argon2.
+FastAPI + Jinja, sans build front. Elle écoute en HTTPS (certificat auto-signé) sur l'IP LAN, port 8443. L'accès est limité aux réseaux privés choisis, par le pare-feu et par la console elle-même. Tout se règle depuis la console : domaines, Cloudflare, adresse, port et réseaux de la console (avec retour automatique à l'ancien réglage s'il n'est pas confirmé en 3 minutes), comptes (mots de passe argon2).
 
 - Créer, modifier, démarrer, arrêter et supprimer des applis (source : image Docker ou dépôt Git).
 - Déployer une version : healthcheck, puis **retour automatique** à la version précédente en cas d'échec. Retour arrière en un clic.
@@ -24,7 +25,7 @@ FastAPI + Jinja, sans build front. Elle écoute en HTTPS (certificat auto-signé
 - Images privées : un jeton de lecture du registre (ghcr.io : `read:packages`) se saisit dans la fiche de l'appli. Il est vérifié par `docker login`, puis enregistré une fois pour tout le registre dans `/root/.docker/config.json`.
 - **Sauvegardes** chiffrées (restic) chaque nuit vers Google Drive et/ou un NAS (SMB ou SFTP) : exports des bases, `data/` des applis, configuration. Restauration d'une appli depuis la destination choisie, avec copie de l'état d'avant.
 - **Nœuds** : ajout de serveurs supplémentaires (VPS, dédié, conteneur) depuis la console. Hangar les installe par SSH, avec root ou un compte `sudo` (Docker, PostgreSQL, Caddy, cloudflared, pare-feu), puis ne les pilote plus que par le réseau privé et les relie par un réseau privé WireGuard (10.88.0.0/24) qu'il initie lui-même : la box reste fermée. Mesures et alertes par nœud.
-- **Répartition** : chaque appli tourne sur le nœud choisi à sa création (Hangar conseille celui qui a le plus de RAM libre), avec sa base PostgreSQL sur ce même nœud. En mode tunnel, chaque nœud reçoit aussi le trafic Internet (connecteur du même tunnel + Caddy qui connaît toutes les applis) : si une machine tombe, les applis des autres restent joignables.
+- **Répartition** : chaque appli tourne sur le nœud choisi à sa création (Hangar conseille celui qui a le plus de RAM libre), avec sa base PostgreSQL sur ce même nœud. Pour les domaines en mode tunnel, chaque nœud reçoit aussi le trafic Internet (connecteur du même tunnel + Caddy qui connaît toutes les applis) : si une machine tombe, les applis des autres restent joignables.
 - **Déplacement** d'une appli vers un autre nœud depuis sa fiche : copie de `data/` pendant que l'appli tourne, puis coupure courte (copie finale, base, démarrage) et bascule des routes seulement si la cible répond ; sinon retour sur le nœud d'origine.
 - Les **sauvegardes** couvrent tous les nœuds : le `data/` des applis distantes est recopié chaque nuit sur la console avant l'envoi chiffré ; restauration et archives fonctionnent quel que soit le nœud.
 - **Archives manuelles** `.tar.gz` à télécharger (fiche, base et `data/` de chaque appli), restaurables ici ou sur un autre serveur Hangar : les applis absentes sont recréées.
@@ -33,7 +34,7 @@ FastAPI + Jinja, sans build front. Elle écoute en HTTPS (certificat auto-signé
 - **Base de données** de chaque appli : taille, tables, export `.sql.gz`, import (`.sql`, `.sql.gz`, `.dump`) et remise à zéro, avec copie de sécurité.
 - **Mises à jour système** (Debian, Docker, Caddy, cloudflared, PostgreSQL) depuis la console, avec retour à la version précédente si le service ne repart pas.
 - **Statistiques** par appli sur 1 h, 24 h ou 7 jours : requêtes, erreurs, temps de réponse, mémoire, processeur.
-- Liste des noms publics à déclarer chez Cloudflare (sans joker), avec leur état DNS. Remplacement du jeton du tunnel, avec retour à l'ancien si cloudflared ne se connecte pas.
+- Liste des noms publics (sans joker), avec leur état DNS et Cloudflare. Remplacement du jeton du tunnel, avec retour à l'ancien si cloudflared ne se connecte pas.
 
 ## Arborescence
 

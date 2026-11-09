@@ -21,18 +21,24 @@
   </div>
 
   <div class="group">
-    <span class="lbl">Adresse publique</span>
-    <div class="seg" role="radiogroup" aria-label="Exposition">
-      {% for v, l in [('path', 'Chemin'), ('sub', 'Sous-domaine'), ('both', 'Les deux')] %}
-      <label><input type="radio" name="expose" value="{{ v }}" {{ 'checked' if a.expose == v }}><span>{{ l }}</span></label>
+    <span class="lbl">Adresses publiques</span>
+    <div class="field {{ 'bad' if errors.slug }}"><label for="slug">Identifiant</label>
+      <input id="slug" name="slug" value="{{ a.slug }}" spellcheck="false" {{ 'readonly' if not new }} placeholder="courses">
+      {{ err('slug') }}<span class="hint">{{ "Sert aussi de chemin et de sous-domaine proposé. Ne peut plus changer après la création." if new else "Fixé à la création." }}</span></div>
+    <div class="field {{ 'bad' if errors.routes }}">
+      <div id="routes">
+      {% for r in a.routes or [] %}
+        <div class="rrow">
+          <select name="r_kind" aria-label="Type d'adresse"><option value="sub" {{ 'selected' if r.kind == 'sub' }}>Sous-domaine</option><option value="path" {{ 'selected' if r.kind == 'path' }}>Chemin</option></select>
+          <input name="r_sub" value="{{ r.sub }}" spellcheck="false" aria-label="Sous-domaine" placeholder="vide = domaine nu">
+          <select name="r_domain" aria-label="Domaine">{% for d in domains %}<option value="{{ d.name }}" {{ 'selected' if d.name == r.domain }}>{{ d.name }}</option>{% endfor %}</select>
+          <button type="button" class="btn sm rdel" aria-label="Retirer cette adresse">Retirer</button>
+        </div>
       {% endfor %}
-    </div>
-    <div class="row2">
-      <div class="field {{ 'bad' if errors.slug }}"><label for="slug">Identifiant</label>
-        <input id="slug" name="slug" value="{{ a.slug }}" spellcheck="false" {{ 'readonly' if not new }} placeholder="courses">
-        {{ err('slug') }}<span class="hint">{{ "Sert aussi de chemin. Ne peut plus changer après la création." if new else "Fixé à la création." }}</span></div>
-      <div class="field {{ 'bad' if errors.sub }}" id="subfield"><label for="sub">Sous-domaine</label>
-        <div class="suffix"><input id="sub" name="sub" value="{{ a.sub }}" spellcheck="false" placeholder="app1"><span>.{{ s.base_domain }}</span></div>{{ err('sub') }}</div>
+      </div>
+      {{ err('routes') }}
+      <div><button type="button" class="btn sm" id="addroute">Ajouter une adresse</button></div>
+      <span class="hint">La première adresse est l'adresse principale, annoncée dans <code>/.well-known/apps.json</code>. Un sous-domaine vide sert le domaine lui-même. « Chemin » donne <code>&lt;préfixe&gt;.&lt;domaine&gt;/&lt;identifiant&gt;/</code>. Les domaines se gèrent dans <a href="/domains">Domaines</a>.</span>
     </div>
     <div class="preview" id="preview" aria-live="polite"></div>
   </div>
@@ -103,8 +109,9 @@
     {% for n in names %}
     <div class="cert"><span class="mono">{{ n.name }}</span>{{ dnspill(n) }}</div>
     {% endfor %}
+    {% for n in names if n.cf and n.cf.ok is false %}<span class="hint lv-error">{{ n.name }} : {{ n.cf.msg }}</span>{% endfor %}
     {% if names | selectattr('ok', 'false') | list %}
-    <span class="hint">{% if s.mode == 'tunnel' %}Déclare ce nom dans Cloudflare Zero Trust › Networks › Tunnels › ton tunnel › Public hostnames, vers <code>http://{{ s.tunnel_bind }}</code>. Cloudflare crée l'enregistrement DNS tout seul.{% else %}Ajoute un enregistrement A vers l'IP publique du serveur.{% endif %} <a href="/settings">Tous les noms</a></span>
+    <span class="hint">{% if cf and cf.token %}Hangar déclare ces noms chez Cloudflare tout seul ; la résolution DNS publique peut prendre quelques minutes.{% else %}Noms à déclarer à la main : voir <a href="/domains">Domaines</a>, ou donne un jeton d'API Cloudflare pour que Hangar le fasse.{% endif %}</span>
     {% endif %}
     {% if a.status != 'deploying' %}
     <div class="acts" style="justify-content:flex-start;flex-wrap:wrap">
@@ -233,18 +240,58 @@
 
 <script>
 (function () {
-  var base = {{ s.base_domain | tojson }}, hub = {{ s.hub | tojson }}, REG = {{ (registries or {}) | tojson }};
-  var f = document.getElementById('appform');
+  var DOMS = {{ (domains or []) | map(attribute='name') | list | tojson }}, HUBS = {}, REG = {{ (registries or {}) | tojson }};
+  {% for d in domains or [] %}HUBS[{{ d.name | tojson }}] = {{ d.hub | tojson }};
+  {% endfor %}
+  var f = document.getElementById('appform'), box = document.getElementById('routes');
   function val(n) { var el = f.querySelector('[name=' + n + ']:checked') || f.elements[n]; return el ? el.value : ''; }
   function clean(v) { return (v || '').toLowerCase().replace(/[^a-z0-9-]/g, ''); }
+  function rows() { return Array.prototype.slice.call(box.querySelectorAll('.rrow')); }
+  function addRow(kind, dom, sub) {
+    var tpl = rows()[0], r;
+    if (tpl) { r = tpl.cloneNode(true); }
+    else {
+      r = document.createElement('div'); r.className = 'rrow';
+      r.innerHTML = '<select name="r_kind" aria-label="Type d\'adresse"><option value="sub">Sous-domaine</option><option value="path">Chemin</option></select>' +
+        '<input name="r_sub" spellcheck="false" aria-label="Sous-domaine" placeholder="vide = domaine nu">' +
+        '<select name="r_domain" aria-label="Domaine"></select><button type="button" class="btn sm rdel" aria-label="Retirer cette adresse">Retirer</button>';
+      var sel = r.querySelector('[name=r_domain]');
+      DOMS.forEach(function (d) { var o = document.createElement('option'); o.value = o.textContent = d; sel.appendChild(o); });
+    }
+    r.querySelector('[name=r_kind]').value = kind; r.querySelector('[name=r_sub]').value = sub;
+    r.querySelector('[name=r_domain]').value = dom || DOMS[0] || '';
+    delete r.querySelector('[name=r_sub]').dataset.touched;
+    box.appendChild(r); return r;
+  }
+  if (!rows().length && DOMS.length) addRow('sub', DOMS[0], '');
+  document.getElementById('addroute').addEventListener('click', function () {
+    var last = rows()[rows().length - 1];
+    var r = addRow('sub', last ? last.querySelector('[name=r_domain]').value : DOMS[0], clean(f.elements.slug.value));
+    r.querySelector('[name=r_sub]').focus(); update();
+  });
+  box.addEventListener('click', function (ev) {
+    if (!ev.target.classList.contains('rdel')) return;
+    var r = ev.target.closest('.rrow');
+    if (rows().length > 1) r.remove(); else { r.querySelector('[name=r_sub]').value = ''; }
+    update();
+  });
+  box.addEventListener('input', function (ev) { if (ev.target.name === 'r_sub') ev.target.dataset.touched = '1'; });
+  f.elements.slug.addEventListener('input', function () {   // le sous-domaine suit l'identifiant tant qu'il n'a pas été changé
+    rows().forEach(function (r) { var i = r.querySelector('[name=r_sub]'); if (!i.dataset.touched && r.querySelector('[name=r_kind]').value === 'sub') i.value = clean(f.elements.slug.value); });
+  });
+  {% if new %}rows().forEach(function (r) { var i = r.querySelector('[name=r_sub]'); if (i.value) i.dataset.touched = '1'; });{% else %}rows().forEach(function (r) { r.querySelector('[name=r_sub]').dataset.touched = '1'; });{% endif %}
   function update() {
-    var ex = val('expose'), slug = clean(f.elements.slug.value) || '…', sub = clean(f.elements.sub.value) || '…';
-    document.getElementById('subfield').hidden = ex === 'path';
-    var u = [];
-    if (ex !== 'sub') u.push('https://' + hub + '.' + base + '/' + slug + '/');
-    if (ex !== 'path') u.push('https://' + sub + '.' + base + '/');
+    var slug = clean(f.elements.slug.value) || '…', u = [];
+    rows().forEach(function (r) {
+      var kind = r.querySelector('[name=r_kind]').value, dom = r.querySelector('[name=r_domain]').value, sub = r.querySelector('[name=r_sub]');
+      var hub = HUBS[dom], opt = r.querySelector('[name=r_kind] option[value=path]');
+      opt.disabled = !hub; if (!hub && kind === 'path') { r.querySelector('[name=r_kind]').value = kind = 'sub'; }
+      sub.hidden = kind === 'path';
+      if (kind === 'path') u.push('https://' + hub + '.' + dom + '/' + slug + '/');
+      else { var x = clean(sub.value); u.push('https://' + (x ? x + '.' : '') + dom + '/'); }
+    });
     var p = document.getElementById('preview'); p.textContent = '';
-    u.forEach(function (x) { var s = document.createElement('span'); s.textContent = x; p.appendChild(s); });
+    u.forEach(function (x, i) { var s = document.createElement('span'); s.textContent = x + (i === 0 && u.length > 1 ? '  (principale)' : ''); p.appendChild(s); });
     var git = val('source') === 'git';
     document.getElementById('imagelbl').textContent = git ? 'URL du dépôt' : 'Image (sans tag)';
     f.elements.image.placeholder = git ? 'https://github.com/piperault/meteo-backend.git' : 'ghcr.io/piperault/courses-api';

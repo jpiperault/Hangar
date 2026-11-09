@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block main %}
+<h1>Accès modifié</h1>
+<section class="panel" style="max-width:640px">
+  <p>La console redémarre sur sa nouvelle adresse :</p>
+  <p><a class="btn primary" href="{{ url }}settings#acces">{{ url }}</a></p>
+  <p class="hint">Ouvre-la, connecte-toi, puis clique sur <strong>Garder ce réglage</strong> dans Accès et comptes. Le certificat est auto-signé : le navigateur peut demander de l'accepter à nouveau si l'adresse a changé.</p>
+  <p class="hint">Sans confirmation dans les <strong><span id="left">{{ delay }}</span> secondes</strong>, l'ancien réglage revient tout seul et cette page-ci refonctionne.</p>
+</section>
+<script>
+(function () { var n = {{ delay }}, el = document.getElementById('left');
+  var t = setInterval(function () { n -= 1; el.textContent = Math.max(0, n); if (n <= 0) clearInterval(t); }, 1000); })();
+</script>
+{% endblock %}

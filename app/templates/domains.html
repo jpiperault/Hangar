@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% from "_dns.html" import dnspill %}
+{% macro modeseg(prefix, mode) %}
+<div class="seg" role="radiogroup" aria-label="Mode d'exposition">
+  <label><input type="radio" name="mode" value="tunnel" {{ 'checked' if mode != 'direct' }} data-dm="{{ prefix }}"><span>Tunnel Cloudflare</span></label>
+  <label><input type="radio" name="mode" value="direct" {{ 'checked' if mode == 'direct' }} data-dm="{{ prefix }}"><span>Direct (Let's Encrypt)</span></label>
+</div>
+{% endmacro %}
+{% macro directfields(prefix, entry, ip) %}
+<div class="row2" id="direct-{{ prefix }}">
+  <div class="field"><label for="entry-{{ prefix }}">Machine d'entrée</label>
+    <select id="entry-{{ prefix }}" name="entry">{% for e in entries %}<option value="{{ e.id }}" {{ 'selected' if e.id == entry }}>{{ e.name }}</option>{% endfor %}</select>
+    <span class="hint">Celle vers qui pointe le DNS. Ses ports 80 et 443 doivent être joignables depuis Internet.</span></div>
+  <div class="field"><label for="ip-{{ prefix }}">IP publique</label>
+    <input id="ip-{{ prefix }}" name="ip" value="{{ ip or '' }}" spellcheck="false" placeholder="facultative">
+    <span class="hint">Avec un jeton Cloudflare, Hangar crée les enregistrements A vers cette IP. Sinon, à déclarer à la main.</span></div>
+</div>
+{% endmacro %}
+{% block main %}
+<div class="bar"><h1>Domaines</h1><a class="btn primary" href="#ajouter">Ajouter un domaine</a></div>
+<p class="hint" style="max-width:80ch">Chaque domaine a son mode : <strong>tunnel</strong> (Cloudflare reçoit le trafic et l'envoie par cloudflared, aucun port ouvert) ou <strong>direct</strong> (Caddy écoute en 80/443 sur une machine et obtient ses certificats Let's Encrypt). Une appli peut avoir des adresses sur plusieurs domaines : elles se choisissent dans sa fiche.</p>
+
+<div class="cols">
+<div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+  {% for d in doms %}
+  <form class="panel" method="post" action="/domains/{{ d.name }}" id="d-{{ d.name }}">
+    <div class="bar" style="margin:0">
+      <h2 style="margin:0" class="mono">{{ d.name }}</h2>
+      <span>{% if d.is_default %}<span class="pill s-running">principal</span> {% endif %}<span class="pill s-stopped">{{ usage[d.name] }} appli{{ 's' if usage[d.name] > 1 }}</span></span>
+    </div>
+    {{ modeseg(loop.index, d.mode) }}
+    <div class="field"><label for="hub-{{ loop.index }}">Hôte des routes par chemin</label>
+      <div class="suffix"><input id="hub-{{ loop.index }}" name="hub" value="{{ d.hub }}" spellcheck="false" placeholder="vide : pas de routes par chemin"><span>.{{ d.name }}</span></div>
+      <span class="hint">Sert <code>{{ d.hub or 'apps' }}.{{ d.name }}/&lt;appli&gt;/</code> et <code>/.well-known/apps.json</code> (les applis qui ont une adresse sur ce domaine).</span></div>
+    {{ directfields(loop.index, d.entry, d.ip) }}
+    <label class="check"><input type="checkbox" name="default" {{ 'checked disabled' if d.is_default }}><span>Domaine principal : proposé par défaut aux nouvelles applis</span></label>
+    {% if d.is_default %}<input type="hidden" name="default" value="on">{% endif %}
+    <div class="acts" style="justify-content:space-between">
+      <button class="btn primary sm">Enregistrer et recharger Caddy</button>
+      {% if not usage[d.name] and doms | length > 1 %}<button class="btn sm danger" formaction="/domains/{{ d.name }}/remove" onclick="return confirm('Retirer {{ d.name }} ?')">Retirer</button>{% endif %}
+    </div>
+  </form>
+  {% endfor %}
+
+  <form class="panel" method="post" action="/domains/add" id="ajouter" autocomplete="off">
+    <h2>Ajouter un domaine</h2>
+    <div class="field"><label for="nname">Domaine</label><input id="nname" name="name" value="{{ form.name if form else '' }}" placeholder="exemple.fr" spellcheck="false" required>
+      <span class="hint">Le domaine lui-même ou un sous-domaine délégué (lab.exemple.fr). En mode tunnel, le certificat gratuit de Cloudflare ne couvre qu'un niveau sous la zone : préfère le domaine racine.</span></div>
+    {{ modeseg('new', form.mode if form else 'tunnel') }}
+    <div class="field"><label for="hub-new">Hôte des routes par chemin</label>
+      <div class="suffix"><input id="hub-new" name="hub" value="{{ form.hub if form else 'apps' }}" spellcheck="false"><span>.&lt;domaine&gt;</span></div>
+      <span class="hint">Laisse vide si ce domaine ne sert que des sous-domaines.</span></div>
+    {{ directfields('new', form.entry if form else 'local', form.ip if form else '') }}
+    <label class="check"><input type="checkbox" name="default"><span>En faire le domaine principal</span></label>
+    <div><button class="btn primary">Ajouter et recharger Caddy</button></div>
+  </form>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+  <section class="panel" id="cloudflare">
+    <h2>Cloudflare</h2>
+    {% if cf.token %}
+    <dl class="facts">
+      <dt>Jeton d'API</dt><dd><span class="pill s-running">enregistré</span></dd>
+      <dt>Dernière synchro</dt><dd>{{ cf.ts | ago if cf.ts else 'jamais' }}</dd>
+    </dl>
+    {% if cf.error %}<p class="hint lv-error">{{ cf.error }}</p>{% endif %}
+    {% if cf.changes %}<p class="hint">{{ cf.changes | join(' ; ') }}</p>{% endif %}
+    <p class="hint">Hangar crée, met à jour et retire lui-même les noms publics : règles du tunnel et enregistrements DNS. Il ne touche qu'à ses propres noms ; un nom déjà utilisé ailleurs n'est jamais écrasé.</p>
+    <div class="acts" style="justify-content:flex-start">
+      <form method="post" action="/cloudflare/sync"><button class="btn sm primary">Synchroniser maintenant</button></form>
+      <form method="post" action="/cloudflare/remove" onsubmit="return confirm('Retirer le jeton ? Ce qui existe chez Cloudflare reste en place.')"><button class="btn sm">Retirer le jeton</button></form>
+    </div>
+    {% else %}
+    <p class="hint">Sans jeton, chaque nom se déclare à la main (liste ci-dessous). Avec un jeton, Hangar s'en charge dès que tu ajoutes un domaine ou une adresse.</p>
+    <ol class="steps">
+      <li>Cloudflare › Mon profil › Jetons d'API › Créer un jeton › <strong>Jeton personnalisé</strong>.</li>
+      <li>Autorisations : <code>Compte · Cloudflare Tunnel · Modifier</code>, <code>Zone · DNS · Modifier</code>, <code>Zone · Zone · Lire</code>.</li>
+      <li>Ressources de zone : toutes les zones du compte, ou seulement celles de tes domaines.</li>
+    </ol>
+    {% endif %}
+    <form method="post" action="/cloudflare/token" autocomplete="off">
+      <div class="field"><label for="cftoken">{{ 'Remplacer le jeton d\'API' if cf.token else 'Jeton d\'API' }}</label>
+        <input id="cftoken" name="token" type="password" spellcheck="false" required>
+        <span class="hint">Vérifié auprès de Cloudflare avant d'être enregistré dans <code>/srv/platform/cloudflare.token</code> (root seulement). Jamais affiché.</span></div>
+      <div><button class="btn sm">Vérifier et enregistrer</button></div>
+    </form>
+  </section>
+
+  <form class="panel" method="post" action="/settings/tunnel" autocomplete="off" id="tunnel">
+    <h2>Tunnel (cloudflared)</h2>
+    <dl class="facts">
+      <dt>Service</dt><dd><span class="pill {{ 's-running' if tunnel.active else 's-error' }}">{{ 'Connecté' if tunnel.active else tunnel.state }}</span></dd>
+      <dt>Tunnel</dt><dd class="mono">{{ tunnel_id or 'aucun jeton' }}</dd>
+      <dt>Cible</dt><dd>http://{{ s.tunnel_bind }}</dd>
+    </dl>
+    <div class="field"><label for="token">{{ 'Remplacer le jeton du tunnel' if tunnel_id else 'Jeton du tunnel' }}</label>
+      <input id="token" name="token" type="password" spellcheck="false" placeholder="eyJhIjoi…" required>
+      <span class="hint">Zero Trust › Networks › Tunnels › ton tunnel : la longue chaîne après <code>cloudflared service install</code>. Les nœuds qui reçoivent le trafic prennent le même. Si cloudflared ne se connecte pas avec le nouveau jeton, l'ancien est remis.</span></div>
+    <div><button class="btn sm">Enregistrer et reconnecter</button></div>
+  </form>
+
+  <section class="panel">
+    <h2>Noms publics</h2>
+    {% for n in names %}
+    <div class="cert"><span><span class="mono">{{ n.name }}</span> <span class="hint">{{ n.what }} · {{ 'tunnel' if n.mode == 'tunnel' else 'direct' }}</span>
+      {% if n.cf and n.cf.ok is false %}<br><span class="hint lv-error">{{ n.cf.msg }}</span>{% elif n.cf and n.cf.msg and 'certificat' in n.cf.msg %}<br><span class="hint lv-warn">{{ n.cf.msg }}</span>{% endif %}</span>{{ dnspill(n) }}</div>
+    {% else %}
+    <p class="hint">Aucun nom pour l'instant.</p>
+    {% endfor %}
+    {% if missing and not cf.token %}
+    <p class="hint"><strong>{{ missing | length }} nom{{ 's' if missing | length > 1 }} à déclarer.</strong>
+      Tunnel : Zero Trust › Networks › Tunnels › ton tunnel › Public hostnames, service <code>http://{{ s.tunnel_bind }}</code>.
+      Direct : un enregistrement A vers l'IP publique de la machine d'entrée (« DNS only » chez Cloudflare).</p>
+    {% elif missing %}
+    <p class="hint">La résolution DNS publique peut mettre quelques minutes à suivre une création.</p>
+    {% endif %}
+    <p class="hint">Ne publie jamais l'adresse de la console ({{ s.admin_bind }}).</p>
+  </section>
+</div>
+</div>
+<script>
+document.querySelectorAll('form[id^="d-"]').forEach(function (fm) {   // vider un préfixe coupe ses routes et son apps.json
+  var hub = fm.elements.hub, before = hub.value;
+  fm.addEventListener('submit', function (ev) {
+    if (before && !hub.value && ev.submitter && !ev.submitter.formAction.endsWith('/remove') &&
+        !confirm(before + '.' + fm.id.slice(2) + ' ne sera plus servi : ni routes par chemin, ni /.well-known/apps.json. Continuer ?')) ev.preventDefault();
+  });
+});
+(function () {   // champs du mode direct visibles seulement en mode direct
+  function sync(prefix) {
+    var r = document.querySelector('input[data-dm="' + prefix + '"]:checked'), box = document.getElementById('direct-' + prefix);
+    if (box) box.hidden = !r || r.value !== 'direct';
+  }
+  document.querySelectorAll('input[data-dm]').forEach(function (r) {
+    r.addEventListener('change', function () { sync(r.dataset.dm); }); sync(r.dataset.dm);
+  });
+})();
+</script>
+{% endblock %}

@@ -162,7 +162,9 @@ TUNNEL_BIND=127.0.0.1:8080
 EOF
   info "/srv/platform/.env créé"
 else
-  sed -i "s|^ADMIN_BIND=.*|ADMIN_BIND=$IP:8443|; s|^LAN_CIDR=.*|LAN_CIDR=$LAN|" /srv/platform/.env
+  # adresse et réseaux de la console : réglables depuis la console, on ne les écrase pas
+  grep -q '^ADMIN_BIND=' /srv/platform/.env || echo "ADMIN_BIND=$IP:8443" >> /srv/platform/.env
+  grep -q '^LAN_CIDR=' /srv/platform/.env || echo "LAN_CIDR=$LAN" >> /srv/platform/.env
 fi
 chgrp caddy /srv/platform/.env && chmod 640 /srv/platform/.env
 if [ ! -f /srv/platform/postgres.env ]; then
@@ -192,7 +194,15 @@ install -m 0644 "$SRC/deploy/caddy/etc-caddy-Caddyfile" /etc/caddy/Caddyfile
 install -d /etc/systemd/system/caddy.service.d
 install -m 0644 "$SRC/deploy/systemd/caddy-platform.conf" /etc/systemd/system/caddy.service.d/platform.conf
 install -d /etc/nftables.d
-sed "s|elements = { [^}]* }|elements = { $LAN }|" "$SRC/deploy/nftables/platform.nft" > /etc/nftables.d/platform.nft
+# réseaux autorisés et port de la console : ceux du fichier en place s'il existe (réglables depuis la console)
+NETS="$LAN" APORT=8443
+if [ -f /etc/nftables.d/platform.nft ]; then
+  NETS=$(sed -n 's/.*set lan {[^}]*elements = { \([^}]*\) }.*/\1/p' /etc/nftables.d/platform.nft | head -1)
+  APORT=$(sed -n 's/.*ip saddr @lan tcp dport { 22, \([0-9]*\) }.*/\1/p' /etc/nftables.d/platform.nft | head -1)
+  [ -n "$NETS" ] || NETS="$LAN"; [ -n "$APORT" ] || APORT=8443
+fi
+sed "s|elements = { [^}]* }|elements = { $NETS }|; s|tcp dport { 22, 8443 }|tcp dport { 22, $APORT }|" \
+  "$SRC/deploy/nftables/platform.nft" > /etc/nftables.d/platform.nft
 nft -c -f /etc/nftables.d/platform.nft || die "règles de pare-feu invalides"
 install -m 0644 "$SRC/deploy/apt/20auto-upgrades" /etc/apt/apt.conf.d/20auto-upgrades
 install -m 0644 "$SRC/deploy/apt/52platform-unattended" /etc/apt/apt.conf.d/52platform-unattended
