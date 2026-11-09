@@ -30,6 +30,25 @@ WG_LOCAL = "10.88.0.1"
 WG_PORT = 51820
 WG_KEY = "/etc/wireguard/hangar.key"
 LOCAL = "local"
+
+
+def console_role():
+    """Rôle de la machine de la console : {"manage_only": bool, "standby": bool}.
+    manage_only : plus aucune appli n'y est créée ni déplacée ; standby : elle peut rester secours à chaud."""
+    r = db.kv_get("console") or {}
+    return {"manage_only": bool(r.get("manage_only")), "standby": bool(r.get("standby", True))}
+
+
+def save_console_role(manage_only, standby, by):
+    db.kv_set("console", {"manage_only": bool(manage_only), "standby": bool(standby)})
+    P.log("info", f"nœud {LOCAL}", f"rôle de la console : {'gestion seulement' if manage_only else 'héberge aussi des applis'}"
+          f"{' (secours à chaud permis)' if manage_only and standby else ''}, par {by}")
+
+
+def console_hosts(purpose="app"):
+    """La console peut-elle recevoir une appli ? purpose : 'app' (création, déplacement, instance) ou 'standby'."""
+    r = console_role()
+    return not r["manage_only"] or (purpose == "standby" and r["standby"])
 SRC = "/opt/hangar/deploy"
 
 

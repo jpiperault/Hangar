@@ -59,7 +59,7 @@
     <div id="ham-replicas" hidden style="display:flex;flex-direction:column;gap:10px">
       <p class="hint" style="margin:0">L'appli tourne en même temps ici et sur les nœuds cochés ; Caddy répartit les requêtes et écarte une instance qui ne répond plus : aucune coupure si un nœud tombe.{{ ' La base reste unique, avec une réplique sur le premier nœud coché.' if a.db }}</p>
       <fieldset class="secgroup"><legend>Autres instances</legend>
-        {% for c in ha_nodes %}<label class="check"><input type="checkbox" name="inst" value="{{ c.id }}"><span>{{ c.name }} <span class="hint">· {{ '%.0f' % c.free }} Mo libres</span></span></label>{% endfor %}</fieldset>
+        {% for c in ha_inst %}<label class="check"><input type="checkbox" name="inst" value="{{ c.id }}"><span>{{ c.name }} <span class="hint">· {{ '%.0f' % c.free }} Mo libres</span></span></label>{% endfor %}</fieldset>
       <label class="check"><input type="checkbox" name="ack"><span>Chaque instance a son propre data/ : l'appli n'y garde rien d'important (sessions, fichiers envoyés…)</span></label>
     </div>
     <label class="check"><input type="checkbox" name="auto" checked><span>Bascule automatique si le nœud principal tombe</span></label>

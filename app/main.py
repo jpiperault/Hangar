@@ -213,15 +213,17 @@ def validate(f, cur=None):
     return d, e
 
 
-def node_choices():
-    """Nœuds où déployer : la console et les nœuds installés, avec la RAM encore libre (total - réservée)."""
+def node_choices(purpose="app"):
+    """Nœuds où déployer : la console (sauf en « gestion seulement ») et les nœuds installés, avec la RAM
+    encore libre (total - réservée). purpose='standby' : choix d'un secours à chaud."""
     out = []
     reserved = {}
     for a in db.apps():
         if a["desired"] == "running":
             reserved[a["node"]] = reserved.get(a["node"], 0) + a["mem_mb"]
     local_total = stats.host_now()["mem_total"]
-    out.append({"id": "local", "name": "Ce serveur (console)", "free": local_total - reserved.get("local", 0)})
+    if nodes.console_hosts(purpose):
+        out.append({"id": "local", "name": "Ce serveur (console)", "free": local_total - reserved.get("local", 0)})
     for n in nodes.all_nodes():
         if n["id"] == "local" or n["state"] != "ok":
             continue
@@ -295,6 +297,10 @@ async def home(request: Request):
 @app.get("/apps/new")
 async def new_app(request: Request):
     ch = node_choices()
+    if not ch:
+        flash(request, "La console est en « gestion seulement » et aucun nœud n'est en ligne : ajoute un nœud "
+                       "ou réautorise les applis sur la console.", "error")
+        return go("/nodes#console")
     best = max(ch, key=lambda c: c["free"])["id"]
     dft = D.default()
     blank = {"name": "", "pkg": "fr.piperault.", "slug": "", "port": 8080,
@@ -342,7 +348,9 @@ async def _app_ctx(request, slug):
     hst = await asyncio.to_thread(ha.status, slug)
     busy = (hst and (hst["busy"] or hst["h"]["state"] == "setup"))
     return dict(title=a["name"], nav="apps", a=a, new=False, errors={}, events=events, names=names, ha=hst,
-                ha_nodes=[c for c in others if c["id"] != a["node"]],
+                console_only=nodes.console_role()["manage_only"],
+                ha_nodes=[c for c in node_choices("standby") if c["id"] != a["node"]],
+                ha_inst=[c for c in others if c["id"] != a["node"]],
                 refresh=a["status"] == "deploying" or bool(busy), registries=P.registry_logins(), st=st, dbi=dbi,
                 ranges=list(stats.RANGES), others=others, dsize=dsize, domains=D.all_domains(), cf=cloudflare.status())
 
@@ -403,6 +411,15 @@ async def ha_action(request: Request, slug: str, action: str):
         P.spawn(_ha_job, fn, slug, request.session.get("user"), what)
         flash(request, msg + " Suis l'avancement dans les événements.")
     return go(f"/apps/{slug}#hautedispo")
+
+
+@app.post("/nodes/console")
+async def console_settings(request: Request):
+    f = await request.form()
+    await asyncio.to_thread(nodes.save_console_role, f.get("role") == "manage", f.get("standby") == "on",
+                            request.session.get("user"))
+    flash(request, "Rôle de la console enregistré.")
+    return go("/nodes#console")
 
 
 @app.post("/ha/settings")
@@ -1386,7 +1403,7 @@ async def nodes_page(request: Request):
         if ap:
             hrows.append({"a": ap, "h": h})
     return render(request, "nodes.html", title="Nœuds", nav="nodes", rows=rows, key=key, now=time.time(),
-                  has=ha.settings(), hrows=hrows,
+                  has=ha.settings(), hrows=hrows, crole=nodes.console_role(), on_console=apps_by.get(nodes.LOCAL, []),
                   fence_auto=len([n for n in nodes.all_nodes() if n["id"] != nodes.LOCAL]) >= 2,
                   refresh=busy, auto_refresh=None if busy else 60)
 

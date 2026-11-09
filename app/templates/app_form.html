@@ -9,6 +9,8 @@
   </div>
   {% if not new %}<span class="pill s-{{ a.status }}">{{ LABELS[a.status] }}</span>{% endif %}
 </div>
+{% if not new and console_only and a.node == 'local' %}<div class="flash warn" role="status">La console est en « gestion seulement », mais cette appli tourne encore dessus.
+  {% if ha %}Bascule-la sur un autre nœud depuis le bloc <a href="#hautedispo">Haute disponibilité</a>.{% elif others %}Déplace-la sur un nœud avec le bloc <a href="#nodemove">Nœud</a> en bas de page.{% else %}Ajoute un nœud (page <a href="/nodes">Nœuds</a>) pour pouvoir l'y déplacer.{% endif %}</div>{% endif %}
 
 <div class="cols">
 <form class="panel" method="post" action="{{ '/apps/new' if new else '/apps/' ~ a.slug }}" id="appform" novalidate>
@@ -186,7 +188,7 @@
   {% include "_ha.html" %}
 
   {% if others and not ha %}
-  <form class="panel" method="post" action="/apps/{{ a.slug }}/node/move"
+  <form class="panel" id="nodemove" method="post" action="/apps/{{ a.slug }}/node/move"
         onsubmit="return confirm('Déplacer {{ a.name }} ? Coupure de quelques secondes pendant la bascule.')">
     <h2>Nœud</h2>
     <dl class="facts"><dt>Actuel</dt><dd><a href="/nodes/{{ a.node }}">{{ a.node }}</a></dd>

@@ -20,7 +20,7 @@
     <div class="nstat"><span>Disque</span><span class="mono">{{ '%.1f' % i.disk }} / {{ '%.0f' % i.disk_total }} Go</span>{{ meter(i.disk, i.disk_total) }}</div>
     {% elif n.state == 'error' %}<p class="hint lv-error">{{ n.error }}</p>
     {% else %}<p class="hint">Mesures disponibles une fois l'installation terminée.</p>{% endif %}
-    <div class="pk">{{ n.apps | length }} appli{{ 's' if n.apps | length > 1 }}{% if n.id != 'local' %} · réseau privé {{ n.wg_ip }}{% if n.hs %} · lien vu {{ n.hs | ago }}{% endif %}{% endif %}</div>
+    <div class="pk">{% if n.id == 'local' and crole.manage_only %}gestion seulement · {% endif %}{{ n.apps | length }} appli{{ 's' if n.apps | length > 1 }}{% if n.id != 'local' %} · réseau privé {{ n.wg_ip }}{% if n.hs %} · lien vu {{ n.hs | ago }}{% endif %}{% endif %}</div>
   </a>
 {% endfor %}
 </div>
@@ -58,9 +58,21 @@
 </section>
 </div>
 
+<form class="panel" method="post" action="/nodes/console" id="console" style="margin-top:20px;display:flex;flex-direction:column;gap:12px">
+  <h2 style="margin:0">Rôle de la console</h2>
+  <div class="seg" role="radiogroup" aria-label="Rôle de la console">
+    <label><input type="radio" name="role" value="host" {{ 'checked' if not crole.manage_only }}><span>Héberge aussi des applis</span></label>
+    <label><input type="radio" name="role" value="manage" {{ 'checked' if crole.manage_only }}><span>Gestion seulement</span></label>
+  </div>
+  <p class="hint" style="margin:0"><strong>Héberge aussi des applis</strong> : tout tient sur une seule machine, idéal pour démarrer. <strong>Gestion seulement</strong> (conseillé dès que tu as des nœuds) : la console garde les clés SSH des nœuds, le jeton Cloudflare et les accès aux sauvegardes ; sans appli dessus, une appli piratée ne peut pas les atteindre, aucune ne lui prend sa mémoire, et toutes peuvent être en haute dispo, puisque c'est la console qui décide des bascules. Si la console s'arrête, les applis des nœuds continuent de tourner.</p>
+  <label class="check"><input type="checkbox" name="standby" {{ 'checked' if crole.standby }}><span>En gestion seulement, la console peut quand même servir de secours à chaud (elle ne fait tourner l'appli qu'après une bascule)</span></label>
+  {% if crole.manage_only and on_console %}<div class="flash warn" role="status">Encore sur la console : {% for a in on_console %}<a href="/apps/{{ a.slug }}">{{ a.name }}</a>{{ ', ' if not loop.last }}{% endfor %}. Déplace-les depuis leur fiche (bloc « Nœud »).</div>{% endif %}
+  <div><button class="btn sm primary">Enregistrer</button></div>
+</form>
+
 <form class="panel" method="post" action="/ha/settings" id="hautedispo" style="margin-top:20px;display:flex;flex-direction:column;gap:12px">
   <h2 style="margin:0">Haute disponibilité</h2>
-  <p class="hint" style="margin:0">Elle se met en place appli par appli, dans sa fiche : secours à chaud (réplique de la base et copie de data/ sur un autre nœud, bascule automatique) ou instances multiples (l'appli tourne sur plusieurs nœuds à la fois). La console décide des bascules : une appli de la console elle-même ne bascule pas si la console s'éteint.</p>
+  <p class="hint" style="margin:0">Elle se met en place appli par appli, dans sa fiche : secours à chaud (réplique de la base et copie de data/ sur un autre nœud, bascule automatique) ou instances multiples (l'appli tourne sur plusieurs nœuds à la fois). La console décide des bascules : une appli de la console elle-même ne bascule pas si la console s'éteint (voir « Gestion seulement » ci-dessus).</p>
   {% for r in hrows %}<div class="cert"><a href="/apps/{{ r.a.slug }}#hautedispo">{{ r.a.name }}</a><span class="hint">{{ 'secours' if r.h.mode == 'standby' else 'instances' }} : {{ r.a.node }} → {{ r.h.nodes | join(', ') }} · {{ {'ok': 'protégée', 'degraded': 'secours à refaire', 'setup': 'mise en place', 'error': 'en erreur'}.get(r.h.state, r.h.state) }}</span></div>{% endfor %}
   <fieldset class="secgroup"><legend>Arrêt de sécurité d'un nœud isolé</legend>
     <p class="hint" style="margin:0">Un nœud qui ne voit plus aucun autre membre du réseau privé arrête ses applis en haute dispo et son connecteur de tunnel : si la console les a basculées ailleurs, elles ne tournent jamais en double. Il les relance dès que la console le revoit, si rien n'a basculé.</p>

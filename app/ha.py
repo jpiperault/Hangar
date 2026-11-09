@@ -404,6 +404,8 @@ def validate(a, mode, nodes_, ack):
         return "Choisis au moins un autre nœud."
     if mode == "standby" and len(nodes_) != 1:
         return "Le secours à chaud se fait sur un seul nœud."
+    if N.LOCAL in nodes_ and not N.console_hosts("standby" if mode == "standby" else "app"):
+        return "La console est en « gestion seulement » : choisis un autre nœud (page Nœuds pour changer)."
     for n in nodes_:
         if n != N.LOCAL and not _ok(n):
             return f"Le nœud {n} n'est pas en ligne."
