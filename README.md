@@ -78,6 +78,7 @@ Reprise complète sur un nouveau serveur, depuis une archive téléchargée, Dri
 
 - [docs/reprise.md](docs/reprise.md) : installer sur un nouveau serveur et tout restaurer (archive téléchargée, Drive, NAS)
 - [docs/exploitation.md](docs/exploitation.md) : services, fichiers, sauvegardes, alertes, mises à jour
+- [docs/google-drive.md](docs/google-drive.md) : créer le projet Google et connecter Google Drive aux sauvegardes
 - [docs/prompt-deploiement.md](docs/prompt-deploiement.md) : préparer une appli pour Hangar avec Claude
 
 ## Contrat pour un backend

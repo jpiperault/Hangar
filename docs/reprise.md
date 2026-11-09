@@ -109,7 +109,7 @@ La commande affiche l'état final de chaque appli. Elle se termine en erreur si 
 
 1. Installe sans `--restore`.
 2. Dans la console, ouvre **Sauvegardes › Mot de passe des sauvegardes › Nouveau serveur ?** et saisis **le mot de passe de tes sauvegardes**, celui que tu as noté.
-3. Connecte **Google Drive** avec le même identifiant Google qu'avant, et/ou le **NAS** avec les mêmes dossiers. Hangar retrouve le dépôt existant.
+3. Connecte **Google Drive** avec le même compte Google qu'avant, et/ou le **NAS** avec les mêmes dossiers. Hangar retrouve le dépôt existant. Le projet Google existant (ID client et code secret) resservira tel quel ; il doit rester « En production » et ses deux pages publiques réapparaissent dès que le domaine est repris (voir [google-drive.md](google-drive.md)).
 4. Dans **Restaurer une appli**, choisis la sauvegarde la plus récente, puis clique sur **Tout restaurer (reprise du serveur)…**. Hangar la télécharge et la convertit en archive.
 5. Dans **Archives**, ouvre l'archive « importée » et clique sur **Tout cocher**. Coche **Reprendre les réglages**, puis lance la restauration.
 

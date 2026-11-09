@@ -1,4 +1,32 @@
 {% extends "base.html" %}
+{% macro gproc(title, sub) %}
+      <details><summary class="hint"><strong>{{ title }}</strong> {{ sub }}</summary>
+        <p class="hint">L'identifiant fourni par défaut avec rclone est partagé par tous ses utilisateurs, et Google le bloque souvent (« quota dépassé »). Le tien est gratuit et son quota t'est réservé. Guide détaillé : <code>docs/google-drive.md</code>.</p>
+        {% if not s.home %}<p class="hint lv-warn">Il faut d'abord un domaine avec un préfixe pour les routes par chemin (page <a href="/domains">Domaines</a>) : Hangar y publie les deux pages que Google exige.</p>{% endif %}
+        <ol class="steps">
+          <li><strong>Projet</strong> : sur <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">console.cloud.google.com</a>, crée un projet « Hangar ».</li>
+          <li><strong>API</strong> : dans <a href="https://console.cloud.google.com/apis/library/drive.googleapis.com" target="_blank" rel="noopener">API et services › Bibliothèque</a>, active <strong>Google Drive API</strong>.</li>
+          <li><strong>Google Auth Platform</strong> : ouvre <a href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noopener">Google Auth Platform</a> et clique sur « Commencer » : nom de l'application « Hangar », ton adresse e-mail d'assistance, audience <strong>Externe</strong>, ton adresse comme contact, puis « Créer ».</li>
+          <li><strong>Branding</strong> : remplis la partie « Domaine de l'application », puis « Enregistrer » en bas de page.
+            {% if s.home %}<dl class="facts" style="margin:6px 0">
+              <dt>Page d'accueil</dt><dd><code>https://{{ s.home }}/</code></dd>
+              <dt>Règles de confidentialité</dt><dd><code>https://{{ s.home }}/confidentialite</code></dd>
+              <dt>Conditions d'utilisation</dt><dd>laisser vide</dd>
+              <dt>Domaines autorisés</dt><dd>« + Ajouter un domaine » : <code>{{ s.domain }}</code> (sans <code>https://</code> ni préfixe)</dd>
+              <dt>Logo</dt><dd>n'en mets pas : un logo oblige à faire valider l'application (plusieurs jours)</dd></dl>
+            <span class="hint">Hangar sert lui-même ces deux pages : vérifie que <a href="https://{{ s.home }}/confidentialite" target="_blank" rel="noopener">la page de confidentialité</a> s'ouvre.</span>{% endif %}</li>
+          <li><strong>Accès aux données</strong> : « Ajouter ou supprimer des champs d'application », coche <code>…/auth/drive.file</code> (« Afficher, créer et supprimer uniquement les fichiers que vous utilisez avec cette appli »), « Mettre à jour », puis « Enregistrer ».</li>
+          <li><strong>Audience</strong> : « Publier l'application », puis « Confirmer ». L'état doit passer à <strong>En production</strong>.
+            <span class="hint">Indispensable : en mode « Test », Google coupe l'accès au bout de 7 jours et les sauvegardes s'arrêtent. Le droit <code>drive.file</code> ne demande pas de validation par Google. S'il te demande quand même de prouver que {{ s.domain or 'le domaine' }} t'appartient : dans <a href="https://search.google.com/search-console" target="_blank" rel="noopener">Search Console</a>, ajoute une propriété « Domaine », puis l'enregistrement TXT <code>google-site-verification=…</code> qu'il donne dans le DNS chez Cloudflare (nom <code>@</code>), et clique sur « Valider ».</span></li>
+          <li><strong>Clients</strong> : « Créer un client », type <strong>Application de bureau</strong>, nom « Hangar ». Copie l'<strong>ID client</strong> et le <strong>code secret</strong> dans les champs ci-dessous (le secret n'est affiché en entier qu'à la création : télécharge le JSON au besoin).</li>
+          <li><strong>Connexion</strong> : clique sur « Connecter Google Drive ». Google affiche « Google n'a pas validé cette application » : c'est normal, clique sur « Paramètres avancés », puis « Accéder à Hangar (non sécurisé) », coche l'accès aux fichiers et « Continuer ».</li>
+        </ol>
+        <form method="post" action="/backups/public-contact" class="inlinefield" style="margin:4px 0 8px" autocomplete="off">
+          <label for="pcontact" class="hint">E-mail de contact affiché sur ces deux pages (facultatif)</label>
+          <input id="pcontact" name="contact" type="email" value="{{ s.public_contact or '' }}" placeholder="contact@{{ s.domain or 'exemple.fr' }}" spellcheck="false">
+          <button class="btn sm">Enregistrer</button></form>
+      </details>
+{% endmacro %}
 {% block main %}
 <div class="bar"><h1>Sauvegardes</h1>
   <div class="acts">
@@ -25,11 +53,13 @@
       </dl>
       {% if not own_client %}<p class="hint lv-warn">L'identifiant partagé de rclone est souvent bloqué par Google. Si les sauvegardes échouent avec « rateLimitExceeded », déconnecte Drive et reconnecte-le avec ton propre identifiant.</p>{% endif %}
       <span class="hint">Chaque nuit à 3 h : un export de chaque base, le dossier data/ de chaque appli et la configuration de la plateforme. Tout est chiffré avant l'envoi : Google ne voit que des fichiers illisibles.</span>
+      <span class="hint">Si ton projet Google était encore en mode « Test » quand tu as connecté Drive, l'accès s'arrêtera 7 jours après la connexion, même une fois le projet publié : publie-le, puis clique sur « Déconnecter » et reconnecte Drive.</span>
+      {{ gproc("▸ Projet Google", ": procédure, pages publiques et contact") }}
       <form method="post" action="/backups/drive/disconnect" data-confirm="Déconnecter Google Drive ? Les sauvegardes déjà envoyées restent dans le Drive."><button class="btn sm">Déconnecter</button></form>
     {% elif pending and google_url %}
       <ol class="steps">
         <li><a class="btn primary sm" href="{{ google_url }}" target="_blank" rel="noopener">Ouvrir Google et autoriser l'accès</a>
-          <span class="hint">Choisis ton compte puis « Autoriser ». Google demande seulement l'accès aux fichiers que Hangar crée lui-même.</span></li>
+          <span class="hint">Choisis ton compte. Si Google affiche « Google n'a pas validé cette application », clique sur « Paramètres avancés », puis « Accéder à Hangar (non sécurisé) ». Coche l'accès demandé, limité aux fichiers que Hangar crée lui-même, puis « Continuer ».</span></li>
         <li>Google renvoie ensuite vers une adresse <code>http://127.0.0.1:53682/…</code> et le navigateur affiche « site inaccessible ». <strong>C'est normal.</strong> Copie toute la barre d'adresse de cet onglet.</li>
         <li><form method="post" action="/backups/drive/finish" class="inlinefield">
           <label class="sr" for="url" hidden>Adresse copiée</label>
@@ -39,29 +69,7 @@
       <form method="post" action="/backups/drive/cancel"><button class="btn sm link">Annuler</button></form>
     {% else %}
       <p class="hint">Les sauvegardes restent pour l'instant sur ce serveur : un export des bases chaque nuit, gardé 14 jours. Si le disque lâche, tout est perdu. Connecte Google Drive pour en garder une copie chiffrée ailleurs.</p>
-      <details><summary class="hint"><strong>▸ Étape préalable : ton identifiant Google</strong> (10 minutes, une seule fois)</summary>
-        <p class="hint">L'identifiant fourni par défaut avec rclone est partagé par tous ses utilisateurs, et Google le bloque souvent (« quota dépassé »). Le tien est gratuit, et son quota t'est réservé.</p>
-        <ol class="steps">
-          <li>Ouvre <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">console.cloud.google.com</a> et crée un projet « Hangar ».</li>
-          <li>Dans <a href="https://console.cloud.google.com/apis/library/drive.googleapis.com" target="_blank" rel="noopener">API et services › Bibliothèque</a>, active <strong>Google Drive API</strong>.</li>
-          <li>Dans <a href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noopener">Google Auth Platform</a>, clique sur « Commencer » : nom de l'application « Hangar », ton adresse e-mail, audience <strong>Externe</strong>.</li>
-          <li>Dans <strong>Accès aux données</strong>, ajoute le champ d'application <code>…/auth/drive.file</code>.</li>
-          <li>Dans <strong>Branding</strong> (image de marque), Google demande ces informations pour publier l'application. Hangar sert lui-même les deux pages :
-            {% if s.home %}<dl class="facts" style="margin:6px 0">
-              <dt>Page d'accueil</dt><dd><code>https://{{ s.home }}/</code></dd>
-              <dt>Règles de confidentialité</dt><dd><code>https://{{ s.home }}/confidentialite</code></dd>
-              <dt>Domaine autorisé</dt><dd><code>{{ s.domain }}</code></dd>
-              <dt>E-mail d'assistance</dt><dd>ton adresse (la même que plus haut)</dd></dl>
-            <span class="hint">Vérifie d'abord que <a href="https://{{ s.home }}/confidentialite" target="_blank" rel="noopener">la page de confidentialité</a> s'ouvre depuis Internet. Google peut demander de prouver que le domaine t'appartient (Search Console) : dans ce cas, ajoute l'enregistrement DNS qu'il indique chez Cloudflare.</span>
-            {% else %}<span class="hint lv-warn">Il faut d'abord un domaine avec un préfixe pour les routes par chemin (page <a href="/domains">Domaines</a>) : les pages y sont servies.</span>{% endif %}</li>
-          <li>Dans <strong>Audience</strong>, clique sur <strong>Publier l'application</strong> (« En production »). <span class="hint">En mode « Test », Google coupe l'accès au bout de 7 jours : les sauvegardes s'arrêteraient chaque semaine. Le droit <code>drive.file</code> ne demande pas de validation approfondie ; à la connexion, Google peut afficher « Google n'a pas validé cette application » : clique sur « Paramètres avancés », puis « Accéder à Hangar ».</span></li>
-          <li>Dans <strong>Clients</strong>, crée un client de type <strong>Application de bureau</strong>, nommé « Hangar ». Copie son <strong>ID client</strong> et son <strong>code secret</strong> ci-dessous.</li>
-        </ol>
-        <form method="post" action="/backups/public-contact" class="inlinefield" style="margin:4px 0 8px" autocomplete="off">
-          <label for="pcontact" class="hint">E-mail de contact affiché sur ces deux pages (facultatif)</label>
-          <input id="pcontact" name="contact" type="email" value="{{ s.public_contact or '' }}" placeholder="contact@{{ s.domain or 'exemple.fr' }}" spellcheck="false">
-          <button class="btn sm">Enregistrer</button></form>
-      </details>
+      {{ gproc("▸ Étape préalable : ton projet Google", "(15 minutes, une seule fois)") }}
       <form method="post" action="/backups/drive/start" autocomplete="off">
         <div class="row2">
           <div class="field"><label for="client_id">ID client</label><input id="client_id" name="client_id" spellcheck="false" placeholder="123456-abc….apps.googleusercontent.com"></div>
