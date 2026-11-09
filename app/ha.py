@@ -152,6 +152,12 @@ def _ok(node_id):
 
 # ---------------------------------------------------------------- base dédiée
 
+def _seg_push():
+    from . import segment
+    for e in segment.push_all():
+        P.log("warn", "nœud local", e)
+
+
 def _d(slug):
     return P.app_dir(slug)
 
@@ -166,11 +172,11 @@ def _db_compose(slug, node, role, h):
                     "-c", "hot_standby=on"],
         "volumes": [f"{_d(slug)}/pgdata:/var/lib/postgresql/data", f"{_d(slug)}/pginit:/docker-entrypoint-initdb.d:ro"],
         "ports": [f"{P.node_wg(node)}:{h['db_port']}:5432"],     # réseau privé seulement
-        "networks": ["platform"], "shm_size": "128mb",
+        "networks": [f"hangar-{slug}"], "shm_size": "128mb",
         "labels": {"fr.hangar.ha-db": slug, "fr.hangar.ha-dbrole": role},
         "healthcheck": {"test": ["CMD-SHELL", "pg_isready -U platform"], "interval": "10s", "timeout": "5s",
                         "retries": 5}}},
-        "networks": {"platform": {"external": True}}}
+        "networks": {f"hangar-{slug}": {"external": True}}}
     os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
     P.write_private(path, "# Généré par Hangar (haute dispo). Ne pas éditer à la main.\n" + json.dumps(doc, indent=2) + "\n")
     return path
@@ -436,6 +442,7 @@ def _enable(a, mode, nodes_, auto, delay, sync_min, by):
          (slug, mode, json.dumps(nodes_), 1 if auto else 0, delay, sync_min, a["host_port"] + DB_PORT_OFFSET,
           secrets.token_hex(16), secrets.token_hex(16), time.time()))
     h = get(slug)
+    _seg_push()   # port de la base dédiée ouvert à cette appli seulement, sur chaque nœud
     label = "secours à chaud" if mode == "standby" else "instances multiples"
     P.log("info", slug, f"haute dispo ({label} sur {', '.join(nodes_)}) : mise en place par {by}")
     node, d = a["node"], P.app_dir(slug)
@@ -493,6 +500,7 @@ def _rollback_enable(slug, a, nodes_):
                     f"CREATE DATABASE {P.db_name(slug)} OWNER {P.db_name(slug)};", node)
             _pg_restore(node, P.PG, slug, dump)
         db.x("DELETE FROM ha WHERE slug = ?", (slug,))
+        _seg_push()
         _db_remove(slug, node)
         ok, detail = P._up(db.app(slug), a["version"])
         P.log("warn" if ok else "error", slug, "appli remise comme avant" + ("" if ok else f", mais ne répond pas : {detail}"))
@@ -534,6 +542,7 @@ def _disable(slug, by):
         P.ensure_db(a, node, P.PG)
         _pg_restore(node, P.PG, slug, dump)
     db.x("DELETE FROM ha WHERE slug = ?", (slug,))
+    _seg_push()
     for n in set(h["nodes"]) | {node}:
         if _ok(n):
             _db_remove(slug, n)

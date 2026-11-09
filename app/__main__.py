@@ -114,6 +114,13 @@ def sysupdate(args):
     sys.exit(system.run_update(args[0]))
 
 
+def segment_cmd(args):
+    """Cloisonnement des applis sur une installation existante : chaque appli sur son propre réseau."""
+    from . import db, segment
+    db.init()
+    sys.exit(0 if segment.migrate() else 1)
+
+
 if __name__ == "__main__":
     cmd = sys.argv[1:2]
     if cmd == ["passwd"]:
@@ -130,5 +137,7 @@ if __name__ == "__main__":
         access_revert(sys.argv[2:])
     elif cmd == ["sysupdate"]:
         sysupdate(sys.argv[2:])
+    elif cmd == ["segment"]:
+        segment_cmd(sys.argv[2:])
     else:
         serve()

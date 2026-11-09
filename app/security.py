@@ -289,7 +289,7 @@ def render_nft(p, web):
           "\tchain pre {",
           "\t\ttype filter hook prerouting priority raw; policy accept;",
           "\t\t# les adresses du réseau privé et de la boucle locale ne s'atteignent que par leurs interfaces",
-          f"\t\tiifname != {{ \"lo\", \"{N.WG_IF}\", \"docker0\", \"br-*\" }} fib daddr type local "
+          f"\t\tiifname != {{ \"lo\", \"{N.WG_IF}\", \"docker0\", \"br-*\", \"hg-*\" }} fib daddr type local "
           f"ip daddr {{ {N.WG_NET}, 127.0.0.0/8 }} counter drop",
           "\t}", "",
           "\tchain input {",
@@ -298,7 +298,9 @@ def render_nft(p, web):
           "\t\tct state established,related accept",
           "\t\tct state invalid drop",
           "\t\tmeta l4proto { icmp, ipv6-icmp } accept",
-          "\t\t# réseau privé : seule la console administre le nœud (les conteneurs n'atteignent pas l'hôte)",
+          "\t\t# les conteneurs des applis n'atteignent aucun service de l'hôte (SSH, ports ajoutés…) hors web",
+          "\t\tiifname { \"docker0\", \"br-*\", \"hg-*\" } meta l4proto { tcp, udp } th dport != { 80, 443 } counter drop",
+          "\t\t# réseau privé : seule la console administre le nœud",
           f"\t\tiifname \"{N.WG_IF}\" ip saddr {N.WG_LOCAL} accept",
           f"\t\tudp dport {N.WG_PORT} accept"]
     if p["ssh_mode"] == "open":
@@ -330,10 +332,12 @@ def render_nft(p, web):
           "\tchain forward {",
           "\t\ttype filter hook forward priority -1; policy accept;",
           "\t\tiifname { \"docker0\", \"br-*\" } oifname { \"docker0\", \"br-*\" } accept",
-          "\t\tiifname { \"docker0\", \"br-*\" } meta l4proto { tcp, udp } th dport 53 accept",
-          f"\t\tiifname {{ \"docker0\", \"br-*\" }} ip daddr {N.WG_NET} tcp dport {P.HOST_PORT_MIN + 10000}-38000 accept",
-          f"\t\tiifname {{ \"docker0\", \"br-*\" }} ct state new ip daddr {{ {PRIVATE4} }} counter drop",
-          "\t\tiifname { \"docker0\", \"br-*\" } ct state new ip6 daddr { fc00::/7, fe80::/10 } counter drop",
+          "\t\t# entre réseaux d'applis : table hangarapps",
+          "\t\tiifname \"hg-*\" oifname \"hg-*\" accept",
+          "\t\tiifname { \"docker0\", \"br-*\", \"hg-*\" } meta l4proto { tcp, udp } th dport 53 accept",
+          f"\t\tiifname {{ \"docker0\", \"br-*\", \"hg-*\" }} ip daddr {N.WG_NET} tcp dport {P.HOST_PORT_MIN + 10000}-38000 accept",
+          f"\t\tiifname {{ \"docker0\", \"br-*\", \"hg-*\" }} ct state new ip daddr {{ {PRIVATE4} }} counter drop",
+          "\t\tiifname { \"docker0\", \"br-*\", \"hg-*\" } ct state new ip6 daddr { fc00::/7, fe80::/10 } counter drop",
           "\t}", "}"]
     return "\n".join(L) + "\n"
 

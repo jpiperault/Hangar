@@ -39,6 +39,8 @@ def _restore(slug, node, path):
 def _cleanup(slug, node, with_db):
     d = P.app_dir(slug)
     P.dk(node, "compose", "down", "--remove-orphans", cwd=d, timeout=180)
+    from . import segment
+    segment.drop(node, slug)
     if with_db:
         P.drop_db(slug, node)
     if not P.is_local(node):

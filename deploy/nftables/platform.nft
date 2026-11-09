@@ -14,6 +14,7 @@ table inet platform {
 		ct state invalid drop
 		meta l4proto { icmp, ipv6-icmp } accept
 		# les conteneurs des applis n'atteignent aucun service de la console (SSH, console web…)
+		iifname { "docker0", "br-*", "hg-*" } meta l4proto { tcp, udp } th dport != { 80, 443 } counter drop
 		tcp dport { 80, 443 } accept
 		udp dport 443 accept
 		ip saddr @lan tcp dport { 22, 8443 } accept
@@ -23,11 +24,13 @@ table inet platform {
 	# Applis compromises : pas de rebond vers le réseau local ni vers les nœuds (passe avant les règles de Docker).
 	chain forward {
 		type filter hook forward priority -1; policy accept;
+		# même réseau Docker ; entre réseaux d'applis : table hangarapps (/etc/nftables.d/hangar-apps.nft)
 		iifname { "docker0", "br-*" } oifname { "docker0", "br-*" } accept
+		iifname "hg-*" oifname "hg-*" accept
 		# DNS (le résolveur est souvent la box) et bases dédiées de la haute dispo par le réseau privé
-		iifname { "docker0", "br-*" } meta l4proto { tcp, udp } th dport 53 accept
-		iifname { "docker0", "br-*" } ip daddr 10.88.0.0/24 tcp dport 28001-38000 accept
-		iifname { "docker0", "br-*" } ct state new ip daddr @private4 counter drop
-		iifname { "docker0", "br-*" } ct state new ip6 daddr { fc00::/7, fe80::/10 } counter drop
+		iifname { "docker0", "br-*", "hg-*" } meta l4proto { tcp, udp } th dport 53 accept
+		iifname { "docker0", "br-*", "hg-*" } ip daddr 10.88.0.0/24 tcp dport 28001-38000 accept
+		iifname { "docker0", "br-*", "hg-*" } ct state new ip daddr @private4 counter drop
+		iifname { "docker0", "br-*", "hg-*" } ct state new ip6 daddr { fc00::/7, fe80::/10 } counter drop
 	}
 }

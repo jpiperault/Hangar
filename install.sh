@@ -266,6 +266,11 @@ if [ -n "$RESTORE" ]; then
   hangar restore "$RESTORE" || echo "    Certaines applis ne sont pas en ligne : voir la console (Applications et Journal)."
 fi
 
+step "Cloisonnement des applis"
+# idempotent : pare-feu de cloisonnement et plage d'adresses Docker sur la console et les nœuds joignables,
+# puis chaque appli encore sur l'ancien réseau commun passe sur son propre réseau (quelques secondes de coupure)
+hangar segment | sed 's/^/    /' || echo "    Cloisonnement incomplet : relance « hangar segment » (voir docs/exploitation.md)."
+
 step "Terminé"
 info "Console : https://$IP:8443  (réseau local uniquement, certificat auto-signé)"
 [ "$NEWPW" = 1 ] && info "Identifiants : cat /root/hangar-mot-de-passe.txt   (à changer avec : hangar passwd)"

@@ -104,6 +104,12 @@ def denv(node_id):
 
 
 def dk(node_id, *args, cwd=None, timeout=600, input=None):
+    if "compose" in args and "up" in args:   # réseau cloisonné de l'appli prêt avant le démarrage
+        from . import segment
+        try:
+            segment.before_up(node_id, list(args), cwd)
+        except RuntimeError as e:
+            return 1, str(e)
     return run(["docker", *args], cwd=cwd, timeout=timeout, input=input, env=denv(node_id))
 
 
@@ -907,7 +913,7 @@ def write_compose(a, version, instance=None, role=None):
         "image": image_ref(a, version),
         "restart": "unless-stopped",
         "ports": _ports(a),
-        "networks": ["platform"],
+        "networks": [f"hangar-{a['slug']}"],     # réseau propre à l'appli (segment.py)
         "volumes": [f"{app_dir(a['slug'])}/data:/data"],
         "environment": {k: v.replace("$", "$$") for k, v in env.items()},
         "mem_limit": f"{a['mem_mb']}m",
@@ -925,7 +931,7 @@ def write_compose(a, version, instance=None, role=None):
     if a["source"] == "git":
         svc["build"] = {"context": f"{a['image']}#{version}"}
     doc = {"name": f"app-{a['slug']}", "services": {"app": svc},
-           "networks": {"platform": {"external": True}}}
+           "networks": {f"hangar-{a['slug']}": {"external": True}}}
     d = app_dir(a["slug"])
     os.makedirs(d, mode=0o700, exist_ok=True)
     os.chmod(d, 0o700)
@@ -1367,6 +1373,8 @@ def delete(slug):
             a = db.app(slug)
         if os.path.exists(f"{d}/compose.yml"):
             dk(node, "compose", "down", "--remove-orphans", cwd=d, timeout=180)
+        from . import segment
+        segment.drop(node, slug)
         if a["db"]:
             try:
                 dump_db(slug, f"{keep}/{db_name(slug)}.sql.gz", node)

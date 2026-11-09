@@ -73,7 +73,9 @@ Before=network-online.target docker.service
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/sbin/nft -f /etc/nftables.d/hangar-node.nft
+ExecStart=-/bin/sh -c '[ ! -f /etc/nftables.d/hangar-apps.nft ] || /usr/sbin/nft -f /etc/nftables.d/hangar-apps.nft'
 ExecStop=/usr/sbin/nft delete table inet hangarnode
+ExecStop=-/usr/sbin/nft delete table inet hangarapps
 [Install]
 WantedBy=multi-user.target
 EOF

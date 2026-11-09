@@ -375,6 +375,11 @@ def install(node_id, sudo_password=""):
         ok, msg = security.apply(node_id, "installation")
         if not ok:
             _log(n, "warn", f"sécurité non appliquée : {msg}")
+        from . import segment
+        try:
+            segment.push(node_id)      # cloisonnement des applis entre elles
+        except RuntimeError as e:
+            _log(n, "warn", str(e))
         try:
             P.apply_routing()          # Caddy du nœud : routes de toutes les applis
             P.sync_tunnel(node_id)     # connecteur du tunnel si le nœud reçoit le trafic

@@ -1,5 +1,7 @@
 {
   "live-restore": true,
   "log-driver": "json-file",
-  "log-opts": { "max-size": "10m", "max-file": "3" }
+  "log-opts": { "max-size": "10m", "max-file": "3" },
+  "bip": "172.17.0.1/16",
+  "default-address-pools": [ { "base": "172.20.0.0/14", "size": 24 } ]
 }
