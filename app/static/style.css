@@ -232,3 +232,7 @@ table.mon td{vertical-align:middle}
 .rrow{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(0,1.3fr) auto;gap:6px;align-items:center}
 .rrow input[hidden]{display:block;visibility:hidden}
 @media (max-width:640px){.rrow{grid-template-columns:1fr 1fr}.rrow input[hidden]{display:none}}
+
+/* champs numériques : sans les flèches natives du navigateur, on tape la valeur */
+input[type=number]{-moz-appearance:textfield;appearance:textfield}
+input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
