@@ -153,7 +153,7 @@ def get_app_or_404(slug):
 SLUG = P.SLUG
 DOMAIN = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
 PKG, IMAGE, GIT, VERSION = P.PKG, P.IMAGE, P.GIT, P.VERSION
-RESERVED = {"health", "static", "well-known", "admin"}
+RESERVED = {"health", "static", "well-known", "admin", "confidentialite"}
 
 
 def validate(f, cur=None):
@@ -930,6 +930,23 @@ async def backups_page(request: Request):
                   pending=backup.auth_pending(), google_url=backup._auth.get("google_url"),
                   pw=backup.password(), keep=keep, next_run=nxt.strip(), apps=db.apps(), refresh=busy or arch_busy,
                   folder=backup.FOLDER, own_client=backup.client_id(), archives=backup.archives())
+
+
+@app.post("/backups/public-contact")
+async def public_contact(request: Request):
+    f = await request.form()
+    c = (f.get("contact") or "").strip()
+    if c and not re.fullmatch(r"[^@\s<>\"']{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,63}", c):
+        flash(request, "Adresse e-mail invalide.", "error")
+        return go("/backups#drive")
+    db.set_setting("public_contact", c)
+    try:
+        await asyncio.to_thread(P.apply_routing)
+        flash(request, "Contact enregistré sur la page d'accueil et les règles de confidentialité." if c
+              else "Contact retiré des pages publiques.")
+    except RuntimeError as e:
+        flash(request, f"Contact enregistré, mais les pages n'ont pas été republiées : {e}", "error")
+    return go("/backups#drive")
 
 
 @app.post("/backups/password")

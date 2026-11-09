@@ -46,9 +46,21 @@
           <li>Dans <a href="https://console.cloud.google.com/apis/library/drive.googleapis.com" target="_blank" rel="noopener">API et services › Bibliothèque</a>, active <strong>Google Drive API</strong>.</li>
           <li>Dans <a href="https://console.cloud.google.com/auth/overview" target="_blank" rel="noopener">Google Auth Platform</a>, clique sur « Commencer » : nom de l'application « Hangar », ton adresse e-mail, audience <strong>Externe</strong>.</li>
           <li>Dans <strong>Accès aux données</strong>, ajoute le champ d'application <code>…/auth/drive.file</code>.</li>
-          <li>Dans <strong>Audience</strong>, clique sur <strong>Publier l'application</strong> (« En production »). <span class="hint">En mode « Test », Google coupe l'accès au bout de 7 jours. Le droit <code>drive.file</code> ne demande aucune validation par Google.</span></li>
+          <li>Dans <strong>Branding</strong> (image de marque), Google demande ces informations pour publier l'application. Hangar sert lui-même les deux pages :
+            {% if s.home %}<dl class="facts" style="margin:6px 0">
+              <dt>Page d'accueil</dt><dd><code>https://{{ s.home }}/</code></dd>
+              <dt>Règles de confidentialité</dt><dd><code>https://{{ s.home }}/confidentialite</code></dd>
+              <dt>Domaine autorisé</dt><dd><code>{{ s.domain }}</code></dd>
+              <dt>E-mail d'assistance</dt><dd>ton adresse (la même que plus haut)</dd></dl>
+            <span class="hint">Vérifie d'abord que <a href="https://{{ s.home }}/confidentialite" target="_blank" rel="noopener">la page de confidentialité</a> s'ouvre depuis Internet. Google peut demander de prouver que le domaine t'appartient (Search Console) : dans ce cas, ajoute l'enregistrement DNS qu'il indique chez Cloudflare.</span>
+            {% else %}<span class="hint lv-warn">Il faut d'abord un domaine avec un préfixe pour les routes par chemin (page <a href="/domains">Domaines</a>) : les pages y sont servies.</span>{% endif %}</li>
+          <li>Dans <strong>Audience</strong>, clique sur <strong>Publier l'application</strong> (« En production »). <span class="hint">En mode « Test », Google coupe l'accès au bout de 7 jours : les sauvegardes s'arrêteraient chaque semaine. Le droit <code>drive.file</code> ne demande pas de validation approfondie ; à la connexion, Google peut afficher « Google n'a pas validé cette application » : clique sur « Paramètres avancés », puis « Accéder à Hangar ».</span></li>
           <li>Dans <strong>Clients</strong>, crée un client de type <strong>Application de bureau</strong>, nommé « Hangar ». Copie son <strong>ID client</strong> et son <strong>code secret</strong> ci-dessous.</li>
         </ol>
+        <form method="post" action="/backups/public-contact" class="inlinefield" style="margin:4px 0 8px" autocomplete="off">
+          <label for="pcontact" class="hint">E-mail de contact affiché sur ces deux pages (facultatif)</label>
+          <input id="pcontact" name="contact" type="email" value="{{ s.public_contact or '' }}" placeholder="contact@{{ s.domain or 'exemple.fr' }}" spellcheck="false">
+          <button class="btn sm">Enregistrer</button></form>
       </details>
       <form method="post" action="/backups/drive/start" autocomplete="off">
         <div class="row2">

@@ -2,6 +2,7 @@
 import base64
 import concurrent.futures
 import gzip
+import html
 import json
 import os
 import re
@@ -285,7 +286,11 @@ def render_caddyfile(s, apps, here=LOCAL):
                   f"\t\troot * {PUBLIC}/{name}",
                   '\t\theader Cache-Control "public, max-age=300"',
                   "\t\tfile_server", "\t}",
-                  "\thandle /health {", '\t\trespond "ok" 200', "\t}"]
+                  "\thandle /health {", '\t\trespond "ok" 200', "\t}",
+                  "\t# pages publiques : accueil et règles de confidentialité",
+                  "\thandle / {", f"\t\troot * {PUBLIC}/{name}", "\t\trewrite * /index.html", "\t\tfile_server", "\t}",
+                  "\thandle /confidentialite {", f"\t\troot * {PUBLIC}/{name}", "\t\trewrite * /confidentialite.html",
+                  "\t\tfile_server", "\t}"]
             for slug, rs in rts.items():
                 a = by_slug.get(slug)
                 if not a or not any(r["kind"] == "path" and r["domain"] == name for r in rs):
@@ -504,12 +509,66 @@ def apply_routing():
     spawn(security.reconcile)   # pare-feu des nœuds : 80/443 suivent les machines d'entrée des domaines directs
 
 
+PAGE = """<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+<style>body{{font:16px/1.6 system-ui,sans-serif;max-width:680px;margin:40px auto;padding:0 16px;color:#1d2330;background:#fff}}
+h1{{font-size:1.6rem;margin:0 0 4px}}h2{{font-size:1.1rem;margin:28px 0 6px}}p,li{{color:#3b4352}}a{{color:#0b6e5a}}
+.sub{{color:#6b7385;margin:0 0 24px}}footer{{margin-top:40px;font-size:.85rem;color:#6b7385}}
+@media (prefers-color-scheme:dark){{body{{background:#14171d;color:#e7e9ee}}p,li{{color:#c3c8d2}}a{{color:#5fd0b5}}}}</style>
+</head><body>
+{body}
+<footer>{host} · <a href="/">Accueil</a> · <a href="/confidentialite">Règles de confidentialité</a></footer>
+</body></html>
+"""
+
+
+def public_pages(host, contact):
+    """Page d'accueil et règles de confidentialité du domaine (demandées par Google pour publier l'accès au Drive)."""
+    esc = lambda t: html.escape(t, quote=True)
+    who = (f'<a href="mailto:{esc(contact)}">{esc(contact)}</a>' if contact else "l'administrateur de ce serveur")
+    home = PAGE.format(title=f"Hangar · {esc(host)}", host=esc(host), body=f"""<h1>Hangar</h1>
+<p class="sub">{esc(host)}</p>
+<p>Ce serveur héberge les services de {esc(host.split('.', 1)[-1])} avec Hangar, une console d'hébergement
+auto-hébergée et open source : applications web, bases de données, sauvegardes et surveillance.</p>
+<h2>Utilisation de Google Drive</h2>
+<p>Hangar peut envoyer les sauvegardes chiffrées du serveur dans le Google Drive de son administrateur. Il n'accède
+qu'aux fichiers qu'il a créés lui-même (autorisation <code>drive.file</code>) et ne lit aucun autre document.</p>
+<p>Contact : {who}.</p>""")
+    priv = PAGE.format(title=f"Règles de confidentialité · {esc(host)}", host=esc(host), body=f"""<h1>Règles de confidentialité</h1>
+<p class="sub">Hangar sur {esc(host)}</p>
+<h2>Données consultées</h2>
+<p>Quand son administrateur connecte Google Drive, Hangar demande uniquement l'autorisation <code>drive.file</code> :
+il voit et modifie seulement les fichiers qu'il a lui-même créés, dans un dossier dédié. Il ne lit ni ne liste aucun
+autre fichier du Drive, et n'accède à aucune autre donnée du compte Google (contacts, e-mails, profil).</p>
+<h2>Utilisation</h2>
+<p>Ces fichiers sont les sauvegardes du serveur. Ils sont chiffrés sur le serveur avant leur envoi : Google ne
+reçoit que des données illisibles. Ils servent uniquement à restaurer le serveur après une panne.</p>
+<h2>Conservation et partage</h2>
+<p>Les sauvegardes sont gardées selon la durée choisie dans la console, puis supprimées. Le jeton d'accès
+Google reste sur le serveur. Aucune donnée n'est vendue, partagée avec des tiers ni utilisée à des fins publicitaires.
+L'utilisation des données reçues des API Google respecte les
+<a href="https://developers.google.com/terms/api-services-user-data-policy">règles relatives aux données utilisateur des services API Google</a>,
+y compris les exigences d'utilisation limitée.</p>
+<h2>Révocation</h2>
+<p>L'accès peut être retiré à tout moment depuis la console (Sauvegardes, Déconnecter) ou sur
+<a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</p>
+<h2>Contact</h2>
+<p>{who[0].upper() + who[1:] if not contact else who}.</p>""")
+    return {"index.html": home, "confidentialite.html": priv}
+
+
 def write_manifests():
-    """Écrit public/<domaine>/.well-known/apps.json ; retourne {chemin relatif: contenu} pour les nœuds."""
+    """Écrit public/<domaine>/.well-known/apps.json et les pages publiques (accueil, confidentialité) ;
+    retourne {chemin relatif: contenu} pour les nœuds."""
     files = {}
+    doms = D.by_name()
+    contact = db.settings().get("public_contact") or ""
     for name, m in manifests().items():
-        rel = f"{name}/.well-known/apps.json"
-        files[rel] = json.dumps(m, indent=2, ensure_ascii=False)
+        files[f"{name}/.well-known/apps.json"] = json.dumps(m, indent=2, ensure_ascii=False)
+        for fname, content in public_pages(f"{doms[name]['hub']}.{name}", contact).items():
+            files[f"{name}/{fname}"] = content
+    for rel in files:
         path = f"{PUBLIC}/{rel}"
         os.makedirs(os.path.dirname(path), mode=0o755, exist_ok=True)
         tmp = path + ".tmp"
