@@ -9,6 +9,7 @@
 import base64
 import datetime
 import fcntl
+import gzip
 import json
 import os
 import re
@@ -590,7 +591,48 @@ def snapshots(dest_id="gdrive", refresh=False):
     return snaps, None
 
 
+def _sql_restore(slug, path):
+    """Copie de sécurité (pg_dump simple, gzip) : chargée dans une base temporaire du rôle de l'appli, puis échangée
+    avec la base actuelle. Si le chargement échoue, la base actuelle n'a pas bougé."""
+    name = P.db_name(slug)
+    tmp = f"{name}_retour"[:63]
+    pnode, pg = P.pg_where(slug)
+    P.ensure_db(db.app(slug))   # rôle présent
+    rc, out = P._psql(f"DROP DATABASE IF EXISTS {tmp} WITH (FORCE); CREATE DATABASE {tmp} OWNER {name};", pnode, pg)
+    if rc:
+        raise RuntimeError("création de la base temporaire impossible : " + P.tail(out, 2))
+    # décompressé au fil de l'eau (un fichier gzip passé en stdin serait lu compressé)
+    p = subprocess.Popen(["docker", "exec", "-i", pg, "psql", "-U", "platform", "-d", tmp, "-q", "-v", "ON_ERROR_STOP=1"],
+                         stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=P.denv(pnode))
+    err = []
+    t = threading.Thread(target=lambda: err.append(p.stderr.read()), daemon=True)
+    t.start()
+    try:
+        with gzip.open(path, "rb") as f:
+            while chunk := f.read(1024 * 1024):
+                p.stdin.write(chunk)
+    except BrokenPipeError:
+        pass   # psql s'est arrêté sur une erreur : elle est dans stderr
+    finally:
+        try:
+            p.stdin.close()
+        except BrokenPipeError:
+            pass
+    rc = p.wait(timeout=3600)
+    t.join(10)
+    if rc:
+        P._psql(f"DROP DATABASE IF EXISTS {tmp} WITH (FORCE);", pnode, pg)
+        raise RuntimeError("rechargement de la base impossible (base actuelle inchangée) : "
+                           + P.tail(b"".join(err).decode(errors="replace"), 2))
+    rc, out = P._psql(f"DROP DATABASE IF EXISTS {name} WITH (FORCE); ALTER DATABASE {tmp} RENAME TO {name};", pnode, pg)
+    if rc:
+        raise RuntimeError("échange avec la base actuelle impossible : " + P.tail(out, 2))
+    P.ensure_db(db.app(slug))   # droits de connexion remis (REVOKE … FROM PUBLIC)
+
+
 def _pg_restore(slug, dump_path):
+    if dump_path.endswith(".sql.gz"):
+        return _sql_restore(slug, dump_path)
     name = P.db_name(slug)
     pnode, pg = P.pg_where(slug)
     with open(dump_path, "rb") as f:
@@ -626,6 +668,7 @@ def _apply(a, src_data, src_dump, parts, label):
                 shutil.move(src_data, f"{d}/data")
             else:   # état actuel rapatrié en copie de sécurité, puis data/ restauré poussé sur le nœud
                 P.pull_dir(node, f"{d}/data", f"{safe}/data")
+                os.makedirs(f"{safe}/data", exist_ok=True)   # data/ vide sur le nœud : la copie de sécurité en a un aussi
                 P.push_dir(node, src_data, f"{d}/data")
     finally:
         if a["desired"] == "running":
@@ -638,6 +681,103 @@ def _apply(a, src_data, src_dump, parts, label):
     if not ok:
         alerts.send(f"{a['name']} : restauration", f"Restaurée, mais le healthcheck échoue : {detail}",
                     priority=4, tags=["warning"])
+    purge_safety()
+
+
+# ---------------------------------------------------------------- copies de sécurité (état d'avant une restauration)
+
+SAFE_RE = re.compile(r"^([a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?)-([0-9]{8}-[0-9]{6})$")
+SAFETY_DAYS = 30   # au-delà, supprimées…
+SAFETY_MIN = 3     # … sauf les 3 plus récentes de chaque appli
+
+
+def _dsize(d):
+    t = 0
+    for root, _dirs, files in os.walk(d):
+        for f in files:
+            try:
+                t += os.lstat(os.path.join(root, f)).st_size
+            except OSError:
+                pass
+    return t
+
+
+def safety_copies(slug=None):
+    if not os.path.isdir(SAFETY):
+        return []
+    out = []
+    for n in os.listdir(SAFETY):
+        m = SAFE_RE.match(n)
+        if not m or (slug and m.group(1) != slug) or not os.path.isdir(f"{SAFETY}/{n}"):
+            continue
+        d = f"{SAFETY}/{n}"
+        out.append({"name": n, "slug": m.group(1), "ts": time.mktime(time.strptime(m.group(2), "%Y%m%d-%H%M%S")),
+                    "has_db": os.path.exists(f"{d}/base-avant.sql.gz"), "has_data": os.path.isdir(f"{d}/data"),
+                    "size": _dsize(d)})
+    return sorted(out, key=lambda c: c["ts"], reverse=True)
+
+
+def safety_copy(name):
+    m = SAFE_RE.match(name or "")
+    return next((c for c in safety_copies(m.group(1)) if c["name"] == name), None) if m else None
+
+
+def delete_safety(name):
+    if safety_copy(name):
+        shutil.rmtree(f"{SAFETY}/{name}", ignore_errors=True)
+
+
+def purge_safety(now=None):
+    """Copies de plus de 30 jours supprimées, en gardant toujours les 3 plus récentes de chaque appli."""
+    now = now or time.time()
+    seen = {}
+    for c in safety_copies():
+        seen[c["slug"]] = seen.get(c["slug"], 0) + 1
+        if seen[c["slug"]] > SAFETY_MIN and now - c["ts"] > SAFETY_DAYS * 86400:
+            shutil.rmtree(f"{SAFETY}/{c['name']}", ignore_errors=True)
+            P.log("info", c["slug"], f"copie de sécurité du {time.strftime('%d/%m/%Y %H:%M', time.localtime(c['ts']))} "
+                  "supprimée (plus de 30 jours)")
+
+
+def after_failure(slug, started, prev):
+    """Opération (retour arrière, import) en échec : l'appli a été redémarrée par _apply ; son état suit son
+    healthcheck. Échec avant l'arrêt : rien n'a changé, état d'avant remis."""
+    a = db.app(slug)
+    if not a:
+        return
+    if not started or a["desired"] != "running":
+        db.update_app(slug, state=prev if not started else "error")
+        return
+    ok, _ = P.wait_health(a)
+    db.update_app(slug, state="ok" if ok else "error")
+
+
+def revert(slug, name, parts, prev="ok"):
+    """Remet l'appli dans l'état d'une copie de sécurité (thread de la console ; l'appelant l'a mise en « deploying »).
+    L'état actuel est lui-même mis de côté avant : un retour arrière s'annule de la même façon."""
+    c, started = safety_copy(name), False
+    work = f"/srv/backups/restore-tmp/revert-{time.strftime('%Y%m%d-%H%M%S')}"
+    try:
+        if not c or c["slug"] != slug:
+            raise RuntimeError("copie de sécurité introuvable")
+        src = f"{SAFETY}/{name}"
+        src_data = None
+        if "data" in parts:   # copiée : la copie de sécurité reste intacte, réutilisable
+            os.makedirs(os.path.dirname(work), mode=0o700, exist_ok=True)
+            if shutil.disk_usage(os.path.dirname(work)).free < c["size"] + 512 * 1024 ** 2:
+                raise RuntimeError("place insuffisante sur le serveur pour copier data/")
+            src_data = f"{work}/data"
+            shutil.copytree(f"{src}/data", src_data, symlinks=True)
+        label = f"la copie de sécurité du {time.strftime('%d/%m/%Y %H:%M:%S', time.localtime(c['ts']))}"
+        P.log("info", slug, f"retour à {label} lancé ({', '.join(parts)})")
+        with P.op_lock:
+            started = True
+            _apply(db.app(slug), src_data, f"{src}/base-avant.sql.gz", parts, label)
+    except Exception as e:
+        P.log("error", slug, f"retour arrière impossible : {str(e)[:600]}")
+        after_failure(slug, started, prev)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def restore_app(slug, dest_id, snap, parts):

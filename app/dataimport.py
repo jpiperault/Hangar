@@ -200,8 +200,7 @@ def run(name, slug, parts, prev="ok"):
             backup._apply(db.app(slug), src_data, src_dump, parts, label)
         remove(name)
     except Exception as e:
-        if db.app(slug):   # échec avant l'arrêt de l'appli : elle tourne toujours, rien n'a changé
-            db.update_app(slug, state="error" if started else prev)
         P.log("error", slug, f"import de données impossible : {str(e)[:600]}")
+        backup.after_failure(slug, started, prev)
     finally:
         shutil.rmtree(work, ignore_errors=True)

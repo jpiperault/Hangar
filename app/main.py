@@ -420,7 +420,8 @@ async def _app_ctx(request, slug):
                 ha_nodes=[c for c in node_choices("standby") if c["id"] != a["node"]],
                 ha_inst=[c for c in others if c["id"] != a["node"]],
                 refresh=a["status"] == "deploying" or bool(busy), registries=P.registry_logins(), st=st, dbi=dbi,
-                ranges=list(stats.RANGES), others=others, dsize=dsize, domains=D.all_domains(), cf=cloudflare.status())
+                ranges=list(stats.RANGES), others=others, dsize=dsize, domains=D.all_domains(), cf=cloudflare.status(),
+                safety=backup.safety_copies(slug))
 
 
 # ---------------------------------------------------------------- haute disponibilité
@@ -571,6 +572,31 @@ async def rollback(request: Request, slug: str):
         db.update_app(slug, state="deploying")
         P.spawn(P.deploy, slug, a["prev_version"], "rollback")
         flash(request, f"Retour à {a['prev_version']} en cours.")
+    return go(f"/apps/{slug}")
+
+
+@app.post("/apps/{slug}/revert")
+async def app_revert(request: Request, slug: str):
+    a = db.app(slug)
+    if not a:
+        return go("/")
+    f = await request.form()
+    c = backup.safety_copy(f.get("copy") or "")
+    if not c or c["slug"] != slug:
+        flash(request, "Copie de sécurité introuvable.", "error")
+        return go(f"/apps/{slug}#securite")
+    parts = [p for p, has in (("db", c["has_db"] and a["db"]), ("data", c["has_data"])) if has and f.get(p) == "on"]
+    if not parts:
+        flash(request, "Coche la base et/ou les fichiers à remettre.", "error")
+        return go(f"/apps/{slug}#securite")
+    if a["state"] == "deploying" or backup.running():
+        flash(request, f"{a['name']} : une opération ou une sauvegarde est en cours, réessaie plus tard.", "error")
+        return go(f"/apps/{slug}#securite")
+    prev = a["state"]
+    db.update_app(slug, state="deploying")
+    P.spawn(backup.revert, slug, c["name"], parts, prev)
+    flash(request, f"Retour arrière lancé pour {a['name']}. Son état actuel est d'abord mis de côté : "
+          "tu pourras y revenir de la même façon.")
     return go(f"/apps/{slug}")
 
 
@@ -928,7 +954,8 @@ async def backups_page(request: Request):
                   pending=backup.auth_pending(), google_url=backup._auth.get("google_url"),
                   pw=backup.password(), keep=keep, next_run=nxt.strip(), apps=db.apps(), refresh=busy or arch_busy,
                   folder=backup.FOLDER, own_client=backup.client_id(), archives=backup.archives(),
-                  restore_tests=backup.restore_tests(), imports=dataimport.pending())
+                  restore_tests=backup.restore_tests(), imports=dataimport.pending(), safety=backup.safety_copies(),
+                  app_names={a['slug']: a['name'] for a in db.apps()})
 
 
 @app.post("/backups/public-contact")
@@ -1131,6 +1158,17 @@ async def import_run(request: Request, name: str):
     flash(request, f"Import lancé dans {a['name']} : l'appli est arrêtée quelques instants, puis redémarrée. "
           "Son état d'avant est gardé dans /srv/backups/avant-restauration.")
     return go(f"/apps/{slug}")
+
+
+@app.post("/backups/safety/{name}/delete")
+async def safety_delete(request: Request, name: str):
+    c = backup.safety_copy(name)
+    if c:
+        await asyncio.to_thread(backup.delete_safety, name)
+        P.log("info", c["slug"], f"copie de sécurité {name} supprimée")
+        flash(request, "Copie de sécurité supprimée.")
+    f = await request.form()
+    return go(f"/apps/{c['slug']}#securite" if c and f.get("back") == "app" else "/backups#securite")
 
 
 @app.post("/backups/import/{name}/delete")

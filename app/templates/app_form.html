@@ -202,6 +202,25 @@
   </form>
   {% endif %}
 
+  {% if safety %}
+  <section class="panel" id="securite">
+    <h2>Revenir en arrière</h2>
+    <p class="hint">Avant chaque restauration ou import de données, l'état de l'appli est mis de côté. Tu peux le remettre : l'état actuel est lui-même mis de côté d'abord, donc un retour arrière s'annule de la même façon. Copies gardées 30 jours (toujours les 3 dernières).</p>
+    {% for c in safety %}
+    <form class="cert" method="post" action="/apps/{{ a.slug }}/revert" data-confirm="Remettre {{ a.name }} dans son état du {{ c.ts | when }} ? L'appli est arrêtée quelques instants ; son état actuel est mis de côté.">
+      <input type="hidden" name="copy" value="{{ c.name }}">
+      <span><span class="mono">{{ c.ts | when }}</span> <span class="hint">{{ c.size | size }}</span><br>
+        {% if c.has_db %}<label class="check" style="display:inline-flex"><input type="checkbox" name="db" {{ 'checked' if a.db else 'disabled' }}><span>base{{ '' if a.db else ' (appli sans base)' }}</span></label>{% endif %}
+        {% if c.has_data %}<label class="check" style="display:inline-flex"><input type="checkbox" name="data" checked><span>data/</span></label>{% endif %}</span>
+      <span class="acts">
+        <button class="btn sm" {{ 'disabled' if a.status == 'deploying' }}>Revenir à cet état</button>
+        <button class="btn sm link" formaction="/backups/safety/{{ c.name }}/delete" name="back" value="app" data-confirm="Supprimer cette copie de sécurité ?">Supprimer</button>
+      </span>
+    </form>
+    {% endfor %}
+  </section>
+  {% endif %}
+
   {% if events %}
   <section class="panel">
     <div class="bar"><h2>Derniers événements</h2><a class="btn sm link" href="/journal?app={{ a.slug }}">Tout voir</a></div>
