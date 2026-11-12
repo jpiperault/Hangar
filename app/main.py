@@ -1351,11 +1351,14 @@ async def backup_restore(request: Request):
 @app.get("/system")
 async def system_page(request: Request):
     chk = db.kv_get("sys_check")
-    busy = system.running()
+    busy = await asyncio.to_thread(system.running)
     info = await asyncio.to_thread(P.system_info)
     events = db.q("SELECT * FROM events WHERE app IN ('système', 'alertes') ORDER BY id DESC LIMIT 12")
+    mach = [{"id": n, "name": name, "chk": (chk or {}) if n == P.LOCAL else ((chk or {}).get("nodes") or {}).get(n)}
+            for n, name in system.machines()]
     return render(request, "system.html", title="Système", nav="system", chk=chk, chk_ts=db.kv_ts("sys_check"),
-                  busy=busy, comps=system.COMPONENTS, info=info, events=events, refresh=bool(busy))
+                  busy=busy, comps=system.COMPONENTS, info=info, events=events, refresh=bool(busy), machines=mach,
+                  since=db.kv_get("sys_pending_since") or {})
 
 
 @app.post("/system/check")
@@ -1371,9 +1374,11 @@ async def system_check(request: Request):
 @app.post("/system/update/{cid}")
 async def system_update(request: Request, cid: str):
     try:
-        await asyncio.to_thread(system.launch, cid)
-        msg = f"Mise à jour de {system.COMPONENTS[cid]['name']} lancée."
-        if cid == "docker":
+        f = await request.form()
+        node = (f.get("node") or P.LOCAL).strip()
+        await asyncio.to_thread(system.launch, cid, node)
+        msg = f"Mise à jour de {system.COMPONENTS[cid]['name']} lancée ({system._who(node)})."
+        if cid == "docker" and P.is_local(node):
             msg += " La console va redémarrer : recharge la page dans une minute."
         flash(request, msg)
     except (ValueError, RuntimeError) as e:

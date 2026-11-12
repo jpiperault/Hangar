@@ -7,26 +7,36 @@
 <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
   <section class="panel">
     <h2>Mises à jour</h2>
-    <p class="hint">Vérifiées chaque jour{% if chk_ts %}, dernière fois {{ chk_ts | ago }}{% endif %}. Ces composants ne se mettent jamais à jour tout seuls. Si un service ne repart pas après sa mise à jour, l'ancienne version est réinstallée.</p>
+    <p class="hint">Console et chaque nœud, vérifiés chaque jour{% if chk_ts %}, dernière fois {{ chk_ts | ago }}{% endif %}. Ces composants ne se mettent jamais à jour tout seuls (les correctifs de sécurité Debian, si : page <a href="/security">Sécurité</a>). Une mise à jour à la fois. Si un service ne repart pas après sa mise à jour, l'ancienne version est réinstallée. Rappel par alerte si une mise à jour attend depuis plus de 14 jours.</p>
     {% if chk %}
+    {% for m in machines %}{% set mc = m.chk or {} %}
+    <h3 style="margin:16px 0 6px">{{ m.name }}{% if m.id != 'local' %} <a class="hint" href="/nodes/{{ m.id }}">nœud {{ m.id }}</a>{% endif %}
+      {% if mc.ts %}<span class="hint" style="font-weight:normal"> · vérifié {{ mc.ts | ago }}</span>{% endif %}</h3>
+    {% if mc.error %}<p class="hint lv-error">Vérification impossible : {{ mc.error }}</p>
+    {% elif not mc.components %}<p class="hint">Pas encore vérifié : clique sur « Rechercher les mises à jour ».</p>
+    {% else %}
     <div class="tablebox"><table>
       <thead><tr><th>Composant</th><th>Installé</th><th>Disponible</th><th></th></tr></thead>
       <tbody>
-      {% for cid, c in comps.items() %}{% set x = chk.components.get(cid, {}) %}
-        <tr><td><div class="nm">{{ c.name }}</div><div class="pk">{{ c.note }}</div></td>
+      {% for cid, c in comps.items() %}{% set x = mc.components.get(cid, {}) %}{% set wait = since.get(m.id ~ ':' ~ cid) %}
+        <tr><td><div class="nm">{{ c.name }}</div><div class="pk">{{ c.note if m.id == 'local' or cid != 'docker' else "Le démon redémarre ; les conteneurs du nœud continuent de tourner (live-restore)." }}</div></td>
           <td class="mono">{{ x.current or '—' }}</td>
-          <td>{% if x.available %}<span class="pill s-deploying">{{ x.available }}</span>{% if cid == 'debian' %}<div class="pk">{{ x.packages[:8] | join(', ') }}{{ '…' if x.packages | length > 8 }}</div>{% endif %}
+          <td>{% if x.available %}<span class="pill s-deploying">{{ x.available }}</span>{% if wait %}<div class="pk">en attente depuis {{ wait.ts | ago }}</div>{% endif %}{% if cid == 'debian' %}<div class="pk">{{ x.packages[:8] | join(', ') }}{{ '…' if x.packages | length > 8 }}</div>{% endif %}
               {% elif x.error %}<span class="hint lv-error">{{ x.error }}</span>{% else %}<span class="hint">à jour</span>{% endif %}</td>
-          <td><div class="acts">{% if busy == cid %}<span class="pill s-deploying">En cours…</span>
+          <td><div class="acts">{% if busy and busy[0] == m.id and busy[1] == cid %}<span class="pill s-deploying">En cours…</span>
             {% elif x.available %}<form class="inline" method="post" action="/system/update/{{ cid }}"
-              data-confirm="{{ 'Mettre à jour ' ~ c.name ~ ' ? ' ~ c.note }}"><button class="btn sm primary" {{ 'disabled' if busy }}>Mettre à jour</button></form>{% endif %}</div></td></tr>
+              data-confirm="{{ 'Mettre à jour ' ~ c.name ~ ' (' ~ m.name ~ ') ?' }}"><input type="hidden" name="node" value="{{ m.id }}"><button class="btn sm primary" {{ 'disabled' if busy }}>Mettre à jour</button></form>{% endif %}</div></td></tr>
       {% endfor %}
+      {% if m.id == 'local' and chk.hangar %}
         <tr><td><div class="nm">Hangar</div><div class="pk">Code de la console (dépôt GitHub)</div></td>
           <td class="mono">{{ chk.hangar.head }}</td>
           <td>{% if chk.hangar.behind %}<span class="pill s-deploying">{{ chk.hangar.behind }} commit(s) sur GitHub</span>{% elif chk.hangar.ahead %}<span class="hint">{{ chk.hangar.ahead }} commit(s) pas encore poussé(s)</span>{% else %}<span class="hint">à jour</span>{% endif %}
             {% if chk.hangar.dirty %}<div class="pk">modifications locales non commitées</div>{% endif %}</td><td></td></tr>
+      {% endif %}
       </tbody></table></div>
-    {% if chk.reboot %}<p class="hint lv-warn">Un redémarrage du conteneur est demandé par une mise à jour (depuis Proxmox).</p>{% endif %}
+    {% if mc.reboot %}<p class="hint lv-warn">Redémarrage demandé par une mise à jour{% if m.id == 'local' %} (le conteneur de la console, depuis Proxmox){% else %} : bouton Redémarrer dans la fiche du <a href="/nodes/{{ m.id }}#maintenance">nœud</a>{% endif %}.</p>{% endif %}
+    {% endif %}
+    {% endfor %}
     {% else %}<p class="hint">Pas encore vérifié : clique sur « Rechercher les mises à jour ».</p>{% endif %}
   </section>
 
@@ -62,7 +72,7 @@
         <li>la mémoire est presque saturée ;</li>
         <li>PostgreSQL ou le tunnel s'arrête.</li>
       </ul>
-      Une alerte plus discrète signale aussi une nouvelle version d'appli ou de composant.</span>
+      Une alerte plus discrète signale aussi une nouvelle version d'appli ou de composant (console ou nœud), et rappelle une mise à jour qui attend depuis plus de 14 jours.</span>
     <div class="bar" style="justify-content:flex-start">
       <button class="btn primary sm">Enregistrer</button>
       <button class="btn sm" formaction="/system/alerts/test">Envoyer un test</button>

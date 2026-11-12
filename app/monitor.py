@@ -111,15 +111,40 @@ def check_versions(slug=None):
     return found
 
 
+PENDING_DAYS = 14   # au-delà, rappel : une mise à jour attend depuis longtemps
+
+
 def check_updates():
     prev = db.kv_get("sys_check") or {}
     res = system.check()
-    before = {k: v.get("available") for k, v in (prev.get("components") or {}).items()}
-    new = [system.COMPONENTS[k]["name"] for k, v in res["components"].items()
-           if v.get("available") and k != "debian" and v.get("available") != before.get(k)]
+
+    def avail(r, n):
+        m = r if n == P.LOCAL else (r.get("nodes") or {}).get(n) or {}
+        return {k: v.get("available") for k, v in (m.get("components") or {}).items()}
+    names = dict(system.machines())
+    new = []
+    for n, k in system.pending(res):
+        if avail(res, n).get(k) != avail(prev, n).get(k):
+            new.append(f"{system.COMPONENTS[k]['name']} ({'console' if n == P.LOCAL else names.get(n, n)})")
     if new:
         alerts.send("Mises à jour système disponibles", ", ".join(new) + ". À lancer depuis la page Système.",
                     priority=2, tags=["arrow_up"])
+    # depuis quand chaque mise à jour attend ; rappel une fois au-delà de 14 jours
+    since = db.kv_get("sys_pending_since") or {}
+    now = time.time()
+    cur = {f"{n}:{k}" for n, k in system.pending(res)}
+    since = {key: v for key, v in since.items() if key in cur}
+    late = []
+    for key in cur:
+        e = since.setdefault(key, {"ts": now, "reminded": False})
+        if not e["reminded"] and now - e["ts"] > PENDING_DAYS * 86400:
+            e["reminded"] = True
+            n, k = key.split(":", 1)
+            late.append(f"{system.COMPONENTS[k]['name']} ({'console' if n == P.LOCAL else names.get(n, n)})")
+    db.kv_set("sys_pending_since", since)
+    if late:
+        alerts.send("Mises à jour en attente depuis plus de 14 jours", ", ".join(sorted(late))
+                    + ". À lancer depuis la page Système.", priority=3, tags=["hourglass"])
 
 
 def check_backup_age():

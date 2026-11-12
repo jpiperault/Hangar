@@ -1,4 +1,4 @@
 #!/bin/sh
-# Outil Hangar. Usage : hangar passwd | backup | archive | restore <archive.tar.gz> | routing | segment | sysupdate <composant>
+# Outil Hangar. Usage : hangar passwd | backup | archive | restore <archive.tar.gz> | routing | segment | sysupdate <composant> [--node <nœud>]
 set -a; . /srv/platform/.env; set +a
 cd /opt/hangar && exec /opt/hangar/venv/bin/python -m app "$@"

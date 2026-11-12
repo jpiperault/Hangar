@@ -92,7 +92,7 @@ APT::Periodic::Unattended-Upgrade "1";
 APT::Periodic::AutocleanInterval "7";
 EOF
 cat > /etc/apt/apt.conf.d/52platform-unattended <<'EOF'
-// Sécurité Debian uniquement. Docker reste manuel (via la console Hangar).
+// Sécurité Debian uniquement. Docker, Caddy, cloudflared : page Système et alertes de la console Hangar.
 Unattended-Upgrade::Origins-Pattern { "origin=Debian,codename=${distro_codename}-security,label=Debian-Security"; };
 Unattended-Upgrade::Package-Blacklist { "docker-ce"; "docker-ce-cli"; "containerd.io"; "caddy"; "cloudflared"; };
 Unattended-Upgrade::Automatic-Reboot "false";

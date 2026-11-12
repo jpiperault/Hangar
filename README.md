@@ -39,7 +39,7 @@ FastAPI + Jinja, sans build front. Elle écoute en HTTPS (certificat auto-signé
 - **Alertes ntfy** sur le téléphone : appli qui ne répond plus, échec de déploiement, de sauvegarde ou de mise à jour, disque, mémoire, PostgreSQL, tunnel.
 - **Nouvelles versions** : les tags x.y.z des images sont vérifiés toutes les 6 h, avec un bouton pour déployer la nouvelle version.
 - **Base de données** de chaque appli : taille, tables, export `.sql.gz`, import (`.sql`, `.sql.gz`, `.dump`) et remise à zéro, avec copie de sécurité.
-- **Mises à jour système** (Debian, Docker, Caddy, cloudflared, PostgreSQL) depuis la console, avec retour à la version précédente si le service ne repart pas.
+- **Mises à jour système** (Debian, Docker, Caddy, cloudflared, PostgreSQL) de la console et de chaque nœud, depuis la page Système, avec retour à la version précédente si le service ne repart pas et rappel si une mise à jour attend depuis plus de 14 jours.
 - **Statistiques** par appli sur 1 h, 24 h ou 7 jours : requêtes, erreurs, temps de réponse, mémoire, processeur.
 - Liste des noms publics (sans joker), avec leur état DNS et Cloudflare. Remplacement du jeton du tunnel, avec retour à l'ancien si cloudflared ne se connecte pas.
 
@@ -55,7 +55,7 @@ deploy/              fichiers système installés sur le serveur (copies de réf
   docker/            daemon.json (live-restore, rotation des logs), compose PostgreSQL
   nftables/          pare-feu dans une table dédiée (ne touche pas aux règles Docker)
   apt/               mises à jour de sécurité automatiques (Docker, Caddy, cloudflared exclus)
-  bin/               hangar (CLI : passwd, backup [--verify], archive, restore, routing, segment, sysupdate)
+  bin/               hangar (CLI : passwd, backup [--verify], archive, restore, routing, segment, sysupdate [--node])
   node/              préparation d'un nœud (bootstrap.sh, pare-feu)
 docs/                exploitation, reprise sur un nouveau serveur, prompt de déploiement d'une appli
 install.sh           installation complète (idempotente), avec restauration optionnelle d'une archive

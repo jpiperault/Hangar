@@ -1,6 +1,6 @@
 """Point d'entrée : `python -m app` lance la console.
 `python -m app passwd [--random]` gère le compte, `backup [--manual]` sauvegarde, `archive` crée une archive, `restore <archive>` reprend tout,
-`routing` régénère la configuration de Caddy, `sysupdate <composant>` met à jour."""
+`routing` régénère la configuration de Caddy, `sysupdate <composant> [--node <nœud>]` met à jour."""
 import getpass
 import os
 import secrets
@@ -111,9 +111,10 @@ def access_revert(args):
 def sysupdate(args):
     from . import db, system
     db.init()
+    node = args[args.index("--node") + 1] if "--node" in args and args.index("--node") + 1 < len(args) else None
     if not args or args[0] not in system.COMPONENTS:
-        sys.exit("Usage : hangar sysupdate " + "|".join(system.COMPONENTS))
-    sys.exit(system.run_update(args[0]))
+        sys.exit("Usage : hangar sysupdate " + "|".join(system.COMPONENTS) + " [--node <nœud>]")
+    sys.exit(system.run_update(args[0], node))
 
 
 def segment_cmd(args):
