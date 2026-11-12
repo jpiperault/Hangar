@@ -1373,9 +1373,9 @@ async def system_check(request: Request):
 
 @app.post("/system/update/{cid}")
 async def system_update(request: Request, cid: str):
+    f = await request.form()
+    node = (f.get("node") or P.LOCAL).strip()
     try:
-        f = await request.form()
-        node = (f.get("node") or P.LOCAL).strip()
         await asyncio.to_thread(system.launch, cid, node)
         msg = f"Mise à jour de {system.COMPONENTS[cid]['name']} lancée ({system._who(node)})."
         if cid == "docker" and P.is_local(node):
@@ -1383,7 +1383,7 @@ async def system_update(request: Request, cid: str):
         flash(request, msg)
     except (ValueError, RuntimeError) as e:
         flash(request, str(e), "error")
-    return go("/system")
+    return go(f"/system#maj-{node}" if re.fullmatch(r"[a-z0-9][a-z0-9-]{0,30}", node) else "/system")
 
 
 @app.post("/system/alerts")

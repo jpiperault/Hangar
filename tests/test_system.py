@@ -74,4 +74,5 @@ def test_page_par_machine(monkeypatch):
     seen = []
     monkeypatch.setattr(system, "launch", lambda cid, node=None: seen.append((cid, node)))
     r = c.post("/system/update/caddy", data={"node": "vps"}, headers=same, follow_redirects=False)
-    assert r.headers["location"] == "/system" and seen == [("caddy", "vps")]
+    assert r.headers["location"] == "/system#maj-vps" and seen == [("caddy", "vps")]
+    assert 'data-mtab="maj-vps"' in t and 'data-mpane="maj-hs"' in t and "def = 'maj-vps'" in t   # onglet ouvert : celui qui attend

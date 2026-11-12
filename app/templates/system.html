@@ -9,9 +9,17 @@
     <h2>Mises à jour</h2>
     <p class="hint">Console et chaque nœud, vérifiés chaque jour{% if chk_ts %}, dernière fois {{ chk_ts | ago }}{% endif %}. Ces composants ne se mettent jamais à jour tout seuls (les correctifs de sécurité Debian, si : page <a href="/security">Sécurité</a>). Une mise à jour à la fois. Si un service ne repart pas après sa mise à jour, l'ancienne version est réinstallée. Rappel par alerte si une mise à jour attend depuis plus de 14 jours.</p>
     {% if chk %}
+    {% set ns = namespace(first='') %}
+    <nav class="tabs" aria-label="Machines" style="margin:10px 0 12px">
+      {% for m in machines %}{% set mc = m.chk or {} %}
+        {% set nb = (mc.components or {}).values() | selectattr('available') | list | length %}
+        {% if not ns.first and ((busy and busy[0] == m.id) or nb) %}{% set ns.first = m.id %}{% endif %}
+        <a href="#maj-{{ m.id }}" data-mtab="maj-{{ m.id }}">{{ m.name }}{% if busy and busy[0] == m.id %} <span class="pill s-deploying">en cours</span>{% elif mc.error %} <span class="pill s-error">!</span>{% elif nb %} <span class="pill s-deploying">{{ nb }}</span>{% endif %}</a>
+      {% endfor %}
+    </nav>
     {% for m in machines %}{% set mc = m.chk or {} %}
-    <h3 style="margin:16px 0 6px">{{ m.name }}{% if m.id != 'local' %} <a class="hint" href="/nodes/{{ m.id }}">nœud {{ m.id }}</a>{% endif %}
-      {% if mc.ts %}<span class="hint" style="font-weight:normal"> · vérifié {{ mc.ts | ago }}</span>{% endif %}</h3>
+    <div data-mpane="maj-{{ m.id }}">
+    <p class="hint" style="margin:0 0 8px">{% if m.id != 'local' %}<a href="/nodes/{{ m.id }}">Fiche du nœud {{ m.id }}</a>{% else %}Cette machine{% endif %}{% if mc.ts %} · vérifié {{ mc.ts | ago }}{% endif %}</p>
     {% if mc.error %}<p class="hint lv-error">Vérification impossible : {{ mc.error }}</p>
     {% elif not mc.components %}<p class="hint">Pas encore vérifié : clique sur « Rechercher les mises à jour ».</p>
     {% else %}
@@ -36,7 +44,22 @@
       </tbody></table></div>
     {% if mc.reboot %}<p class="hint lv-warn">Redémarrage demandé par une mise à jour{% if m.id == 'local' %} (le conteneur de la console, depuis Proxmox){% else %} : bouton Redémarrer dans la fiche du <a href="/nodes/{{ m.id }}#maintenance">nœud</a>{% endif %}.</p>{% endif %}
     {% endif %}
+    </div>
     {% endfor %}
+    <script nonce="{{ csp_nonce }}">
+    (function () {   // un onglet par machine ; l'adresse garde l'onglet ouvert (#maj-…), sans JavaScript tout reste affiché
+      var panes = document.querySelectorAll('[data-mpane]'), tabs = document.querySelectorAll('[data-mtab]');
+      var def = 'maj-{{ ns.first or machines[0].id }}';
+      function show() {
+        var id = (location.hash || '').slice(1);
+        if (!document.querySelector('[data-mpane="' + id + '"]')) id = def;
+        panes.forEach(function (p) { p.hidden = p.dataset.mpane !== id; });
+        tabs.forEach(function (t) { var on = t.dataset.mtab === id; t.classList.toggle('on', on); t.setAttribute('aria-current', on ? 'page' : 'false'); });
+      }
+      tabs.forEach(function (t) { t.addEventListener('click', function (e) { e.preventDefault(); history.replaceState(null, '', '#' + t.dataset.mtab); show(); }); });
+      window.addEventListener('hashchange', show); show();
+    })();
+    </script>
     {% else %}<p class="hint">Pas encore vérifié : clique sur « Rechercher les mises à jour ».</p>{% endif %}
   </section>
 
