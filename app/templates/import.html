@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="bar"><div><div class="crumb"><a href="/backups#import">Sauvegardes</a> /</div><h1>Importer des données</h1>
+  <span class="hint">{{ i.filename or iname }}</span></div></div>
+<div class="kpis">
+  <span class="kpi">Reçu <strong>{{ i.ts | when }}</strong></span>
+  <span class="kpi">Taille <strong>{{ i.size | size }}</strong></span>
+  {% if i.dump %}<span class="kpi">Base <strong>{{ i.db_size | size }}</strong>{% if i.pg_from %} · PostgreSQL {{ i.pg_from.split(' ')[0] }}{% endif %}</span>{% endif %}
+  {% if i.data %}<span class="kpi">data/ <strong>{{ i.files }} fichier{{ 's' if i.files != 1 }}</strong> · {{ i.data_size | size }}</span>{% endif %}
+  {% if i.src_slug %}<span class="kpi">Appli d'origine <strong>{{ i.src_slug }}</strong></span>{% endif %}
+</div>
+{% if not apps %}
+<section class="panel" style="margin-top:16px"><p class="hint">Aucune appli sur ce serveur. Crée d'abord l'appli (même image et même version que l'instance d'origine, base activée si besoin) depuis <a href="/apps/new">Nouvelle application</a>, puis reviens ici.</p></section>
+{% else %}
+<form class="panel danger" method="post" action="/backups/import/{{ iname }}/run" style="margin-top:16px;display:flex;flex-direction:column;gap:12px">
+  <p class="hint" style="margin:0">L'appli choisie est arrêtée. Sa base et son dossier data/ actuels sont copiés dans /srv/backups/avant-restauration, puis <strong>remplacés</strong> par ceux du fichier. Elle redémarre ensuite dans sa version actuelle : ses migrations mettent la base à niveau, et son healthcheck valide l'import. Les variables (secrets compris) restent celles de sa fiche.</p>
+  <div class="field"><label for="app">Appli qui reçoit les données</label>
+    <select id="app" name="app" required>
+      <option value="">— choisir —</option>
+      {% for a in apps %}<option value="{{ a.slug }}" data-db="{{ 1 if 'db' in a.can else 0 }}" data-nodb="{{ 1 if i.dump and not a.db else 0 }}" {{ 'selected' if a.slug == pick }}>{{ a.name }} ({{ a.slug }}{{ ', nœud ' ~ a.node if a.node != 'local' }})</option>{% endfor %}
+    </select></div>
+  <div class="field"><span class="flabel">À importer</span>
+    {% if i.dump %}<label class="check"><input type="checkbox" name="db" id="cdb" checked><span>La base{% if i.objects %} <span class="hint">({{ i.objects }} objets{% if i.pg_dump %}, export pg_dump {{ i.pg_dump.split(' ')[0] }}{% endif %})</span>{% endif %}</span></label>
+    <span class="hint lv-error" id="nodb" hidden>Cette appli n'a pas de base PostgreSQL : active-la dans sa fiche pour importer la base.</span>{% endif %}
+    {% if i.data %}<label class="check"><input type="checkbox" name="data" checked><span>Le dossier data/ <span class="hint">({{ i.files }} fichier{{ 's' if i.files != 1 }}, {{ i.data_size | size }})</span></span></label>{% endif %}
+  </div>
+  <div class="field"><label for="confirm">Tape l'identifiant de l'appli (<code id="cslug">…</code>) pour confirmer</label><input id="confirm" name="confirm" autocomplete="off" spellcheck="false"></div>
+  <div class="bar" style="justify-content:flex-start;margin:0"><button class="btn danger">Importer et remplacer</button><a class="btn" href="/backups#import">Annuler</a></div>
+</form>
+<script nonce="{{ csp_nonce }}">
+(function () {
+  var sel = document.getElementById('app'), cdb = document.getElementById('cdb'), nodb = document.getElementById('nodb');
+  function sync() {
+    var o = sel.options[sel.selectedIndex];
+    document.getElementById('cslug').textContent = sel.value || '…';
+    if (cdb) { var ok = o && o.dataset.db === '1'; cdb.disabled = !ok; if (!ok) cdb.checked = false; else if (!cdb.dataset.touched) cdb.checked = true; }
+    if (nodb) nodb.hidden = !(o && o.dataset.nodb === '1');
+  }
+  if (cdb) cdb.addEventListener('change', function () { cdb.dataset.touched = '1'; });
+  sel.addEventListener('change', sync); sync();
+})();
+</script>
+{% endif %}
+{% endblock %}

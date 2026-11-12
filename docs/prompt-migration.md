@@ -5,12 +5,12 @@
      Claude posera la question.
   2. Colle tout le fichier dans le prompt, ou enregistre-le dans le dépôt
      (par exemple docs/MIGRATION-HANGAR.md) et dis à Claude : « Suis docs/MIGRATION-HANGAR.md ».
-  Le kit produit une archive au format Hangar, à importer dans Sauvegardes → Archives → Importer une archive.
+  Le kit produit un fichier db.dump + data/, à envoyer dans Sauvegardes → Importer des données dans une appli.
 -->
 
 # Kit de migration de « <Nom de l'appli> » vers Hangar
 
-Crée dans ce dépôt un kit qui exporte les données d'une instance existante de l'appli, hébergée hors de Hangar, sous la forme d'une **archive importable par Hangar**. Commence par lire le dépôt pour comprendre où l'appli range ses données : base, fichiers, stockage externe éventuel. Si une information manque et change la solution, pose-moi la question avant de coder. Pour le reste, choisis l'option la plus simple et dis-moi ce que tu as choisi. Ne modifie pas le comportement de l'appli.
+Crée dans ce dépôt un kit qui exporte les données d'une instance existante de l'appli, hébergée hors de Hangar, sous la forme d'un **fichier importable par Hangar**. Commence par lire le dépôt pour comprendre où l'appli range ses données : base, fichiers, stockage externe éventuel. Si une information manque et change la solution, pose-moi la question avant de coder. Pour le reste, choisis l'option la plus simple et dis-moi ce que tu as choisi. Ne modifie pas le comportement de l'appli.
 
 ## L'instance de départ
 
@@ -29,24 +29,16 @@ Crée dans ce dépôt un kit qui exporte les données d'une instance existante d
   Il remplace ensuite `/data`, puis redémarre l'appli dans sa version actuelle. Les migrations de l'appli s'exécutent alors au démarrage.
 - Hangar attribue `/data` à l'utilisateur du conteneur. Les propriétaires d'origine des fichiers n'ont donc pas d'importance.
 
-## Format de l'archive (imposé par Hangar)
+## Format du fichier d'import (imposé par Hangar)
 
-Un fichier `.tar.gz`, de 20 Go au plus, qui contient **dans cet ordre** :
+Un fichier `.tar.gz`, de 20 Go au plus, qui contient **seulement** :
 
-1. `manifest.json` : **le premier membre de l'archive**.
-   ```json
-   {"format": 2, "created": <horodatage Unix>, "hangar": "migration",
-    "apps": [{"slug": "<slug>", "name": "<Nom>", "source": "image", "image": "ghcr.io/<compte>/<slug>",
-              "version": "<x.y.z>", "port": <port>, "health_path": "/health", "mem_mb": <RAM en Mo>,
-              "db": true, "env": "", "desired": "running", "expose": "sub", "sub": "<sous-domaine>"}]}
-   ```
-   - `image` sans tag. `version` : lettres, chiffres, `.`, `_`, `-` et `/` seulement.
-   - `env` reste **vide** : aucun secret dans l'archive.
-   - Pas de clé `settings`.
-2. `db/<slug>.dump` : un export **`pg_dump -Fc --no-owner --no-acl`**, produit par un client **`pg_dump` version 17** (image `postgres:17`). Un `pg_dump` plus récent produit un fichier que Hangar ne saurait pas lire. À omettre si l'appli n'a pas de base.
-3. `apps/<slug>/data/…` : l'arborescence exacte que l'appli attend dans `/data`.
-   - Uniquement des fichiers et des dossiers ordinaires : ni liens symboliques, ni chemins absolus, ni `..`. Hangar refuse le reste.
-   - Pas de fichiers temporaires ni de cache recréable.
+- `db.dump` : un export **`pg_dump -Fc --no-owner --no-acl`**, produit par un client **`pg_dump` version 17** (image `postgres:17`). Un `pg_dump` plus récent produit un fichier que Hangar ne saurait pas lire : Hangar le vérifie à l'envoi avec `pg_restore -l` et le refuse sinon. À omettre si l'appli n'a pas de base.
+- `data/…` : l'arborescence exacte que l'appli attend dans `/data`.
+  - Uniquement des fichiers et des dossiers ordinaires : ni liens symboliques, ni chemins absolus, ni `..`. Hangar refuse le reste.
+  - Pas de fichiers temporaires ni de cache recréable.
+
+Aucun autre fichier à la racine : Hangar refuse l'archive. Elle ne contient ni réglages ni secrets : ceux-ci restent dans la fiche de l'appli dans la console.
 
 ## Ce que tu dois produire
 
@@ -67,7 +59,7 @@ Il se lance sur l'ancien serveur et n'y modifie **rien**. Il demande seulement l
 - **Les fichiers :**
   - Copie-les vers la disposition attendue sous `/data`, y compris ceux d'un stockage externe (S3…) s'il y en a.
   - Si la base contient des chemins absolus ou des URL de l'ancien serveur, réécris-les dans la copie (jamais dans la source) en chemins relatifs à `/data`, ou en URL relatives.
-- **L'archive :** `hangar-migration-<slug>-<date>.tar.gz`, avec `manifest.json` en premier.
+- **L'archive :** `migration-<slug>-<date>.tar.gz`, avec `db.dump` et `data/` à la racine.
 - **Le rapport `migration/rapport-<date>.txt`, sans aucun secret ni donnée personnelle :**
   - le nombre de lignes par table, dans la source et dans l'export ;
   - le nombre de fichiers et la taille totale de `/data` ;
@@ -80,7 +72,7 @@ Il se lance sur l'ancien serveur et n'y modifie **rien**. Il demande seulement l
 Il rejoue en local ce que Hangar fera :
 
 1. extrait l'archive dans un dossier temporaire ;
-2. vérifie que `manifest.json` est le premier membre ;
+2. vérifie qu'elle ne contient que `db.dump` et `data/…`, sans lien ni chemin absolu ;
 3. démarre un `postgres:17` vide ;
 4. crée un rôle et une base, puis lance `pg_restore --clean --if-exists --no-owner --no-acl --role=<rôle>` ;
 5. démarre l'image `ghcr.io/<compte>/<slug>:<version>`, avec ce dossier `data/` monté sur `/data` et `DATABASE_URL` pointant sur cette base ;
@@ -97,7 +89,7 @@ Un document court qui contient :
   - créer l'appli dans Hangar avec le **même identifiant** `<slug>`, la base PostgreSQL activée et la même version, puis la déployer ;
   - la liste des **variables d'environnement à recopier** de l'ancienne instance vers la console Hangar, en particulier les secrets dont dépendent les données : clé de signature des sessions, clé de chiffrement… Donne les noms, jamais les valeurs. Une clé perdue déconnecte les utilisateurs, ou rend illisibles des données chiffrées.
 - **Export :** arrêter l'ancienne instance ou la passer en maintenance, lancer `export.sh`, puis `verify.sh`.
-- **Import :** dans Hangar, Sauvegardes → Archives → Importer une archive, choisir l'appli `<slug>`, cocher base et données, puis Restaurer. Hangar garde une copie de l'état d'avant et vérifie le healthcheck.
+- **Import :** dans Hangar, Sauvegardes → Importer des données dans une appli → Envoyer les données. Choisir ensuite l'appli `<slug>`, cocher la base et le dossier data/, taper l'identifiant pour confirmer, puis Importer. Hangar garde une copie de l'état d'avant (/srv/backups/avant-restauration) et vérifie le healthcheck.
 - **Contrôles après l'import :** une liste courte de vérifications fonctionnelles (connexion, quelques écrans, un fichier envoyé).
 - **Bascule :** faire pointer le domaine vers Hangar (adresse de l'appli dans la console). Garder l'ancienne instance arrêtée mais intacte quelques jours : c'est le **retour arrière**.
 - **Si l'archive dépasse 20 Go :** la marche à suivre (par exemple, envoyer les fichiers volumineux à part dans `/data`).
@@ -105,7 +97,7 @@ Un document court qui contient :
 ## Vérifications à faire avant de me rendre la main
 
 1. Sur une instance de test, avec des données factices : `export.sh` puis `verify.sh` passent, et les nombres de lignes sont identiques.
-2. `tar -tzf` montre `manifest.json` en premier, et ni lien symbolique ni chemin absolu.
+2. `tar -tzf` ne montre que `db.dump` et `data/…`, sans lien symbolique ni chemin absolu.
 3. L'export est fait par un `pg_dump` en version 17 : vérifie l'en-tête du fichier avec `pg_restore -l`.
 4. Une deuxième exécution de `export.sh` donne le même résultat, et la source n'a pas changé.
 5. Aucun secret dans l'archive, le rapport ou les journaux.

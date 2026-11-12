@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import access, alerts, backup, cloudflare, db, dbadmin, ha, monitor, move, nodes, security, stats, system
+from . import access, alerts, backup, cloudflare, dataimport, db, dbadmin, ha, monitor, move, nodes, security, stats, system
 from . import domains as D
 from . import platform as P
 
@@ -928,7 +928,7 @@ async def backups_page(request: Request):
                   pending=backup.auth_pending(), google_url=backup._auth.get("google_url"),
                   pw=backup.password(), keep=keep, next_run=nxt.strip(), apps=db.apps(), refresh=busy or arch_busy,
                   folder=backup.FOLDER, own_client=backup.client_id(), archives=backup.archives(),
-                  restore_tests=backup.restore_tests())
+                  restore_tests=backup.restore_tests(), imports=dataimport.pending())
 
 
 @app.post("/backups/public-contact")
@@ -1058,6 +1058,87 @@ async def archive_upload(request: Request):
     os.replace(part, f"{backup.ARCHIVES}/{name}")
     P.log("info", "sauvegarde", f"archive {up.filename} importée ({backup.human(size)}) sous le nom {name}")
     return go(f"/backups/archive/{name}")
+
+
+# ---------------------------------------------------------------- import de données dans une appli existante
+
+@app.post("/backups/import/upload")
+async def import_upload(request: Request):
+    f = await request.form()
+    up = f.get("file")
+    if not up or not getattr(up, "filename", ""):
+        flash(request, "Choisis un fichier .tar.gz (db.dump et/ou data/).", "error")
+        return go("/backups#import")
+    os.makedirs(dataimport.IMPORTS, mode=0o700, exist_ok=True)
+    part = f"{dataimport.IMPORTS}/.{secrets.token_hex(8)}.part"
+    size = 0
+    try:
+        with open(part, "wb") as out:
+            os.chmod(part, 0o600)
+            while chunk := await up.read(4 * 1024 * 1024):
+                size += len(chunk)
+                if size > dataimport.MAX:
+                    break
+                out.write(chunk)
+        if size > dataimport.MAX:
+            raise ValueError("fichier trop gros (20 Go maximum)")
+        name = await asyncio.to_thread(dataimport.receive, part, up.filename, size)
+    except ValueError as e:
+        flash(request, f"{up.filename} : {e}", "error")
+        return go("/backups#import")
+    finally:
+        if os.path.exists(part):
+            os.remove(part)
+    return go(f"/backups/import/{name}")
+
+
+@app.get("/backups/import/{name}")
+async def import_page(request: Request, name: str):
+    i = dataimport.info(name)
+    if not i:
+        return go("/backups#import")
+    apps = [{**dict(a), "can": dataimport.parts_for(i, a)} for a in db.apps()]
+    return render(request, "import.html", title="Importer des données", nav="backups", iname=name, i=i, apps=apps,
+                  pick=request.query_params.get("app") or (i.get("src_slug") if db.app(i.get("src_slug") or "") else ""))
+
+
+@app.post("/backups/import/{name}/run")
+async def import_run(request: Request, name: str):
+    i = dataimport.info(name)
+    if not i:
+        return go("/backups#import")
+    f = await request.form()
+    slug = (f.get("app") or "").strip()
+    a = db.app(slug)
+    back = go(f"/backups/import/{name}?app={slug}")
+    if not a:
+        flash(request, "Choisis l'appli qui reçoit les données.", "error")
+        return go(f"/backups/import/{name}")
+    if (f.get("confirm") or "").strip().lower() != slug:
+        flash(request, f"Tape « {slug} » pour confirmer.", "error")
+        return back
+    parts = [p for p in dataimport.parts_for(i, a) if f.get(p) == "on"]
+    if not parts:
+        flash(request, "Coche la base et/ou les fichiers à importer." if dataimport.parts_for(i, a)
+              else f"{a['name']} n'a pas de base PostgreSQL : rien à importer de ce fichier.", "error")
+        return back
+    if a["state"] == "deploying" or backup.running():
+        flash(request, f"{a['name']} : une opération ou une sauvegarde est en cours, réessaie plus tard.", "error")
+        return back
+    prev = a["state"]
+    db.update_app(slug, state="deploying")
+    P.spawn(dataimport.run, name, slug, parts, prev)
+    flash(request, f"Import lancé dans {a['name']} : l'appli est arrêtée quelques instants, puis redémarrée. "
+          "Son état d'avant est gardé dans /srv/backups/avant-restauration.")
+    return go(f"/apps/{slug}")
+
+
+@app.post("/backups/import/{name}/delete")
+async def import_delete(request: Request, name: str):
+    if dataimport.info(name):
+        dataimport.remove(name)
+        flash(request, "Fichier d'import supprimé.")
+    return go("/backups#import")
 
 
 @app.get("/backups/archive/{name}")
