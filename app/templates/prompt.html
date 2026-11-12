@@ -204,6 +204,7 @@ ADMIN_EMAIL : adresse de l'administrateur</textarea><span class="hint">Une par l
     P('- Limite mémoire : **'+d.mem+' Mo** (mem_limit Docker). Le processus doit tenir dans cette limite.');
     P('- Au déploiement, la console démarre le conteneur, puis interroge `/health` toutes les 2 s, avec 3 s maximum par requête, pendant 90 s au plus. Une réponse **inférieure à 500** valide le déploiement. Sinon, ou si le conteneur s\'arrête, **la version précédente est remise en ligne**.');
     P('- À l\'arrêt, le conteneur reçoit `SIGTERM`, puis il est tué au bout de 10 s. Les logs sont lus sur la **sortie standard**.');
+    P('- **Sauvegardes** : chaque nuit, Hangar sauvegarde '+(d.db?'la base (`pg_dump`) et ':'')+'le dossier `/data`, **pendant que l\'appli tourne**. Une restauration remet '+(d.db?'les deux':'`/data`')+', puis redémarre l\'appli dans sa **version actuelle**, qui peut être plus récente que la sauvegarde. Le healthcheck valide la restauration. Rien d\'autre n\'est sauvegardé.');
     P('- Des anciennes versions de l\'appli Android restent installées chez les utilisateurs : **l\'API doit rester compatible** avec elles.');
     if(d.mode==='tunnel')P('- Limites Cloudflare : 100 Mo maximum par requête et réponse en moins de 100 s.'+(d.files?' Les envois de fichiers doivent rester sous cette taille ; compresse ou redimensionne les images côté client.':''));
     P('- Manifeste public : `'+manifest+'` retourne `{ "'+(d.pkg||'<package>')+'": "'+url+'" }`.');
@@ -216,6 +217,13 @@ ADMIN_EMAIL : adresse de l'administrateur</textarea><span class="hint">Une par l
     if(d.db){P('- Migrations de base **au démarrage**, idempotentes et **uniquement additives** : nouvelles tables, colonnes nullables ou avec une valeur par défaut. On ne supprime ni ne renomme rien qu\'une ancienne version de l\'appli utilise encore.');}
     P('- API versionnée sous **`/api/v1/`**.');
     if(d.files)P('- '+d.filesdesc.charAt(0).toUpperCase()+d.filesdesc.slice(1)+' : stockage sous `/data/…` (un sous-dossier par type), jamais dans la base ni ailleurs dans le conteneur. Taille maximale et types acceptés vérifiés côté serveur.');
+    P('- **Restaurable par Hangar** :');
+    P('  - Tout l\'état de l\'appli est '+(d.db?'dans la base ou ':'')+'dans `/data` : aucun autre volume, aucun cache indispensable (Redis…). Une clé générée au premier démarrage (signature des sessions, chiffrement) est écrite dans `/data` ou fournie en variable, sinon une restauration déconnecte tout le monde ou rend des données illisibles.');
+    if(d.db)P('  - Les migrations amènent une base de **n\'importe quelle version précédente** à la version actuelle : une sauvegarde ancienne peut être restaurée sous une version plus récente.');
+    P('  - `/data` est copié pendant que l\'appli écrit : écriture **atomique** des fichiers (d\'abord `nom.tmp`, puis renommage ; Hangar ignore les `*.tmp`). Pas de SQLite ni d\'autre fichier de base dans `/data` pour des données importantes, car une copie faite pendant une écriture peut être corrompue : '+(d.db?'elles vont dans PostgreSQL.':'si l\'appli en a besoin, il faut activer la base PostgreSQL dans Hangar (dis-le moi).'));
+    if(d.db&&d.files)P('  - La base et `/data` ne sont pas copiés au même instant : un fichier référencé mais absent donne une erreur propre (404), jamais un plantage, et un fichier orphelin ne gêne rien.');
+    if(d.db)P('  - Aucun nom de base ou d\'utilisateur en dur (seulement `DATABASE_URL`), pas de `GRANT` vers d\'autres rôles, pas d\'extension PostgreSQL qui exige un super-utilisateur : la restauration se fait sans les propriétaires ni les droits d\'origine, éventuellement dans un Hangar neuf.');
+    P('  - Chemins relatifs à `/data`, jamais un chemin ou un nom de machine du serveur.');
     P('- Les URL absolues générées se construisent à partir de `X-Forwarded-Proto` et `Host`. Pas de domaine en dur.');
     P('- Logs sur stdout, une ligne par événement, sans données personnelles ni secrets. Arrêt propre sur `SIGTERM`.');
     if(d.exp)P('- **Export et import utilisateur** : `GET /api/v1/export` renvoie une archive zip qui contient les données de l\'utilisateur connecté en JSON'+(d.files?' et ses fichiers':'')+'. `POST /api/v1/import` restaure cette archive après validation complète, sans écraser les données d\'un autre utilisateur. Le format est versionné (`"formatVersion": 1`).');
@@ -261,14 +269,15 @@ ADMIN_EMAIL : adresse de l'administrateur</textarea><span class="hint">Une par l
     if(d.db)P('  - `DATABASE_URL` est injectée par Hangar : ne pas la saisir.');
     P('- **La procédure de mise à jour** : '+(d.ci?'`git tag v1.2.0 && git push --tags`, attendre la fin de l\'Action GitHub, puis':'construire et pousser l\'image `'+image+':1.2.0`, puis')+' dans Hangar, bloc Version, saisir `1.2.0` et cliquer sur Déployer. En cas de problème, utiliser « Revenir à… ».');
     if(d.priv)P('- **Image privée** : la commande à lancer une seule fois sur le serveur, `docker login ghcr.io -u '+d.gh+'`, avec un token GitHub ayant la permission `read:packages`.');
-    P('- **Sauvegardes** : la base est sauvegardée chaque nuit par le serveur.'+(d.files?' Décris le contenu de `/data` et ce qui doit être sauvegardé en plus.':''));
+    P('- **Sauvegardes** : Hangar sauvegarde chaque nuit '+(d.db?'la base et ':'')+'`/data`, et sait les restaurer. Décris le contenu de `/data` (à quoi sert chaque sous-dossier) et ce qui est recréé tout seul s\'il manque.');
     P();P('## Vérifications à faire avant de me rendre la main');P();
     var V=['`docker build --platform linux/amd64 .` réussit. Donne la taille de l\'image.',
       '`docker compose -f docker-compose.local.yml up` démarre, et `curl -i http://127.0.0.1:'+d.port+'/health` répond 200 en moins d\'une seconde.'];
     if(d.db)V.push('Base arrêtée : `/health` répond 503, et le conteneur ne plante pas. Base relancée : tout repart sans redémarrer le backend.');
     V.push('Sans une variable obligatoire, le démarrage échoue avec un message clair.');
-    if(d.db)V.push('Les migrations passent sur une base vide, puis une deuxième fois sans erreur.');
+    if(d.db)V.push('Les migrations passent sur une base vide, une deuxième fois sans erreur, et sur une base créée par la version précédente de l\'appli (dernier tag).');
     if(d.files)V.push('Un fichier envoyé survit à `docker compose down` puis `up` (dossier `/data`).');
+    V.push('Restauration : '+(d.db?'exporte la base (`pg_dump -Fc`) et copie `.data/`, efface les deux, puis restaure la base (`pg_restore --clean --if-exists --no-owner --no-acl`) et remets `.data/`':'copie `.data/` ailleurs, efface-le, puis remets la copie')+' : l\'appli redémarre, `/health` répond 200 et les données sont là.');
     V.push('`docker stats` : mémoire après démarrage et sous charge légère, sous '+d.mem+' Mo.');
     V.push('`docker compose stop` arrête le backend proprement en moins de 10 s.');
     if(d.web)V.push('`/` affiche le site, une route du front rechargée directement fonctionne, et `/api/v1/…` répond.');

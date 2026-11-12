@@ -33,6 +33,7 @@ Rends ce projet déployable sur mon serveur d'applications « Hangar ». Commenc
 - Limite mémoire fixée par la console (256 Mo par défaut, réglable). Le processus doit la respecter.
 - Au déploiement, la console démarre le conteneur, puis interroge `http://<conteneur>:<port><healthcheck>` toutes les 2 s, avec 3 s maximum par requête, pendant 90 s au plus. Une réponse **inférieure à 500** valide le déploiement. Sinon, ou si le conteneur s'arrête, **la version précédente est remise en ligne**.
 - À l'arrêt, le conteneur reçoit `SIGTERM`, puis il est tué au bout de 10 s.
+- **Sauvegardes** : chaque nuit, Hangar sauvegarde la base (`pg_dump`) et le dossier `/data`, **pendant que l'appli tourne**. Une restauration remet les deux, puis redémarre l'appli dans sa **version actuelle**, qui peut être plus récente que la sauvegarde. Le healthcheck valide la restauration. Rien d'autre n'est sauvegardé.
 - Les logs sont lus depuis la **sortie standard**.
 - Les anciennes versions de l'appli Android restent installées chez les utilisateurs : **l'API doit rester compatible** avec elles.
 - Limites Cloudflare : 100 Mo maximum par requête (envoi de fichiers) et réponse en moins de 100 s.
@@ -49,6 +50,13 @@ Rends ce projet déployable sur mon serveur d'applications « Hangar ». Commenc
 - **Migrations de base au démarrage** (Flyway, Alembic, Prisma migrate…), idempotentes et **uniquement additives** : on ajoute des tables et des colonnes nullables ou avec une valeur par défaut. On ne supprime ni ne renomme rien qu'une ancienne version de l'appli utilise encore.
 - **API versionnée** sous `/api/v1/`.
 - Fichiers envoyés par les utilisateurs (photos…) stockés sous `/data/…`, jamais dans la base ni ailleurs dans le conteneur.
+- **Restaurable par Hangar** :
+  - Tout l'état de l'appli est dans la base ou dans `/data` : aucun autre volume, aucun cache indispensable (Redis…). Une clé générée au premier démarrage (signature des sessions, chiffrement) est écrite dans `/data` ou fournie en variable, sinon une restauration déconnecte tout le monde ou rend des données illisibles.
+  - Les migrations amènent une base de **n'importe quelle version précédente** à la version actuelle : une sauvegarde ancienne peut être restaurée sous une version plus récente.
+  - `/data` est copié pendant que l'appli écrit : écriture **atomique** des fichiers (d'abord `nom.tmp`, puis renommage ; Hangar ignore les `*.tmp`). Pas de SQLite ni d'autre fichier de base dans `/data` pour des données importantes, car une copie faite pendant une écriture peut être corrompue : elles vont dans PostgreSQL.
+  - La base et `/data` ne sont pas copiés au même instant : un fichier référencé mais absent donne une erreur propre (404), jamais un plantage, et un fichier orphelin ne gêne rien.
+  - Aucun nom de base ou d'utilisateur en dur (seulement `DATABASE_URL`), pas de `GRANT` vers d'autres rôles, pas d'extension PostgreSQL qui exige un super-utilisateur : la restauration se fait sans les propriétaires ni les droits d'origine, éventuellement dans un Hangar neuf.
+  - Chemins relatifs à `/data`, jamais un chemin ou un nom de machine du serveur.
 - Les URL absolues générées (liens vers les photos, par exemple) se construisent à partir de `X-Forwarded-Proto` et `Host`. Pas de domaine en dur.
 - Logs sur stdout, une ligne par événement, sans données personnelles ni secrets.
 - Arrêt propre sur `SIGTERM`.
@@ -120,7 +128,7 @@ Un document court qui contient :
   2. attendre la fin de l'Action GitHub ;
   3. dans Hangar, bloc Version, saisir `1.2.0` puis Déployer.
 - **Si l'image ghcr est privée**, la commande à lancer une seule fois sur le serveur : `docker login ghcr.io -u <compte>`, avec un token GitHub ayant la permission `read:packages`.
-- **Les sauvegardes** : la base est sauvegardée chaque nuit par le serveur. Pour `/data`, indique ce qui doit être sauvegardé et à quoi sert chaque sous-dossier.
+- **Les sauvegardes** : Hangar sauvegarde chaque nuit la base et `/data`, et sait les restaurer. Décris le contenu de `/data` (à quoi sert chaque sous-dossier) et ce qui est recréé tout seul s'il manque.
 
 ## Vérifications à faire avant de me rendre la main
 
@@ -129,9 +137,11 @@ Un document court qui contient :
 3. Avec la base arrêtée, `/health` répond 503, et le conteneur ne plante pas.
 4. Sans une variable obligatoire, le démarrage échoue avec un message clair.
 5. Un fichier écrit dans `/data` survit à `docker compose down` puis `up`.
-6. La consommation mémoire après démarrage (`docker stats`) reste sous la limite proposée.
-7. Si une version web existe : `/` affiche le site, une route du front rechargée directement fonctionne, et `/api/v1/…` répond.
-8. Les tests existants du projet passent toujours.
+6. Les migrations passent sur une base créée par la version précédente de l'appli (dernier tag), pas seulement sur une base vide.
+7. Restauration : exporte la base (`pg_dump -Fc`) et copie `.data/`, efface les deux, puis restaure la base (`pg_restore --clean --if-exists --no-owner --no-acl`) et remets `.data/` : l'appli redémarre, `/health` répond 200 et les données sont là.
+8. La consommation mémoire après démarrage (`docker stats`) reste sous la limite proposée.
+9. Si une version web existe : `/` affiche le site, une route du front rechargée directement fonctionne, et `/api/v1/…` répond.
+10. Les tests existants du projet passent toujours.
 
 Termine par un récapitulatif :
 - les fichiers créés ou modifiés ;
