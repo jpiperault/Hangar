@@ -14,7 +14,7 @@ pytestmark = pytest.mark.skipif(not shutil.which("gpg"), reason="gpg absent")
 
 def test_aller_retour(tmp_path):
     src = tmp_path / "a.tar.gz"
-    src.write_bytes(os.urandom(300_000))
+    src.write_bytes(b"\x1f\x8b" + os.urandom(300_000))   # en-tête gzip, comme une vraie archive
     enc, out = tmp_path / "a.gpg", tmp_path / "b"
     enc.write_bytes(b"".join(crypt.encrypt_stream(str(src), "mot-de-passe-1")))
     assert crypt.is_encrypted(str(enc)) and not crypt.is_encrypted(str(src))

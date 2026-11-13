@@ -420,3 +420,53 @@ def auto_tick(now=None):
     except (ValueError, RuntimeError) as e:
         P.log("warn", "système", f"{_who(node)} : mise à jour automatique de {COMPONENTS[cid]['name']} non lancée : {e}")
     return pick
+
+
+# ---------------------------------------------------------------- fuseau horaire (console et nœuds)
+
+TZ_COMMON = ["Europe/Paris", "Europe/Brussels", "Europe/Zurich", "Europe/Luxembourg", "Europe/London",
+             "America/Montreal", "Indian/Reunion", "America/Martinique", "America/Guadeloupe", "Pacific/Noumea",
+             "Pacific/Tahiti", "Africa/Casablanca", "Etc/UTC"]
+
+
+def timezones():
+    import zoneinfo
+    return sorted(z for z in zoneinfo.available_timezones() if "/" in z and not z.startswith(("posix/", "right/")))
+
+
+def tz_settings():
+    return {"tz": "", "apps": False, **(db.kv_get("timezone") or {})}
+
+
+def tz_of(node):
+    rc, out = _x(node, ["readlink", "-f", "/etc/localtime"], timeout=20)
+    return out.strip().split("zoneinfo/", 1)[-1] if rc == 0 and "zoneinfo/" in out else "?"
+
+
+def set_tz(node, tz):
+    """Change le fuseau d'une machine (timedatectl, sinon lien /etc/localtime, conteneur LXC compris)."""
+    if tz not in timezones():
+        raise ValueError("fuseau horaire inconnu")
+    q = shlex.quote(tz)
+    rc, out = P.nsh(node, f"timedatectl set-timezone {q} 2>/dev/null || {{ ln -sf /usr/share/zoneinfo/{q} /etc/localtime "
+                          f"&& echo {q} > /etc/timezone; }}; readlink -f /etc/localtime", timeout=60)
+    if rc or not out.strip().endswith(tz):
+        raise RuntimeError(f"{_who(node)} : fuseau non changé ({P.tail(out, 2)})")
+
+
+def apply_tz(tz, apps):
+    """Enregistre le fuseau, l'applique à la console et à chaque nœud joignable. Retourne les erreurs.
+    La console redémarre ensuite (ses heures, ses minuteurs et ses tâches suivent le nouveau fuseau)."""
+    if tz not in timezones():
+        raise ValueError("fuseau horaire inconnu")
+    db.kv_set("timezone", {"tz": tz, "apps": bool(apps)})
+    errs = []
+    for node, _name in machines():
+        try:
+            set_tz(node, tz)
+        except RuntimeError as e:
+            errs.append(str(e))
+    P.log("ok" if not errs else "warn", "système", f"fuseau horaire : {tz}" + (f" ({'; '.join(errs)})" if errs else ""))
+    # redémarrage différé : la réponse à la page part d'abord
+    P.run(["systemd-run", "--on-active=3", "--collect", "--quiet", "systemctl", "restart", "hangar"], timeout=20)
+    return errs

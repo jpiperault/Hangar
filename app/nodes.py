@@ -380,6 +380,13 @@ def install(node_id, sudo_password=""):
             segment.push(node_id)      # cloisonnement des applis entre elles
         except RuntimeError as e:
             _log(n, "warn", str(e))
+        from . import system
+        tz = system.tz_settings()["tz"]
+        if tz:                         # même fuseau horaire que la console (page Système)
+            try:
+                system.set_tz(node_id, tz)
+            except (RuntimeError, ValueError) as e:
+                _log(n, "warn", str(e))
         try:
             P.apply_routing()          # Caddy du nœud : routes de toutes les applis
             P.sync_tunnel(node_id)     # connecteur du tunnel si le nœud reçoit le trafic

@@ -970,6 +970,10 @@ def write_compose(a, version, instance=None, role=None):
     extra, extra_env = services.compose_extra(a, f"hangar-{a['slug']}", f"{app_dir(a['slug'])}/data") \
         if instance is None else ({}, {})
     env.update(extra_env)
+    from . import system
+    tzs = system.tz_settings()
+    if tzs["apps"] and tzs["tz"] and "TZ" not in env:   # heure locale dans l'appli (sauf TZ déjà choisie par elle)
+        env["TZ"] = tzs["tz"]
     from . import preprod
     if preprod.prod_of(a["slug"]):   # à l'appli de couper e-mails, notifications, paiements… en préproduction
         env["HANGAR_ENVIRONMENT"] = "preprod"
@@ -987,6 +991,8 @@ def write_compose(a, version, instance=None, role=None):
         "pids_limit": 1024,
         "labels": {"fr.hangar.app": a["slug"], "fr.hangar.version": version},
     }
+    if tzs["apps"] and tzs["tz"]:   # images sans tzdata : le fichier de l'hôte suffit à la plupart
+        svc["volumes"].append("/etc/localtime:/etc/localtime:ro")
     if role is None:
         from . import ha
         role = ha.role_of(a["slug"], instance)

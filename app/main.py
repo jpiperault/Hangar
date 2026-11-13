@@ -1549,7 +1549,31 @@ async def system_page(request: Request):
             for n, name in system.machines()]
     return render(request, "system.html", title="Système", nav="system", chk=chk, chk_ts=db.kv_ts("sys_check"),
                   busy=busy, comps=system.COMPONENTS, info=info, events=events, refresh=bool(busy), machines=mach,
-                  since=db.kv_get("sys_pending_since") or {}, auto=system.auto_settings())
+                  since=db.kv_get("sys_pending_since") or {}, auto=system.auto_settings(),
+                  tzs=system.tz_settings(), tz_common=system.TZ_COMMON, tz_all=system.timezones(),
+                  tz_now=await asyncio.to_thread(_tz_now))
+
+
+def _tz_now():
+    import concurrent.futures
+    ms = system.machines()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(ms)) as ex:
+        found = list(ex.map(lambda m: system.tz_of(m[0]), ms))
+    return [(name, tz) for (_n, name), tz in zip(ms, found)]
+
+
+@app.post("/system/timezone")
+async def system_timezone(request: Request):
+    f = await request.form()
+    try:
+        errs = await asyncio.to_thread(system.apply_tz, (f.get("tz") or "").strip(), f.get("apps") == "on")
+        msg = f"Fuseau horaire {f.get('tz')} appliqué. La console redémarre : recharge la page dans quelques secondes."
+        if f.get("apps") == "on":
+            msg += " Les applis l'auront à leur prochain déploiement ou redémarrage."
+        flash(request, msg + (" Problèmes : " + " ; ".join(errs) if errs else ""), "error" if errs else "ok")
+    except ValueError as e:
+        flash(request, str(e), "error")
+    return go("/system#fuseau")
 
 
 @app.post("/system/auto")

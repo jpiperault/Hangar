@@ -65,6 +65,7 @@ def test_page_par_machine(monkeypatch):
     monkeypatch.setattr(system, "machines", lambda: [("local", "Console"), ("vps", "Mon VPS"), ("hs", "En panne")])
     monkeypatch.setattr(system, "running", lambda *a, **k: None)
     monkeypatch.setattr(P, "system_info", lambda: {})
+    monkeypatch.setattr(main, "_tz_now", lambda: [("Console", "Etc/UTC"), ("Mon VPS", "Europe/Paris")])
     c = TestClient(main.app, base_url="https://hangar.test", client=("127.0.0.1", 50003))
     main._fails.clear()
     c.post("/login", data={"username": "sys", "password": "mot-de-passe-sys"}, headers=same)
@@ -72,7 +73,7 @@ def test_page_par_machine(monkeypatch):
     assert r.status_code == 200
     t = r.text
     assert "Mon VPS" in t and "2.12.0" in t and 'name="node" value="vps"' in t and "en attente depuis" in t
-    assert "délai dépassé" in t and "Redémarrage demandé" in t
+    assert "délai dépassé" in t and "Redémarrage demandé" in t and 'id="fuseau"' in t and "<option selected>Europe/Paris</option>" in t
     seen = []
     monkeypatch.setattr(system, "launch", lambda cid, node=None: seen.append((cid, node)))
     r = c.post("/system/update/caddy", data={"node": "vps"}, headers=same, follow_redirects=False)
@@ -125,3 +126,25 @@ def test_plage_qui_passe_minuit():
     assert system.in_window(23, 22, 2) and system.in_window(1, 22, 2) and not system.in_window(12, 22, 2)
     with pytest.raises(ValueError):
         system.save_auto(True, ["caddy"], 4, 4)
+
+
+def test_fuseau(monkeypatch, app_row, tmp_path):
+    import json
+    seen = []
+    monkeypatch.setattr(P, "nsh", lambda node, cmd, timeout=120, input=None: seen.append((node, cmd))
+                        or (0, "/usr/share/zoneinfo/Europe/Paris"))
+    monkeypatch.setattr(P, "run", lambda *a, **k: (0, ""))
+    monkeypatch.setattr(system, "machines", lambda: [("local", "Console"), ("vps", "VPS")])
+    with pytest.raises(ValueError):
+        system.apply_tz("Mars/Olympus", False)
+    assert system.apply_tz("Europe/Paris", True) == []
+    assert [n for n, _ in seen] == ["local", "vps"] and "timedatectl set-timezone Europe/Paris" in seen[0][1]
+    assert system.tz_settings() == {"tz": "Europe/Paris", "apps": True}
+    monkeypatch.setattr(P, "app_dir", lambda slug: str(tmp_path / slug))
+    monkeypatch.setattr(P, "compose_path", lambda slug, inst=None: str(tmp_path / slug / "compose.yml"))
+    svc = json.loads("".join(l for l in open(P.write_compose(app_row, "1")) if not l.startswith("#")))["services"]["app"]
+    assert svc["environment"]["TZ"] == "Europe/Paris" and "/etc/localtime:/etc/localtime:ro" in svc["volumes"]
+    svc = json.loads("".join(l for l in open(P.write_compose({**app_row, "env": "TZ=UTC"}, "1"))
+                             if not l.startswith("#")))["services"]["app"]
+    assert svc["environment"]["TZ"] == "UTC"   # la valeur de l'appli l'emporte
+    db.kv_set("timezone", {})
