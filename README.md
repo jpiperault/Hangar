@@ -103,7 +103,7 @@ Sans root, Docker ni réseau : base SQLite et secret de session jetables. GitHub
 - [docs/reprise.md](docs/reprise.md) : installer sur un nouveau serveur et tout restaurer (archive téléchargée, Drive, NAS)
 - [docs/exploitation.md](docs/exploitation.md) : services, fichiers, sauvegardes, alertes, mises à jour
 - [docs/google-drive.md](docs/google-drive.md) : créer le projet Google et connecter Google Drive aux sauvegardes
-- [docs/prompt-deploiement.md](docs/prompt-deploiement.md) : préparer une appli pour Hangar avec Claude
+- [docs/prompt-deploiement.md](docs/prompt-deploiement.md) : exemple écrit de prompt (backend d'appli mobile) ; pour tout type de projet, le générateur « Préparer un projet » de la console
 - [docs/prompt-migration.md](docs/prompt-migration.md) : amener dans Hangar les données d'une instance hébergée ailleurs, avec Claude
 
 ## Contrat pour un backend

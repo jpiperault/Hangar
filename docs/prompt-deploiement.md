@@ -1,4 +1,9 @@
 <!--
+  Version écrite d'exemple : un backend d'appli mobile (API + client Android).
+  Pour tout autre type de projet (appli web, API, bot ou service sans page web, serveur de jeu, site statique),
+  et pour les clients iOS ou web, utilise le générateur de la console : « Préparer un projet » (/prompt),
+  qui adapte chaque section au type choisi.
+
   Prompt à donner à Claude dans le projet de ton application.
   1. Remplis les 6 lignes de la section « Mon application ».
   2. Colle tout le fichier dans le prompt, ou enregistre-le dans le dépôt

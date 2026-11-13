@@ -1289,11 +1289,11 @@ async def prompt_page(request: Request):
         r0 = (D.routes(a["slug"]) or [{"kind": "path", "domain": dft["name"], "sub": ""}])[0]
         dom = D.get(r0["domain"]) or dft
         hangar["platform"].update(base=dom["name"], hub=dom["hub"], mode=dom["mode"])
-        hangar["app"] = {"name": a["name"], "slug": a["slug"], "pkg": a["pkg"],
+        hangar["app"] = {"name": a["name"], "slug": a["slug"], "pkg": a["pkg"], "kind": a["kind"],
                          "expose": "path" if r0["kind"] == "path" else "sub",
                          "sub": r0["sub"], "port": a["port"], "mem": a["mem_mb"], "db": bool(a["db"]),
                          "gh": m.group(1) if m else None, "url": D.primary_url(a["slug"])}
-    return render(request, "prompt.html", title="Prompt de déploiement", nav="prompt", app=a,
+    return render(request, "prompt.html", title="Préparer un projet", nav="prompt", app=a,
                   apps=db.apps(), hangar=hangar)
 
 
