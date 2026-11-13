@@ -343,3 +343,80 @@ def run_update(cid, node=None):
         except Exception:
             pass
         return 1
+
+
+# ---------------------------------------------------------------- mises à jour automatiques la nuit (option)
+
+AUTO_DEFAULT = {"on": False, "comps": ["cloudflared", "caddy", "postgres"], "start": 3, "end": 5}
+AUTO_RETRY_DAYS = 7   # une mise à jour tentée et toujours en attente (échec, ancienne version remise) : pas avant 7 jours
+
+
+def auto_settings():
+    s = {**AUTO_DEFAULT, **(db.kv_get("sys_auto") or {})}
+    s["comps"] = [c for c in s["comps"] if c in COMPONENTS]
+    return s
+
+
+def save_auto(on, comps, start, end):
+    start, end = int(start) % 24, int(end) % 24
+    if start == end:
+        raise ValueError("la plage horaire doit durer au moins une heure")
+    db.kv_set("sys_auto", {"on": bool(on), "comps": [c for c in comps if c in COMPONENTS], "start": start, "end": end})
+
+
+def in_window(hour, start, end):
+    return start <= hour < end if start < end else (hour >= start or hour < end)
+
+
+def auto_pick(res, settings, tried, now):
+    """Prochaine (machine, composant) à mettre à jour automatiquement, sinon None. Fonction pure (testée).
+    tried : {"machine:composant": {"ts", "available"}} des tentatives précédentes."""
+    if not settings["on"] or not in_window(time.localtime(now).tm_hour, settings["start"], settings["end"]):
+        return None
+    cands = []
+    for node, cid in pending(res) + [(n, "debian") for n, k in _debian_pending(res)]:
+        if cid not in settings["comps"]:
+            continue
+        m = res if node == P.LOCAL else (res.get("nodes") or {}).get(node) or {}
+        avail = ((m.get("components") or {}).get(cid) or {}).get("available")
+        t = tried.get(f"{node}:{cid}")
+        if t and t.get("available") == avail and now - t["ts"] < AUTO_RETRY_DAYS * 86400:
+            continue
+        cands.append((node, cid))
+    # nœuds d'abord, la console en dernier (Docker de la console la redémarre) ; Docker après le reste
+    cands.sort(key=lambda x: (x[0] == P.LOCAL, x[1] == "docker"))
+    return cands[0] if cands else None
+
+
+def _debian_pending(res):
+    out = [(P.LOCAL, "debian")] if ((res.get("components") or {}).get("debian") or {}).get("available") else []
+    for n, m in (res.get("nodes") or {}).items():
+        if ((m.get("components") or {}).get("debian") or {}).get("available"):
+            out.append((n, "debian"))
+    return out
+
+
+def auto_tick(now=None):
+    """Appelée régulièrement par la surveillance : lance au plus une mise à jour à la fois, dans la plage de nuit."""
+    now = now or time.time()
+    s = auto_settings()
+    if not s["on"] or running() or db.one("SELECT 1 FROM apps WHERE state = 'deploying'"):
+        return None
+    from . import backup
+    if backup.running() or backup.archive_running():   # pas de changement de PostgreSQL ou de Docker sous une sauvegarde
+        return None
+    res = db.kv_get("sys_check") or {}
+    tried = db.kv_get("sys_auto_tried") or {}
+    pick = auto_pick(res, s, tried, now)
+    if not pick:
+        return None
+    node, cid = pick
+    m = res if node == P.LOCAL else (res.get("nodes") or {}).get(node) or {}
+    tried[f"{node}:{cid}"] = {"ts": now, "available": ((m.get("components") or {}).get(cid) or {}).get("available")}
+    db.kv_set("sys_auto_tried", {k: v for k, v in tried.items() if now - v["ts"] < 30 * 86400})
+    P.log("info", "système", f"{_who(node)} : mise à jour automatique de nuit de {COMPONENTS[cid]['name']}")
+    try:
+        launch(cid, node)
+    except (ValueError, RuntimeError) as e:
+        P.log("warn", "système", f"{_who(node)} : mise à jour automatique de {COMPONENTS[cid]['name']} non lancée : {e}")
+    return pick

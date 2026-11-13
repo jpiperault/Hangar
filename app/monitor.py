@@ -244,6 +244,7 @@ def _loop():
         _every("security", 1800, security.collect_all)
         _every("versions", 6 * 3600, check_versions)
         _every("updates", 24 * 3600, check_updates)
+        _every("auto_updates", 300, system.auto_tick)   # sans effet hors de la plage de nuit, ou si l'option est coupée
         _every("backup_age", 3600, check_backup_age)
         time.sleep(max(5, 60 - (time.time() - t0)))
 

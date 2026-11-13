@@ -1,4 +1,6 @@
 """Mises à jour système : commandes envoyées aux nœuds, recensement, page par machine."""
+import time
+
 import pytest
 
 from app import db, system
@@ -76,3 +78,50 @@ def test_page_par_machine(monkeypatch):
     r = c.post("/system/update/caddy", data={"node": "vps"}, headers=same, follow_redirects=False)
     assert r.headers["location"] == "/system#maj-vps" and seen == [("caddy", "vps")]
     assert 'data-mtab="maj-vps"' in t and 'data-mpane="maj-hs"' in t and "def = 'maj-vps'" in t   # onglet ouvert : celui qui attend
+
+
+def _res():
+    comp = lambda av=None: {"current": "1", "available": av, "packages": []}   # noqa: E731
+    return {"components": {"docker": comp("5:30"), "cloudflared": comp("2026.12"), "debian": comp("2 paquets"),
+                           "caddy": comp(), "postgres": comp()},
+            "nodes": {"vps": {"components": {"cloudflared": comp("2026.12"), "postgres": comp("nouvelle image 17.x"),
+                                             "docker": comp(), "caddy": comp(), "debian": comp()}}}}
+
+
+NUIT = time.mktime((2026, 11, 13, 3, 30, 0, 0, 0, -1))
+JOUR = time.mktime((2026, 11, 13, 14, 0, 0, 0, 0, -1))
+ON = {"on": True, "comps": ["cloudflared", "caddy", "postgres"], "start": 3, "end": 5}
+
+
+def test_auto_plage_et_ordre():
+    assert system.auto_pick(_res(), ON, {}, JOUR) is None
+    assert system.auto_pick(_res(), {**ON, "on": False}, {}, NUIT) is None
+    assert system.auto_pick(_res(), ON, {}, NUIT)[0] == "vps"   # nœuds avant la console
+    tried = {"vps:cloudflared": {"ts": NUIT - 3600, "available": "2026.12"},
+             "vps:postgres": {"ts": NUIT - 3600, "available": "nouvelle image 17.x"}}
+    assert system.auto_pick(_res(), ON, tried, NUIT) == ("local", "cloudflared")
+    # docker et debian seulement si cochés, docker en dernier
+    allc = {**ON, "comps": list(system.COMPONENTS)}
+    order = []
+    t = {}
+    while (p := system.auto_pick(_res(), allc, t, NUIT)):
+        order.append(p)
+        t[f"{p[0]}:{p[1]}"] = {"ts": NUIT, "available": "x"}
+        t[f"{p[0]}:{p[1]}"]["available"] = (_res() if p[0] == "local" else _res()["nodes"][p[0]])["components"][p[1]]["available"]
+    assert order[-1] == ("local", "docker") and ("local", "debian") in order and len(order) == 5
+
+
+def test_auto_reessai():
+    tried = {"vps:cloudflared": {"ts": NUIT - 8 * 86400, "available": "2026.12"}}
+    one = {**ON, "comps": ["cloudflared"]}
+    assert system.auto_pick(_res(), one, tried, NUIT)[0] == "vps"          # plus de 7 jours : retentée
+    tried["vps:cloudflared"]["ts"] = NUIT - 86400
+    assert system.auto_pick(_res(), one, tried, NUIT) == ("local", "cloudflared")
+    tried["vps:cloudflared"]["available"] = "2026.11"                      # nouvelle version depuis : retentée
+    assert system.auto_pick(_res(), one, tried, NUIT)[0] == "vps"
+
+
+def test_plage_qui_passe_minuit():
+    assert system.in_window(23, 22, 2) and system.in_window(1, 22, 2) and not system.in_window(12, 22, 2)
+    with pytest.raises(ValueError):
+        system.save_auto(True, ["caddy"], 4, 4)

@@ -40,7 +40,7 @@ FastAPI + Jinja, sans build front. Elle écoute en HTTPS (certificat auto-signé
 - **Alertes ntfy** sur le téléphone : appli qui ne répond plus, échec de déploiement, de sauvegarde ou de mise à jour, disque, mémoire, PostgreSQL, tunnel ; pour chaque nœud : injoignable, disque, mémoire, Docker, PostgreSQL, pare-feu, Caddy s'il reçoit le web en direct.
 - **Nouvelles versions** : les tags x.y.z des images sont vérifiés toutes les 6 h, avec un bouton pour déployer la nouvelle version.
 - **Base de données** de chaque appli : taille, tables, export `.sql.gz`, import (`.sql`, `.sql.gz`, `.dump`) et remise à zéro, avec copie de sécurité.
-- **Mises à jour système** (Debian, Docker, Caddy, cloudflared, PostgreSQL) de la console et de chaque nœud, depuis la page Système, avec retour à la version précédente si le service ne repart pas et rappel si une mise à jour attend depuis plus de 14 jours.
+- **Mises à jour système** (Debian, Docker, Caddy, cloudflared, PostgreSQL) de la console et de chaque nœud, depuis la page Système, avec retour à la version précédente si le service ne repart pas, rappel si une mise à jour attend depuis plus de 14 jours, et option de mises à jour automatiques la nuit.
 - **Statistiques** par appli sur 1 h, 24 h ou 7 jours : requêtes, erreurs, temps de réponse, mémoire, processeur.
 - Liste des noms publics (sans joker), avec leur état DNS et Cloudflare. Remplacement du jeton du tunnel, avec retour à l'ancien si cloudflared ne se connecte pas.
 

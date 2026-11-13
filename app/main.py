@@ -1384,7 +1384,22 @@ async def system_page(request: Request):
             for n, name in system.machines()]
     return render(request, "system.html", title="Système", nav="system", chk=chk, chk_ts=db.kv_ts("sys_check"),
                   busy=busy, comps=system.COMPONENTS, info=info, events=events, refresh=bool(busy), machines=mach,
-                  since=db.kv_get("sys_pending_since") or {})
+                  since=db.kv_get("sys_pending_since") or {}, auto=system.auto_settings())
+
+
+@app.post("/system/auto")
+async def system_auto(request: Request):
+    f = await request.form()
+    try:
+        system.save_auto(f.get("on") == "on", f.getlist("comps"), f.get("start") or 3, f.get("end") or 5)
+        a = system.auto_settings()
+        P.log("info", "système", "mises à jour automatiques de nuit " + (
+            f"activées ({', '.join(system.COMPONENTS[c]['name'] for c in a['comps']) or 'aucun composant'}, "
+            f"{a['start']} h – {a['end']} h)" if a["on"] else "désactivées"))
+        flash(request, "Mises à jour automatiques enregistrées.")
+    except (ValueError, TypeError) as e:
+        flash(request, f"Réglage refusé : {e}", "error")
+    return go("/system#auto")
 
 
 @app.post("/system/check")

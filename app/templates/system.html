@@ -63,6 +63,19 @@
     {% else %}<p class="hint">Pas encore vérifié : clique sur « Rechercher les mises à jour ».</p>{% endif %}
   </section>
 
+  <form class="panel" id="auto" method="post" action="/system/auto" style="display:flex;flex-direction:column;gap:10px">
+    <h2 style="margin:0">Mises à jour automatiques la nuit</h2>
+    <label class="check"><input type="checkbox" name="on" {{ 'checked' if auto.on }}><span>Installer seules les mises à jour disponibles, sur la console et chaque nœud</span></label>
+    <div class="field"><span class="flabel">Composants</span>
+      {% for cid, c in comps.items() %}<label class="check"><input type="checkbox" name="comps" value="{{ cid }}" {{ 'checked' if cid in auto.comps }}><span>{{ c.name }}{% if cid == 'docker' %} <span class="hint">(redémarre le démon ; sur la console, la console aussi)</span>{% elif cid == 'postgres' %} <span class="hint">(mineures 17.x seulement, dump complet avant)</span>{% elif cid == 'debian' %} <span class="hint">(paquets hors sécurité ; la sécurité s'installe déjà chaque nuit)</span>{% endif %}</span></label>{% endfor %}</div>
+    <div class="row2">
+      <div class="field"><label for="astart">Entre</label><select id="astart" name="start">{% for h in range(24) %}<option value="{{ h }}" {{ 'selected' if h == auto.start }}>{{ h }} h</option>{% endfor %}</select></div>
+      <div class="field"><label for="aend">et</label><select id="aend" name="end">{% for h in range(24) %}<option value="{{ h }}" {{ 'selected' if h == auto.end }}>{{ h }} h</option>{% endfor %}</select></div>
+    </div>
+    <span class="hint">Une mise à jour à la fois, les nœuds avant la console, avec les mêmes protections qu'à la main : si un service ne repart pas, l'ancienne version revient et une alerte part. Une mise à jour en échec n'est retentée qu'après 7 jours, ou dès qu'une version plus récente sort. Rien ne démarre pendant une sauvegarde ou un déploiement.</span>
+    <div><button class="btn sm primary">Enregistrer</button></div>
+  </form>
+
   {% if events %}
   <section class="panel">
     <div class="bar"><h2>Derniers événements système</h2><a class="btn sm link" href="/journal?app=système">Tout voir</a></div>
