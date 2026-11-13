@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import access, alerts, applogs, backup, cloudflare, crypt, dataimport, db, dbadmin, ha, jobs, monitor, move, nodes, preprod, report, security, services, stats, system
+from . import access, alerts, applogs, backup, cloudflare, crypt, dataimport, db, dbadmin, ha, jobs, monitor, move, nodes, preprod, report, security, services, stats, statuspage, system
 from . import domains as D
 from . import platform as P
 
@@ -1810,7 +1810,25 @@ async def monitoring(request: Request):
                      (time.time() - 86400,))
     return render(request, "monitoring.html", title="Supervision", nav="monitoring", host=host, hs=hs, rng=rng,
                   ranges=list(stats.RANGES), rows=rows, svc=svc, pg=pg, incidents=incidents, auto_refresh=60,
-                  now=time.time(), machines=_machines(host, svc, rows))
+                  now=time.time(), machines=_machines(host, svc, rows), sp=statuspage.settings(),
+                  sp_host=statuspage.host(), sp_dns=(await asyncio.to_thread(P.resolves, [statuspage.host()]))
+                  .get(statuspage.host()) if statuspage.host() else None, doms=D.all_domains())
+
+
+@app.post("/monitoring/status")
+async def status_page_save(request: Request):
+    f = await request.form()
+    try:
+        statuspage.save(f.get("on") == "on", f.get("domain") or "", f.get("sub") or "", f.get("title") or "",
+                        f.getlist("apps"))
+        await asyncio.to_thread(P.apply_routing)
+        await asyncio.to_thread(statuspage.write)
+        h = statuspage.host()
+        P.log("info", "système", f"page de statut publique : {h}" if h else "page de statut publique coupée")
+        flash(request, f"Page de statut en ligne sur https://{h}/ (si le nom est déclaré)." if h else "Page de statut coupée.")
+    except (ValueError, RuntimeError) as e:
+        flash(request, f"Page de statut : {e}", "error")
+    return go("/monitoring#statut")
 
 
 def _machines(host, svc, rows):

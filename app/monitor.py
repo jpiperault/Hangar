@@ -10,7 +10,7 @@ import time
 import urllib.error
 import urllib.request
 
-from . import alerts, applogs, backup, db, ha, jobs, nodes, registry, report, security, stats, system
+from . import alerts, applogs, backup, db, ha, jobs, nodes, registry, report, security, stats, statuspage, system
 from . import platform as P
 
 _fails = {}            # slug -> échecs consécutifs
@@ -238,7 +238,8 @@ def _loop():
         for name, fn in (("stats", stats.collect_requests), ("res", stats.collect_resources), ("host", stats.collect_host),
                          ("apps", check_apps), ("sys", check_system),
                          ("nodes", nodes.check_all), ("nodes_health", check_nodes), ("ha", ha.tick),
-                         ("jobs", jobs.tick), ("logs", applogs.tick)):
+                         ("jobs", jobs.tick), ("logs", applogs.tick),
+                         ("status", statuspage.tick)):
             try:
                 fn()
             except Exception as e:

@@ -327,9 +327,17 @@ def render_caddyfile(s, apps, here=LOCAL):
           "# Sites servis par le tunnel : HTTP local seulement",
           f"(tunnel) {{", f"\tbind {bind_host}", "}"]
     by_slug = {a["slug"]: a for a in apps}
+    from . import statuspage
+    sp = statuspage.settings()
     for name, d in sorted(live.items(), key=lambda x: (not x[1]["is_default"], x[0])):
         tunnel = d["mode"] == "tunnel"
         L += ["", f"# ---------------- {name} ({'tunnel Cloudflare' if tunnel else 'direct, Let’s Encrypt'})"]
+        if statuspage.host(sp) and sp["domain"] == name:
+            L += ["", "# page de statut publique", _site_names([statuspage.host(sp)], tunnel, port) + " {"]
+            if tunnel:
+                L.append("\timport tunnel")
+            L += ["\tencode zstd gzip", f"\troot * {PUBLIC}/{statuspage.DIR}", '\theader Cache-Control "public, max-age=30"',
+                  "\trewrite * /index.html", "\tfile_server", "}"]
         if d["hub"]:
             L += ["", f"# Routes par chemin sur {d['hub']}.{name}", _site_names([f"{d['hub']}.{name}"], tunnel, port) + " {"]
             if tunnel:
@@ -640,6 +648,9 @@ def write_manifests():
         files[f"{name}/.well-known/apps.json"] = json.dumps(m, indent=2, ensure_ascii=False)
         for fname, content in public_pages(f"{doms[name]['hub']}.{name}", contact).items():
             files[f"{name}/{fname}"] = content
+    from . import statuspage
+    if statuspage.host():   # gardée dans l'envoi aux nœuds (qui remplace tout le dossier public)
+        files[f"{statuspage.DIR}/index.html"] = statuspage.render()[0]
     for rel in files:
         path = f"{PUBLIC}/{rel}"
         os.makedirs(os.path.dirname(path), mode=0o755, exist_ok=True)

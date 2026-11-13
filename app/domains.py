@@ -242,6 +242,10 @@ def public_names(slug=None):
         for d in doms.values():
             if d["hub"]:
                 add(f"{d['hub']}.{d['name']}", d, "routes par chemin", None)
+        from . import statuspage
+        sp = statuspage.settings()
+        if statuspage.host(sp) and sp["domain"] in doms:
+            add(statuspage.host(sp), doms[sp["domain"]], "page de statut", None)
     for s, rts in all_routes().items():
         if slug is not None and s != slug:
             continue

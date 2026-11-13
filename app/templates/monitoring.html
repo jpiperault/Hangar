@@ -111,4 +111,17 @@
     {% for d in pg.dbs %}<div class="cert"><span class="mono">{{ d.name }}</span><span class="hint">{{ d.size | size }}</span></div>{% endfor %}
   </section>
 </div>
+<form class="panel" id="statut" method="post" action="/monitoring/status" style="margin-top:20px;display:flex;flex-direction:column;gap:10px">
+  <h2 style="margin:0">Page de statut publique {% if sp_host %}<a class="hint" href="https://{{ sp_host }}/" target="_blank" rel="noopener">https://{{ sp_host }}/</a>{% if sp_dns is false %} <span class="pill s-deploying">nom à déclarer</span>{% endif %}{% endif %}</h2>
+  <p class="hint" style="margin:0">Pour tes utilisateurs : l'état de chaque appli choisie et sa disponibilité sur 30 jours, mis à jour chaque minute. Rien d'autre n'y apparaît (ni machines, ni versions, ni erreurs). Une maintenance y est affichée comme telle.</p>
+  <label class="check"><input type="checkbox" name="on" {{ 'checked' if sp.on }}><span>Publier la page</span></label>
+  <div class="row3">
+    <div class="field"><label for="spsub">Sous-domaine</label><input id="spsub" name="sub" value="{{ sp.sub }}" spellcheck="false"></div>
+    <div class="field"><label for="spdom">Domaine</label><select id="spdom" name="domain">{% for d in doms %}<option value="{{ d.name }}" {{ 'selected' if d.name == sp.domain }}>{{ d.name }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="sptitle">Titre</label><input id="sptitle" name="title" value="{{ sp.title }}" maxlength="80"></div>
+  </div>
+  <div class="field"><span class="flabel">Applis affichées</span>
+    {% for a in rows %}<label class="check"><input type="checkbox" name="apps" value="{{ a.slug }}" {{ 'checked' if a.slug in sp.apps }}><span>{{ a.name }}</span></label>{% endfor %}</div>
+  <div><button class="btn sm primary">Enregistrer</button></div>
+</form>
 {% endblock %}
