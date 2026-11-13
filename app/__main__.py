@@ -77,6 +77,24 @@ def restore(args):
     if len(files) != 1 or not os.path.exists(files[0]):
         sys.exit("Usage : hangar restore <archive.tar.gz> [--apps appli1,appli2] [--no-settings]")
     src = os.path.abspath(files[0])
+    from . import crypt
+    if crypt.is_encrypted(src):   # archive téléchargée depuis la console : chiffrée par gpg
+        pws = [os.environ.get("HANGAR_ARCHIVE_PASSWORD", ""), backup.password() or ""]
+        if not any(pws) and sys.stdin.isatty():
+            pws.append(getpass.getpass("Mot de passe de l'archive (mot de passe des sauvegardes du serveur d'origine) : "))
+        os.makedirs(backup.ARCHIVES, mode=0o700, exist_ok=True)
+        clear = f"{backup.ARCHIVES}/{backup.save_upload_name()}"
+        try:
+            crypt.decrypt_file(src, clear, pws)
+        except ValueError as e:
+            if not sys.stdin.isatty():
+                sys.exit(f"{e}. Indique-le avec HANGAR_ARCHIVE_PASSWORD=… avant la commande.")
+            try:
+                crypt.decrypt_file(src, clear, [getpass.getpass("Mot de passe de l'archive : ")])
+            except ValueError as e2:
+                sys.exit(str(e2))
+        print("Archive déchiffrée.")
+        src = clear
     man = backup.read_manifest(src)
     os.makedirs(backup.ARCHIVES, mode=0o700, exist_ok=True)
     if os.path.dirname(src) == backup.ARCHIVES and backup.NAME_RE.match(os.path.basename(src)):

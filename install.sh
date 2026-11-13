@@ -21,7 +21,8 @@ Usage : $0 [options]
   --ip IP               IP locale de la console (défaut : IP de l'interface principale)
   --lan CIDR            réseau autorisé pour la console et SSH (défaut : réseau de cette IP)
   --tunnel-token JETON  relie cloudflared au tunnel (mode tunnel)
-  --restore ARCHIVE     restaure toutes les applis et les réglages d'une archive Hangar (.tar.gz)
+  --restore ARCHIVE     restaure toutes les applis et les réglages d'une archive Hangar (.tar.gz.gpg ou .tar.gz) ;
+                        archive chiffrée : mot de passe des sauvegardes d'origine dans HANGAR_ARCHIVE_PASSWORD, sinon demandé
   --timezone TZ         fuseau horaire (défaut : Europe/Paris ; « keep » pour ne pas changer)
   --yes                 ne pose aucune question
 EOF

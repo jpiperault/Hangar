@@ -122,7 +122,7 @@
 
   <section class="panel" id="archives">
     <h2>Archives à télécharger</h2>
-    <p class="hint">Un fichier <code>.tar.gz</code> avec, pour chaque appli, sa fiche (image, version, variables), l'export de sa base et son dossier data/. Il se restaure ici ou sur un autre serveur Hangar : les applis absentes sont recréées. <strong>Il n'est pas chiffré et contient tes secrets</strong> (variables d'environnement, mots de passe des bases) : range-le en lieu sûr. Les 10 dernières archives sont gardées sur le serveur.</p>
+    <p class="hint">Un fichier <code>.tar.gz</code> avec, pour chaque appli, sa fiche (image, version, variables), l'export de sa base et son dossier data/. Il se restaure ici ou sur un autre serveur Hangar : les applis absentes sont recréées. Il contient tes secrets (variables d'environnement, mots de passe des bases) : <strong>le fichier téléchargé est chiffré</strong> (gpg, AES-256) avec le <a href="#motdepasse">mot de passe des sauvegardes</a>, sans lequel il est illisible. Pour l'ouvrir sur un PC : <code>gpg -d hangar-….tar.gz.gpg &gt; hangar-….tar.gz</code>. Les 10 dernières archives sont gardées sur le serveur.</p>
     {% for x in archives %}
       <div class="cert"><span><span class="mono">{{ x.ts | when }}</span> <span class="hint">{{ x.size | size }}{{ ' · importée' if x.imported }}</span></span>
         <span class="acts">
@@ -133,7 +133,8 @@
     {% else %}<p class="hint">Aucune archive pour l'instant : clique sur « Créer une archive à télécharger ».</p>{% endfor %}
     <form method="post" action="/backups/archive/upload" enctype="multipart/form-data" class="inlinefield">
       <label class="sr" for="afile" hidden>Archive à restaurer</label>
-      <input id="afile" name="file" type="file" accept=".gz,.tar.gz,application/gzip" required aria-label="Archive à restaurer">
+      <input id="afile" name="file" type="file" accept=".gpg,.gz,.tar.gz,application/gzip,application/pgp-encrypted" required aria-label="Archive à restaurer">
+      <input name="password" type="password" autocomplete="new-password" spellcheck="false" placeholder="Mot de passe (archive d'un autre serveur)" aria-label="Mot de passe de l'archive, si elle vient d'un autre serveur">
       <button class="btn sm">Envoyer une archive pour la restaurer</button>
     </form>
   </section>
@@ -172,7 +173,7 @@
   <section class="panel" id="motdepasse">
     <h2>Mot de passe des sauvegardes</h2>
     {% if pw %}
-    <p class="hint"><strong>Sans ce mot de passe, les sauvegardes Drive et NAS sont illisibles, même pour toi.</strong> Si ce serveur disparaît, c'est lui qui permet de tout récupérer. Garde-le dans ton gestionnaire de mots de passe, avec le nom du dossier « {{ folder }} ».</p>
+    <p class="hint"><strong>Sans ce mot de passe, les sauvegardes Drive et NAS et les archives téléchargées sont illisibles, même pour toi.</strong> Si ce serveur disparaît, c'est lui qui permet de tout récupérer. Garde-le dans ton gestionnaire de mots de passe, avec le nom du dossier « {{ folder }} ».</p>
     <details><summary class="btn sm">Afficher le mot de passe</summary>
       <div class="cert"><span class="mono" id="pw">{{ pw }}</span><button type="button" class="btn sm" data-copy="pw">Copier</button></div>
     </details>

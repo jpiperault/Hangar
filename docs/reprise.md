@@ -65,7 +65,7 @@ Elle contient aussi les domaines (mode, préfixe, machine d'entrée) et les adre
 
 1. Installe Hangar avec `./install.sh`, sans `--restore`.
 2. Ouvre la console, puis **Sauvegardes › Archives à télécharger**.
-3. Avec **Choisir un fichier**, prends l'archive sur ton PC, puis clique sur **Envoyer une archive pour la restaurer**. L'archive peut peser jusqu'à 20 Go.
+3. Avec **Choisir un fichier**, prends l'archive sur ton PC (`.tar.gz.gpg`), tape le **mot de passe des sauvegardes** de l'ancien serveur, puis clique sur **Envoyer une archive pour la restaurer**. L'archive peut peser jusqu'à 20 Go.
 4. La page de l'archive s'ouvre :
    - clique sur **Tout cocher** ;
    - garde **Reprendre les réglages** coché pour retrouver le même domaine et le même mode ;
@@ -85,13 +85,15 @@ scp hangar-AAAAMMJJ-HHMMSS.tar.gz <compte>@<ip-du-serveur>:
 Pendant l'installation, depuis le dossier du code :
 
 ```bash
-sudo ./install.sh --restore ~/hangar-AAAAMMJJ-HHMMSS.tar.gz
+sudo HANGAR_ARCHIVE_PASSWORD='<mot de passe des sauvegardes>' ./install.sh --restore ~/hangar-AAAAMMJJ-HHMMSS.tar.gz.gpg
 ```
+
+Sans `HANGAR_ARCHIVE_PASSWORD`, le mot de passe est demandé au moment de la restauration.
 
 Ou sur un serveur déjà installé :
 
 ```bash
-sudo hangar restore ~/hangar-AAAAMMJJ-HHMMSS.tar.gz
+sudo hangar restore ~/hangar-AAAAMMJJ-HHMMSS.tar.gz.gpg
 ```
 
 Options de `hangar restore` :
@@ -102,7 +104,8 @@ La commande affiche l'état final de chaque appli. Elle se termine en erreur si 
 
 ### À savoir
 
-- **L'archive n'est pas chiffrée** et contient les secrets : variables d'environnement et mots de passe des bases. Garde-la en lieu sûr, et supprime les copies temporaires une fois la reprise faite. Sur le serveur, les archives sont dans `/srv/backups/archives`, lisibles par root seulement.
+- **L'archive téléchargée est chiffrée** (`.tar.gz.gpg`, gpg AES-256) avec le **mot de passe des sauvegardes** du serveur qui l'a créée (page Sauvegardes › Mot de passe des sauvegardes). Sans lui, elle est illisible : garde-le dans ton gestionnaire de mots de passe. Hangar la déchiffre tout seul à l'envoi (champ « Mot de passe » si elle vient d'un autre serveur), avec `hangar restore` et `install.sh --restore`. Pour l'ouvrir sur un PC : `gpg -d hangar-….tar.gz.gpg > hangar-….tar.gz` (Gpg4win sous Windows). Les archives non chiffrées d'avant restent acceptées.
+- Sur le serveur, les archives sont gardées en clair dans `/srv/backups/archives`, lisibles par root seulement (le serveur détient de toute façon ces secrets). Supprime les copies déchiffrées sur ton PC une fois la reprise faite.
 - **Images privées** : les jetons des registres ne sont pas dans l'archive. Si une appli échoue au téléchargement de son image, colle le jeton `read:packages` dans sa fiche puis enregistre : elle se redéploie.
 
 ## 5. Restaurer depuis Google Drive ou le NAS (sans archive)

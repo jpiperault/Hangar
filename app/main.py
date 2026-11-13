@@ -11,12 +11,12 @@ import time
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import access, alerts, backup, cloudflare, dataimport, db, dbadmin, ha, monitor, move, nodes, security, stats, system
+from . import access, alerts, backup, cloudflare, crypt, dataimport, db, dbadmin, ha, monitor, move, nodes, security, stats, system
 from . import domains as D
 from . import platform as P
 
@@ -1037,8 +1037,10 @@ async def archive_download(request: Request, name: str):
     path = backup.archive_path(name)
     if not path:
         return go("/backups#archives")
-    P.log("info", "sauvegarde", f"archive {name} téléchargée")
-    return FileResponse(path, media_type="application/gzip", filename=name)
+    backup._ensure_password()
+    P.log("info", "sauvegarde", f"archive {name} téléchargée (chiffrée)")
+    return StreamingResponse(crypt.encrypt_stream(path, backup.password()), media_type="application/pgp-encrypted",
+                             headers={"Content-Disposition": f'attachment; filename="{name}{crypt.SUFFIX}"'})
 
 
 @app.post("/backups/archive/{name}/delete")
@@ -1077,9 +1079,18 @@ async def archive_upload(request: Request):
         flash(request, "Archive trop grosse (20 Go maximum).", "error")
         return go("/backups#archives")
     try:
+        if crypt.is_encrypted(part):   # archive téléchargée (chiffrée) : mot de passe saisi, sinon celui d'ici
+            clear = part + ".clair"
+            try:
+                await asyncio.to_thread(crypt.decrypt_file, part, clear, [f.get("password") or "", backup.password() or ""])
+            finally:
+                os.remove(part)
+            os.replace(clear, part)
         await asyncio.to_thread(backup.read_manifest, part)
     except ValueError as e:
-        os.remove(part)
+        for x in (part, part + ".clair"):
+            if os.path.exists(x):
+                os.remove(x)
         flash(request, f"{up.filename} : {e}", "error")
         return go("/backups#archives")
     os.replace(part, f"{backup.ARCHIVES}/{name}")
