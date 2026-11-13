@@ -167,6 +167,36 @@
     <span class="hint">Avant de basculer, la console attend que {{ a.health_path }} réponde. En cas d'échec, la version actuelle est remise en ligne.{% if a.source == 'image' %} Les nouvelles versions (tags x.y.z) sont recherchées toutes les 6 h{% if a.latest_checked %}, dernière fois {{ a.latest_checked | ago }}{% endif %}.{% endif %}</span>
     {% if a.source == 'image' %}<form method="post" action="/apps/{{ a.slug }}/versions/check"><button class="btn sm primary">Vérifier maintenant</button></form>{% endif %}
   </section>
+  {% if prod %}
+  <section class="panel" id="preprod" style="border-left:3px solid var(--warn)">
+    <h2>Préproduction de <a href="/apps/{{ prod.slug }}">{{ prod.name }}</a></h2>
+    <p class="hint" style="margin:0">Copie de la production pour tester une version avec de vraies données. L'appli reçoit <code>HANGAR_ENVIRONMENT=preprod</code> : ses e-mails, notifications ou paiements doivent être coupés (vérifie ses variables dans Réglages).</p>
+    <dl class="facts"><dt>Ici</dt><dd class="mono">{{ a.version }}</dd><dt>En production</dt><dd class="mono">{{ prod.version }}</dd></dl>
+    <div class="acts" style="justify-content:flex-start;flex-wrap:wrap">
+      {% if a.version != prod.version %}<form class="inline" method="post" action="/apps/{{ a.slug }}/preprod?op=promote" data-confirm="Déployer {{ a.version }} en production ({{ prod.name }}) ?"><button class="btn sm primary" {{ 'disabled' if a.status == 'deploying' }}>Déployer {{ a.version }} en production</button></form>{% endif %}
+      <form class="inline" method="post" action="/apps/{{ a.slug }}/preprod?op=refresh" data-confirm="Remplacer la base et data/ d'ici par ceux de la production ? L'état actuel est mis de côté."><button class="btn sm" {{ 'disabled' if a.status == 'deploying' }}>Recopier les données de la production</button></form>
+    </div>
+  </section>
+  {% elif not new %}
+  <section class="panel" id="preprod">
+    <h2>Préproduction</h2>
+    {% if pre %}
+    <dl class="facts"><dt>Appli</dt><dd><a href="/apps/{{ pre.slug }}">{{ pre.name }}</a> <span class="pill s-{{ 'running' if pre.state == 'ok' else ('deploying' if pre.state == 'deploying' else 'error') }}">{{ {'ok': 'en ligne', 'deploying': 'en cours', 'error': 'erreur'}.get(pre.state, pre.state) }}</span></dd>
+      <dt>Version</dt><dd class="mono">{{ pre.version }}</dd></dl>
+    <div class="acts" style="justify-content:flex-start;flex-wrap:wrap">
+      {% if pre.version != a.version %}<form class="inline" method="post" action="/apps/{{ pre.slug }}/preprod?op=promote" data-confirm="Déployer {{ pre.version }} en production ?"><button class="btn sm primary" {{ 'disabled' if a.status == 'deploying' }}>Déployer {{ pre.version }} en production</button></form>{% endif %}
+      <form class="inline" method="post" action="/apps/{{ pre.slug }}/preprod?op=refresh"><button class="btn sm">Recopier les données de la production</button></form>
+      <a class="btn sm link" href="/apps/{{ pre.slug }}#supprimer">Supprimer la préproduction…</a>
+    </div>
+    {% else %}
+    <p class="hint" style="margin:0">Une copie de l'appli (<code>{{ a.slug }}-preprod</code>, sous-domaines en <code>-preprod</code>) avec la base et data/ de la production, pour tester une version avec de vraies données avant de la déployer ici. Ses variables sont celles de la production : elle reçoit en plus <code>HANGAR_ENVIRONMENT=preprod</code>.</p>
+    <form method="post" action="/apps/{{ a.slug }}/preprod" class="inlinefield">
+      <input name="version" placeholder="version (actuelle : {{ a.version }})" spellcheck="false" aria-label="Version à tester">
+      <button class="btn sm" {{ 'disabled' if a.status == 'deploying' }}>Créer la préproduction</button>
+    </form>
+    {% endif %}
+  </section>
+  {% endif %}
   {% set mt = maint %}
   <form class="panel {{ 'danger' if mt }}" id="maintenance" method="post" action="/apps/{{ a.slug }}/maintenance" style="display:flex;flex-direction:column;gap:10px">
     <h2 style="margin:0">Mode maintenance {% if mt %}<span class="pill s-deploying">actif{{ ' (automatique)' if mt.auto }}</span>{% endif %}</h2>

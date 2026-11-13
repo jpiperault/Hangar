@@ -959,6 +959,9 @@ def write_compose(a, version, instance=None, role=None):
     extra, extra_env = services.compose_extra(a, f"hangar-{a['slug']}", f"{app_dir(a['slug'])}/data") \
         if instance is None else ({}, {})
     env.update(extra_env)
+    from . import preprod
+    if preprod.prod_of(a["slug"]):   # à l'appli de couper e-mails, notifications, paiements… en préproduction
+        env["HANGAR_ENVIRONMENT"] = "preprod"
     svc = {
         "image": image_ref(a, version),
         "restart": "unless-stopped",
@@ -1417,8 +1420,9 @@ def delete(slug):
         os.makedirs(keep, exist_ok=True)
         os.chmod(keep, 0o700)
         d, node = app_dir(slug), a["node"]
-        from . import ha, services
+        from . import ha, preprod, services
         services.drop(slug)
+        preprod.forget(slug)
         if ha.get(slug):   # haute dispo : base dédiée rapatriée dans le PostgreSQL partagé, secours et instances retirés
             ha.disable(slug, "suppression", locked=True)
             a = db.app(slug)

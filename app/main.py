@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import access, alerts, applogs, backup, cloudflare, crypt, dataimport, db, dbadmin, ha, jobs, monitor, move, nodes, report, security, services, stats, system
+from . import access, alerts, applogs, backup, cloudflare, crypt, dataimport, db, dbadmin, ha, jobs, monitor, move, nodes, preprod, report, security, services, stats, system
 from . import domains as D
 from . import platform as P
 
@@ -423,7 +423,8 @@ async def _app_ctx(request, slug):
                 ranges=list(stats.RANGES), others=others, dsize=dsize, domains=D.all_domains(), cf=cloudflare.status(),
                 safety=backup.safety_copies(slug), maint=P.maintenance(slug),
                 jobs=[{**j, "desc": jobs.describe(j), "busy": jobs.is_running(slug, j["id"])} for j in jobs.of(slug)],
-                job_days=jobs.DAYS, redis=services.redis(slug),
+                job_days=jobs.DAYS, redis=services.redis(slug), pre=db.app(preprod.of(slug) or ""),
+                prod=db.app(preprod.prod_of(slug) or ""),
                 redis_st=await asyncio.to_thread(_redis_state, a) if services.redis(slug) else None)
 
 
@@ -705,6 +706,45 @@ def _redis_state(a):
             if k in ("used_memory_human", "db0", "redis_version", "valkey_version", "connected_clients"):
                 out[k] = v
     return out
+
+
+@app.post("/apps/{slug}/preprod")
+async def app_preprod(request: Request, slug: str):
+    a = db.app(slug)
+    if not a:
+        return go("/")
+    f = await request.form()
+    op = request.query_params.get("op") or "create"
+    try:
+        if op == "create":
+            pre = preprod.check(slug)
+            version = (f.get("version") or "").strip() or a["version"]
+            if not P.VERSION.match(version):
+                raise ValueError("version invalide")
+            P.spawn(preprod.create, slug, version)
+            flash(request, f"Préproduction « {pre} » en cours de création : déploiement de {version}, puis copie de la base "
+                  "et de data/ de la production.")
+            return go(f"/apps/{slug}#preprod")
+        pre = slug if preprod.prod_of(slug) else preprod.of(slug)
+        if not pre:
+            raise ValueError("pas de préproduction")
+        if op == "refresh":
+            if db.app(pre)["state"] == "deploying":
+                raise ValueError("la préproduction est occupée")
+            P.spawn(preprod.refresh, pre)
+            flash(request, "Copie des données de la production lancée : la préproduction est arrêtée quelques instants. "
+                  "Son état d'avant est mis de côté.")
+        elif op == "promote":
+            prod = db.app(preprod.prod_of(pre))
+            if prod["state"] == "deploying":
+                raise ValueError("la production est occupée")
+            P.spawn(preprod.promote, pre)
+            flash(request, f"Déploiement de {db.app(pre)['version']} en production lancé ({prod['name']}). "
+                  "En cas d'échec du healthcheck, la version actuelle reste en ligne.")
+            return go(f"/apps/{prod['slug']}")
+    except ValueError as e:
+        flash(request, f"Préproduction : {e}", "error")
+    return go(f"/apps/{slug}#preprod")
 
 
 @app.post("/apps/{slug}/{action}")
