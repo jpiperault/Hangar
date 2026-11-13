@@ -155,6 +155,9 @@ def init():
             _c.execute("ALTER TABLE nodes ADD COLUMN ssh_user TEXT NOT NULL DEFAULT 'root'")
         if "node" not in cols:   # nœud qui héberge l'appli ('local' = la machine de la console)
             _c.execute("ALTER TABLE apps ADD COLUMN node TEXT NOT NULL DEFAULT 'local'")
+        if "kind" not in cols:   # type d'appli (kinds.py) ; les applis d'avant : backend mobile si package Android
+            _c.execute("ALTER TABLE apps ADD COLUMN kind TEXT NOT NULL DEFAULT 'web'")
+            _c.execute("UPDATE apps SET kind = 'mobile' WHERE pkg IS NOT NULL AND pkg != ''")
         ucols = {r["name"] for r in _c.execute("PRAGMA table_info(users)").fetchall()}
         if "role" not in ucols:   # admin : tous les droits ; lecture : voit tout (sauf secrets), ne change rien
             _c.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'")
@@ -209,7 +212,7 @@ def app(slug):
 APP_FIELDS = ["name", "pkg", "expose", "sub", "source", "image", "version", "prev_version",
               "port", "host_port", "health_path", "mem_mb", "env", "db", "db_password",
               "state", "desired", "deployed_at", "created_at", "data_user", "data_owner",
-              "latest_version", "latest_checked", "latest_error", "node"]
+              "latest_version", "latest_checked", "latest_error", "node", "kind"]
 
 
 def insert_app(slug, data):

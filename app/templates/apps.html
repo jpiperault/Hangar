@@ -1,19 +1,28 @@
 {% extends "base.html" %}
 {% block main %}
-<div class="bar"><h1>Applications</h1><a class="btn primary" href="/apps/new">Nouvelle application</a></div>
+<div class="bar"><div><h1>Applications</h1><span class="hint">Sites, API, applis web, jeux, outils et services.</span></div>
+  <div class="acts"><a class="btn" href="/catalogue">Installer une appli prête</a><a class="btn primary" href="/apps/new">Nouvelle application</a></div></div>
 <div class="kpis">
   <span class="kpi"><strong>{{ apps | selectattr('status', 'equalto', 'running') | list | length }}</strong> en ligne</span>
   <span class="kpi"><strong>{{ apps | selectattr('status', 'equalto', 'error') | list | length }}</strong> en erreur</span>
   <span class="kpi"><strong>{{ ram_total }}</strong> Mo de RAM utilisés par les applis</span>
   <span class="kpi">Domaine principal <strong>{{ s.domain }}</strong></span>
 </div>
+{% set present = apps | map(attribute='kind') | unique | list %}
+{% if present | length > 1 %}
+<div class="chips seg" role="radiogroup" aria-label="Filtrer par type">
+  <label><input type="radio" name="kf" value="" checked><span>Toutes <span class="hint">{{ apps | length }}</span></span></label>
+  {% for k in kind_list if k.id in present %}<label><input type="radio" name="kf" value="{{ k.id }}"><span>{{ k.short }} <span class="hint">{{ apps | selectattr('kind', 'equalto', k.id) | list | length }}</span></span></label>{% endfor %}
+</div>
+{% endif %}
 <div class="tablebox">
   <table>
-    <thead><tr><th>Application</th><th>Adresses publiques</th><th>État</th><th>Version</th><th>Requêtes 24 h</th><th>RAM</th><th></th></tr></thead>
+    <thead><tr><th>Application</th><th>Type</th><th>Adresses publiques</th><th>État</th><th>Version</th><th>Requêtes 24 h</th><th>RAM</th><th></th></tr></thead>
     <tbody>
     {% for a in apps %}
-      <tr>
-        <td><div class="nm"><a href="/apps/{{ a.slug }}">{{ a.name }}</a></div><div class="pk">{{ a.pkg or a.slug }}{% if a.node != 'local' %} · nœud {{ a.node }}{% endif %}</div></td>
+      <tr data-k="{{ a.kind }}">
+        <td><div class="nm"><a href="/apps/{{ a.slug }}">{{ a.name }}</a></div><div class="pk">{{ a.slug }}{% if a.node != 'local' %} · nœud {{ a.node }}{% endif %}</div></td>
+        <td><span class="pill s-stopped">{{ kind_names.get(a.kind, a.kind) }}</span>{% if a.pkg %}<div class="pk">client Android</div>{% endif %}</td>
         <td><div class="urls">{% for k, u in a.urls %}<span class="route"><i>{{ k }}</i><a href="{{ u }}" target="_blank" rel="noopener">{{ u }}</a></span>{% endfor %}</div></td>
         <td><span class="pill s-{{ a.status }}">{{ LABELS[a.status] }}</span></td>
         <td><div class="mono">{{ a.version }}</div>{% if a.latest_version %}<div><span class="pill s-deploying" title="Nouvelle version sur le registre">{{ a.latest_version }} disponible</span></div>{% else %}<div class="pk">{{ a.deployed_at | when }}</div>{% endif %}</td>
@@ -30,9 +39,13 @@
         </div></td>
       </tr>
     {% else %}
-      <tr><td colspan="7" class="empty">Aucune application pour l'instant. Prépare d'abord ton projet avec le <a href="/prompt">prompt de déploiement</a>, puis clique sur « Nouvelle application ».</td></tr>
+      <tr><td colspan="8" class="empty">Aucune application pour l'instant. Installe une <a href="/catalogue">appli prête</a>, ou prépare ton projet avec <a href="/prompt">Préparer un projet</a>, puis clique sur « Nouvelle application ».</td></tr>
     {% endfor %}
     </tbody>
   </table>
 </div>
+<script nonce="{{ csp_nonce }}">
+document.querySelectorAll('input[name=kf]').forEach(function (r) { r.addEventListener('change', function () {
+  document.querySelectorAll('tr[data-k]').forEach(function (tr) { tr.hidden = r.value && tr.dataset.k !== r.value; }); }); });
+</script>
 {% endblock %}

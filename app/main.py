@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import access, affinity, alerts, applogs, backup, cache, cloudflare, crashes, limits, remoteconfig, smoke, crypt, dataimport, db, dbadmin, ha, jobs, monitor, move, nodes, preprod, report, security, services, stats, statuspage, system
+from . import access, affinity, alerts, kinds, applogs, backup, cache, cloudflare, crashes, limits, remoteconfig, smoke, crypt, dataimport, db, dbadmin, ha, jobs, monitor, move, nodes, preprod, report, security, services, stats, statuspage, system
 from . import domains as D
 from . import platform as P
 
@@ -218,6 +218,7 @@ def validate(f, cur=None):
     d["name"] = (f.get("name") or "").strip()[:80]
     if not d["name"]:
         e["name"] = "Donne un nom à l'application."
+    d["kind"] = f.get("kind") if kinds.valid(f.get("kind")) else (cur["kind"] if cur else kinds.DEFAULT)
     d["pkg"] = (f.get("pkg") or "").strip()
     if d["pkg"] and not PKG.match(d["pkg"]):
         e["pkg"] = "Format attendu : fr.piperault.monappli"
@@ -414,8 +415,14 @@ async def logout(request: Request):
 async def home(request: Request):
     rows = await asyncio.to_thread(P.apps_with_status)
     return render(request, "apps.html", title="Applications", nav="apps", apps=rows, req24=stats.requests_24h(),
+                  kind_list=kinds.choices(), kind_names={k: v["short"] for k, v in kinds.KINDS.items()},
                   refresh=any(r["status"] == "deploying" for r in rows),
                   ram_total=sum(r["ram"] for r in rows))
+
+
+@app.get("/catalogue")
+async def catalogue_page(request: Request):
+    return go("/apps/new")   # le catalogue d'applis prêtes arrive avec son lot
 
 
 @app.get("/apps/new")
@@ -427,12 +434,13 @@ async def new_app(request: Request):
         return go("/nodes#console")
     best = max(ch, key=lambda c: c["free"])["id"]
     dft = D.default()
-    blank = {"name": "", "pkg": "fr.piperault.", "slug": "", "port": 8080,
+    blank = {"name": "", "pkg": "", "slug": "", "port": 8080, "kind": kinds.DEFAULT,
              "routes": [{"kind": "sub", "domain": dft["name"] if dft else "", "sub": ""}],
-             "health_path": "/", "mem_mb": 256, "source": "image", "image": "", "version": "", "env": "", "db": 0,
+             "health_path": "/health", "mem_mb": 256, "source": "image", "image": "", "version": "", "env": "", "db": 1,
              "data_user": "", "node": best}
     return render(request, "app_form.html", title="Nouvelle application", nav="apps", a=blank, new=True, errors={},
-                  registries=P.registry_logins(), node_choices=ch, best=best, domains=D.all_domains())
+                  registries=P.registry_logins(), node_choices=ch, best=best, domains=D.all_domains(),
+                  kinds=kinds.choices())
 
 
 @app.post("/apps/new")
@@ -444,7 +452,7 @@ async def create_app(request: Request):
     if errors:
         return render(request, "app_form.html", 400, title="Nouvelle application", nav="apps", a=d, new=True,
                       errors=errors, registries=P.registry_logins(), reg_user=f.get("reg_user") or "",
-                      node_choices=node_choices(), best=None, domains=D.all_domains())
+                      node_choices=node_choices(), best=None, domains=D.all_domains(), kinds=kinds.choices())
     slug = d.pop("slug")
     rts = d.pop("routes")
     d.update(host_port=P.next_host_port(), state="deploying", desired="running", created_at=time.time(),
@@ -473,6 +481,7 @@ async def _app_ctx(request, slug):
     hst = await asyncio.to_thread(ha.status, slug)
     busy = (hst and (hst["busy"] or hst["h"]["state"] == "setup"))
     return dict(title=a["name"], nav="apps", a=a, new=False, errors={}, events=events, names=names, ha=hst,
+                kinds=kinds.choices(), kind=kinds.get(a["kind"]),
                 console_only=nodes.console_role()["manage_only"],
                 ha_nodes=[c for c in node_choices("standby") if c["id"] != a["node"]],
                 ha_inst=[c for c in others if c["id"] != a["node"]],

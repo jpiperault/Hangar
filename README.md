@@ -1,13 +1,13 @@
 # Hangar
 
-Serveur d'applications auto-hébergé pour les backends d'applications Android, avec une console d'administration web accessible uniquement depuis le réseau local.
+Hébergeur d'applications auto-hébergé : sites, API, applis web, jeux, outils open source et services, sur une ou plusieurs machines, avec une console d'administration web accessible uniquement depuis le réseau local. Les backends d'applis mobiles (Android, iOS) y ont en plus leurs outils : découverte du serveur, configuration à distance, rapports de plantage.
 
-- Chaque backend tourne dans **un conteneur Docker** (un projet Compose par appli dans `/srv/apps/<id>`).
+- Chaque appli a un **type** (appli web, API, backend mobile…) qui adapte le formulaire et ses réglages par défaut, et tourne dans **un conteneur Docker** (un projet Compose par appli dans `/srv/apps/<id>`).
 - **Caddy** route le trafic par sous-domaine (`https://<sous-domaine>.<domaine>/`, ou le domaine nu) ou par chemin (`https://apps.<domaine>/<id>/`).
 - **Multi-domaine** : autant de domaines que tu veux, chacun avec son mode d'exposition :
   - **tunnel** : Caddy en HTTP local derrière `cloudflared`, TLS chez Cloudflare, aucun port ouvert ;
   - **direct** : Caddy sur 80/443 avec Let's Encrypt, sur la machine d'entrée choisie (la console ou un nœud).
-- Une appli a une **liste d'adresses**, sur un ou plusieurs domaines ; la première est l'adresse principale. Les applis Android trouvent leur serveur via `https://apps.<domaine>/.well-known/apps.json`.
+- Une appli a une **liste d'adresses**, sur un ou plusieurs domaines ; la première est l'adresse principale. Les applis mobiles (client facultatif d'une appli) trouvent leur serveur via `https://apps.<domaine>/.well-known/apps.json`.
 - **Cloudflare automatique** avec un jeton d'API : règles du tunnel et enregistrements DNS créés, mis à jour et retirés par Hangar, sans jamais toucher aux noms qui ne viennent pas de lui.
 - **PostgreSQL 17** est partagé, avec une base et un rôle dédiés par appli, injectés dans `DATABASE_URL`.
 
@@ -20,7 +20,7 @@ FastAPI + Jinja, sans build front. Elle écoute en HTTPS (certificat auto-signé
 - Modifier la configuration : si le healthcheck échoue, l'ancienne configuration est restaurée.
 - `/data` attribué automatiquement à l'utilisateur `USER` de l'image.
 - Secrets masqués dans le formulaire, logs des conteneurs, journal des opérations.
-- Générateur de prompt pour préparer un projet d'appli avec Claude (Dockerfile, healthcheck, CI ghcr.io, client Android).
+- Générateur de prompt pour préparer un projet avec Claude (Dockerfile, healthcheck, CI ghcr.io, clients mobiles en option).
 - Le Caddyfile est validé avant chaque rechargement. Une configuration refusée n'est jamais appliquée.
 - Images privées : un jeton de lecture du registre (ghcr.io : `read:packages`) se saisit dans la fiche de l'appli. Il est vérifié par `docker login`, puis enregistré une fois pour tout le registre dans `/root/.docker/config.json`.
 - **Sauvegardes** chiffrées (restic) chaque nuit vers Google Drive et/ou un NAS (SMB ou SFTP) : exports des bases, `data/` des applis, configuration. Restauration d'une appli depuis la destination choisie, avec copie de l'état d'avant. **Import de données** dans une appli existante (base et/ou `data/`), pour migrer une instance hébergée ailleurs. Retour arrière en un clic vers l'état d'avant chaque restauration ou import, et **points de restauration** à la demande. **Test de restauration** chaque semaine : la dernière sauvegarde est restaurée pour de vrai à côté (bases rechargées dans un PostgreSQL jetable), alerte en cas d'échec.

@@ -10,6 +10,7 @@
   <div>
     <div class="crumb"><a href="/">Applications</a> /</div>
     <h1>{{ 'Nouvelle application' if new else a.name }}</h1>
+    {% if not new %}<span class="pill s-stopped" style="margin-top:4px">{{ kind.short }}{{ ' · client Android' if a.pkg }}</span>{% endif %}
   </div>
   {% if not new %}<span class="pill s-{{ a.status }}">{{ LABELS[a.status] }}</span>{% endif %}
 </div>
@@ -21,9 +22,17 @@
 <form class="panel" method="post" action="{{ '/apps/new' if new else '/apps/' ~ a.slug }}" id="appform" novalidate>
   <div class="group">
     <span class="lbl">Application</span>
+    {% if new %}
+    <div class="kindgrid" role="radiogroup" aria-label="Type d'application">
+      {% for k in kinds %}<label class="kindcard"><input type="radio" name="kind" value="{{ k.id }}" data-kind {{ 'checked' if k.id == a.kind }}
+        data-port="{{ k.defaults.port }}" data-health="{{ k.defaults.health_path }}" data-db="{{ k.defaults.db }}" data-client="{{ 1 if k.client else 0 }}" data-client-open="{{ 1 if k.client_open else 0 }}">
+        <span><b>{{ k.name }}</b><small>{{ k.desc }}</small></span></label>{% endfor %}
+      <a class="kindcard more" href="/catalogue"><span><b>Outil auto-hébergé</b><small>Une appli open source prête : statistiques, mots de passe, wiki, Git… depuis le catalogue.</small></span></a>
+    </div>
+    {% endif %}
     <div class="row2">
       <div class="field {{ 'bad' if errors.name }}"><label for="name">Nom</label><input id="name" name="name" value="{{ a.name }}" required>{{ err('name') }}</div>
-      <div class="field {{ 'bad' if errors.pkg }}"><label for="pkg">Package Android</label><input id="pkg" name="pkg" value="{{ a.pkg }}" spellcheck="false">{{ err('pkg') }}<span class="hint">Clé de l'appli dans /.well-known/apps.json.</span></div>
+      {% if not new %}<div class="field"><label for="kind">Type</label><select id="kind" name="kind">{% for k in kinds %}<option value="{{ k.id }}" {{ 'selected' if k.id == a.kind }}>{{ k.name }}</option>{% endfor %}</select></div>{% endif %}
     </div>
   </div>
 
@@ -95,6 +104,12 @@
       {{ err('data_user') }}<span class="hint">Les fichiers persistants vont dans <code>/data</code> du conteneur (dossier <code>/srv/apps/{{ a.slug or '&lt;id&gt;' }}/data</code>). À chaque déploiement, ce dossier est attribué à l'utilisateur défini par <code>USER</code> dans l'image. Indique un UID (<code>1000</code> ou <code>1000:1000</code>) seulement si la détection échoue.</span></div>
   </div>
 
+  <details class="group clientbox" id="clientbox" {{ 'open' if a.pkg or errors.pkg or (new and a.kind == 'mobile') }}>
+    <summary><span class="lbl" style="display:inline">Client mobile</span> <span class="hint">· facultatif{{ ' · ' ~ a.pkg if a.pkg else ' · aucun' }}</span></summary>
+    <div class="field {{ 'bad' if errors.pkg }}" style="margin-top:10px"><label for="pkg">Package Android</label><input id="pkg" name="pkg" value="{{ a.pkg }}" spellcheck="false" placeholder="fr.exemple.monappli">{{ err('pkg') }}
+      <span class="hint">L'appli Android trouve son serveur dans <code>/.well-known/apps.json</code>, et gagne l'onglet Clients : configuration à distance et rapports de plantage.</span></div>
+  </details>
+
   <div class="bar" style="justify-content:flex-end">
     <a class="btn" href="{{ '/' if new else '/apps/' ~ a.slug }}">Annuler</a>
     <button class="btn primary" type="submit">{{ 'Créer et déployer' if new else 'Enregistrer' }}</button>
@@ -108,7 +123,7 @@
   <a href="#base" data-tab="base">Base et services</a>
   <a href="#hautedispo" data-tab="hautedispo">Haute dispo et nœud</a>
   <a href="#taches" data-tab="taches">Tâches{% if jobs %} <span class="hint">{{ jobs | length }}</span>{% endif %}</a>
-  <a href="#mobile" data-tab="mobile">Appli mobile{% if crash_groups | selectattr('status', 'equalto', 'open') | list %} <span class="pill s-error">{{ crash_groups | selectattr('status', 'equalto', 'open') | list | length }}</span>{% endif %}</a>
+  {% if a.pkg %}<a href="#mobile" data-tab="mobile">Clients{% if crash_groups | selectattr('status', 'equalto', 'open') | list %} <span class="pill s-error">{{ crash_groups | selectattr('status', 'equalto', 'open') | list | length }}</span>{% endif %}</a>{% endif %}
   <a href="#restauration" data-tab="restauration">Revenir en arrière</a>
 </nav>
 
@@ -202,7 +217,7 @@
   <form class="panel {{ 'danger' if mt }}" id="maintenance" method="post" action="/apps/{{ a.slug }}/maintenance" style="display:flex;flex-direction:column;gap:10px">
     <h2 style="margin:0">Mode maintenance {% if mt %}<span class="pill s-deploying">actif{{ ' (automatique)' if mt.auto }}</span>{% endif %}</h2>
     {% if mt %}
-    <p class="hint" style="margin:0">Depuis {{ mt.since | ago }}, les visiteurs voient une page « Maintenance en cours » (code 503, en-tête <code>X-Hangar-Maintenance: 1</code> pour l'appli Android).{% if mt.auto %} Posé par une restauration ou un import : il s'enlève tout seul à la fin.{% endif %}</p>
+    <p class="hint" style="margin:0">Depuis {{ mt.since | ago }}, les visiteurs voient une page « Maintenance en cours » (code 503, en-tête <code>X-Hangar-Maintenance: 1</code> pour les clients qui veulent le détecter).{% if mt.auto %} Posé par une restauration ou un import : il s'enlève tout seul à la fin.{% endif %}</p>
     <input type="hidden" name="on" value="0"><div><button class="btn sm primary">Désactiver la maintenance</button></div>
     {% else %}
     <p class="hint" style="margin:0">Affiche une page « Maintenance en cours » (503) au lieu de l'appli, par exemple pendant une migration. Il se met tout seul pendant une restauration, un import ou un retour arrière.</p>
@@ -245,9 +260,17 @@
 <form class="panel" method="post" action="{{ '/apps/new' if new else '/apps/' ~ a.slug }}" id="appform" novalidate>
   <div class="group">
     <span class="lbl">Application</span>
+    {% if new %}
+    <div class="kindgrid" role="radiogroup" aria-label="Type d'application">
+      {% for k in kinds %}<label class="kindcard"><input type="radio" name="kind" value="{{ k.id }}" data-kind {{ 'checked' if k.id == a.kind }}
+        data-port="{{ k.defaults.port }}" data-health="{{ k.defaults.health_path }}" data-db="{{ k.defaults.db }}" data-client="{{ 1 if k.client else 0 }}" data-client-open="{{ 1 if k.client_open else 0 }}">
+        <span><b>{{ k.name }}</b><small>{{ k.desc }}</small></span></label>{% endfor %}
+      <a class="kindcard more" href="/catalogue"><span><b>Outil auto-hébergé</b><small>Une appli open source prête : statistiques, mots de passe, wiki, Git… depuis le catalogue.</small></span></a>
+    </div>
+    {% endif %}
     <div class="row2">
       <div class="field {{ 'bad' if errors.name }}"><label for="name">Nom</label><input id="name" name="name" value="{{ a.name }}" required>{{ err('name') }}</div>
-      <div class="field {{ 'bad' if errors.pkg }}"><label for="pkg">Package Android</label><input id="pkg" name="pkg" value="{{ a.pkg }}" spellcheck="false">{{ err('pkg') }}<span class="hint">Clé de l'appli dans /.well-known/apps.json.</span></div>
+      {% if not new %}<div class="field"><label for="kind">Type</label><select id="kind" name="kind">{% for k in kinds %}<option value="{{ k.id }}" {{ 'selected' if k.id == a.kind }}>{{ k.name }}</option>{% endfor %}</select></div>{% endif %}
     </div>
   </div>
 
@@ -318,6 +341,12 @@
       <input id="data_user" name="data_user" value="{{ a.data_user or '' }}" spellcheck="false" placeholder="automatique : utilisateur de l'image">
       {{ err('data_user') }}<span class="hint">Les fichiers persistants vont dans <code>/data</code> du conteneur (dossier <code>/srv/apps/{{ a.slug or '&lt;id&gt;' }}/data</code>). À chaque déploiement, ce dossier est attribué à l'utilisateur défini par <code>USER</code> dans l'image. Indique un UID (<code>1000</code> ou <code>1000:1000</code>) seulement si la détection échoue.</span></div>
   </div>
+
+  <details class="group clientbox" id="clientbox" {{ 'open' if a.pkg or errors.pkg or (new and a.kind == 'mobile') }}>
+    <summary><span class="lbl" style="display:inline">Client mobile</span> <span class="hint">· facultatif{{ ' · ' ~ a.pkg if a.pkg else ' · aucun' }}</span></summary>
+    <div class="field {{ 'bad' if errors.pkg }}" style="margin-top:10px"><label for="pkg">Package Android</label><input id="pkg" name="pkg" value="{{ a.pkg }}" spellcheck="false" placeholder="fr.exemple.monappli">{{ err('pkg') }}
+      <span class="hint">L'appli Android trouve son serveur dans <code>/.well-known/apps.json</code>, et gagne l'onglet Clients : configuration à distance et rapports de plantage.</span></div>
+  </details>
 
   <div class="bar" style="justify-content:flex-end">
     <a class="btn" href="{{ '/' if new else '/apps/' ~ a.slug }}">Annuler</a>
@@ -443,10 +472,9 @@
   </script>
 </div>
 
+{% if a.pkg %}
 <div data-pane="mobile" style="display:flex;flex-direction:column;gap:20px">
-  {% if not a.pkg %}
-  <section class="panel"><h2>Appli mobile</h2><p class="hint">Indique le <strong>package Android</strong> de l'appli dans l'onglet Réglages (ex. <code>fr.piperault.cuistory</code>) pour lui donner une configuration à distance et recevoir ses rapports de plantage.</p></section>
-  {% else %}
+  {% if false %}
   <form class="panel" id="config-distance" method="post" action="/apps/{{ a.slug }}/remote-config" style="display:flex;flex-direction:column;gap:10px">
     <h2 style="margin:0">Configuration à distance</h2>
     <p class="hint" style="margin:0">Lue par l'appli Android au démarrage{% if rc_url %} : <a href="{{ rc_url }}" target="_blank" rel="noopener" class="mono">{{ rc_url }}</a>{% else %} (l'appli doit avoir une adresse sur un domaine avec un hôte de routes){% endif %}. Publiée tout de suite, sans passer par le Play Store.</p>
@@ -526,11 +554,12 @@ thread {   // au démarrage : envoi du rapport en attente
         }
     }
 }</pre>
-    <p class="hint">Le prompt de déploiement peut aussi demander à Claude de l'intégrer (onglet Appli Android du générateur).</p>
+    <p class="hint">Le prompt de déploiement peut aussi demander à Claude de l'intégrer (option « Appli Android » du générateur).</p>
     </details>
   </section>
   {% endif %}
 </div>
+{% endif %}
 
 <div data-pane="restauration">
   {% if safety %}
@@ -656,6 +685,25 @@ thread {   // au démarrage : envoi du rapport en attente
     if (el) el.scrollIntoView({block: 'start'});
   }
   window.addEventListener('hashchange', show); show();
+})();
+</script>
+{% endif %}
+{% if new %}
+<script nonce="{{ csp_nonce }}">
+(function () {   // type d'appli : valeurs par défaut adaptées tant qu'on n'y a pas touché, bloc client mobile ouvert ou non
+  var f = document.getElementById('appform'); if (!f) return;
+  var port = f.querySelector('[name=port]'), hc = f.querySelector('[name=health_path]'), dbx = f.querySelector('[name=db]');
+  var box = document.getElementById('clientbox'), pkg = document.getElementById('pkg');
+  [port, hc, dbx].forEach(function (el) { if (el) el.addEventListener('input', function () { el.dataset.touched = '1'; }); });
+  function apply(r) {
+    if (port && !port.dataset.touched) port.value = r.dataset.port;
+    if (hc && !hc.dataset.touched) hc.value = r.dataset.health;
+    if (dbx && !dbx.dataset.touched) dbx.checked = r.dataset.db === '1';
+    var client = r.dataset.client === '1' || (pkg && pkg.value);
+    box.hidden = !client;
+    if (r.dataset.clientOpen === '1') box.open = true;
+  }
+  f.querySelectorAll('[data-kind]').forEach(function (r) { r.addEventListener('change', function () { apply(r); }); if (r.checked) apply(r); });
 })();
 </script>
 {% endif %}

@@ -868,6 +868,8 @@ def check_app_entry(e):
     chk(not e.get("db_password") or (isinstance(e["db_password"], str) and re.match(r"^[A-Za-z0-9]{8,128}$", e["db_password"])),
         "mot de passe de base")
     chk(e.get("desired", "running") in ("running", "stopped"), "état")
+    from . import kinds
+    chk(e.get("kind", "web") in kinds.KINDS, "type")
     chk(e.get("expose", "path") in ("path", "sub", "both", "none", None), "exposition")
     chk(not e.get("sub") or (isinstance(e["sub"], str) and re.match(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", e["sub"])),
         "sous-domaine")

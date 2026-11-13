@@ -242,3 +242,14 @@ input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-
 html.navigating::before{content:"";position:fixed;top:0;left:0;height:3px;width:100%;z-index:1000;background:linear-gradient(90deg,transparent,var(--accent),transparent);background-size:40% 100%;background-repeat:no-repeat;animation:navbar 1s linear infinite}
 @keyframes navbar{from{background-position:-40% 0}to{background-position:140% 0}}
 @media (prefers-reduced-motion:reduce){html.navigating::before{animation:none;background:var(--accent);opacity:.6}}
+
+/* type d'appli à la création */
+.kindgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;margin-bottom:6px}
+.kindcard{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--surface);cursor:pointer;text-decoration:none;color:var(--fg);min-height:44px}
+.kindcard input{margin-top:3px;accent-color:var(--accent)}
+.kindcard b{display:block;font-size:.95rem}
+.kindcard small{display:block;color:var(--muted);font-size:.8rem;line-height:1.35;margin-top:2px}
+.kindcard:has(input:checked){border:2px solid var(--accent);background:var(--accent-soft);padding:11px 13px}
+.kindcard.more{border-style:dashed}
+.clientbox{border:1px dashed var(--line);border-radius:10px;padding:10px 14px}
+.clientbox summary{cursor:pointer;min-height:24px}
