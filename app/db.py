@@ -158,6 +158,16 @@ def init():
         if "kind" not in cols:   # type d'appli (kinds.py) ; les applis d'avant : backend mobile si package Android
             _c.execute("ALTER TABLE apps ADD COLUMN kind TEXT NOT NULL DEFAULT 'web'")
             _c.execute("UPDATE apps SET kind = 'mobile' WHERE pkg IS NOT NULL AND pkg != ''")
+        if "ios_bundle" not in cols:   # client iOS (identifiant du bundle), facultatif
+            _c.execute("ALTER TABLE apps ADD COLUMN ios_bundle TEXT NOT NULL DEFAULT ''")
+        if "web_client" not in cols:   # client web : script Hangar servi sur l'adresse de l'appli
+            _c.execute("ALTER TABLE apps ADD COLUMN web_client INTEGER NOT NULL DEFAULT 0")
+        ccols = {r["name"] for r in _c.execute("PRAGMA table_info(crashes)").fetchall()}
+        if "platform" not in ccols:
+            _c.execute("ALTER TABLE crashes ADD COLUMN platform TEXT NOT NULL DEFAULT 'android'")
+        gcols = {r["name"] for r in _c.execute("PRAGMA table_info(crash_groups)").fetchall()}
+        if "platform" not in gcols:
+            _c.execute("ALTER TABLE crash_groups ADD COLUMN platform TEXT NOT NULL DEFAULT 'android'")
         ucols = {r["name"] for r in _c.execute("PRAGMA table_info(users)").fetchall()}
         if "role" not in ucols:   # admin : tous les droits ; lecture : voit tout (sauf secrets), ne change rien
             _c.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'")
@@ -212,7 +222,7 @@ def app(slug):
 APP_FIELDS = ["name", "pkg", "expose", "sub", "source", "image", "version", "prev_version",
               "port", "host_port", "health_path", "mem_mb", "env", "db", "db_password",
               "state", "desired", "deployed_at", "created_at", "data_user", "data_owner",
-              "latest_version", "latest_checked", "latest_error", "node", "kind"]
+              "latest_version", "latest_checked", "latest_error", "node", "kind", "ios_bundle", "web_client"]
 
 
 def insert_app(slug, data):

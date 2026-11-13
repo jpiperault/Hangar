@@ -221,9 +221,17 @@ def validate(f, cur=None):
     d["kind"] = f.get("kind") if kinds.valid(f.get("kind")) else (cur["kind"] if cur else kinds.DEFAULT)
     d["pkg"] = (f.get("pkg") or "").strip()
     if d["pkg"] and not PKG.match(d["pkg"]):
-        e["pkg"] = "Format attendu : fr.piperault.monappli"
-    elif d["pkg"] and db.one("SELECT 1 FROM apps WHERE pkg = ? AND slug != ?", (d["pkg"], cur["slug"] if cur else "")):
+        e["pkg"] = "Format attendu : fr.exemple.monappli"
+    elif d["pkg"] and db.one("SELECT 1 FROM apps WHERE (pkg = ? OR ios_bundle = ?) AND slug != ?",
+                             (d["pkg"], d["pkg"], cur["slug"] if cur else "")):
         e["pkg"] = "Ce package est déjà relié à une autre appli."
+    d["ios_bundle"] = (f.get("ios_bundle") or "").strip()
+    if d["ios_bundle"] and not re.fullmatch(r"[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+", d["ios_bundle"]):
+        e["ios_bundle"] = "Format attendu : fr.exemple.monappli"
+    elif d["ios_bundle"] and db.one("SELECT 1 FROM apps WHERE (ios_bundle = ? OR pkg = ?) AND slug != ?",
+                                    (d["ios_bundle"], d["ios_bundle"], cur["slug"] if cur else "")):
+        e["ios_bundle"] = "Ce bundle est déjà relié à une autre appli."
+    d["web_client"] = 1 if f.get("web_client") == "on" else 0
 
     if cur:
         d["slug"] = cur["slug"]
@@ -490,7 +498,9 @@ async def _app_ctx(request, slug):
                 safety=backup.safety_copies(slug), maint=P.maintenance(slug),
                 jobs=[{**j, "desc": jobs.describe(j), "busy": jobs.is_running(slug, j["id"])} for j in jobs.of(slug)],
                 job_days=jobs.DAYS, cpus=limits.cpus(slug), rc=remoteconfig.of(slug),
-                rc_url=_rc_url(a), crash_groups=crashes.groups(slug) if a["pkg"] else [], aff=affinity.of(slug), aff_modes=affinity.MODES,
+                rc_urls={"android": _rc_url(a, a["pkg"]), "ios": _rc_url(a, a["ios_bundle"])},
+                has_clients=bool(a["pkg"] or a["ios_bundle"] or a["web_client"]), client_names=_client_names(a),
+                crash_groups=crashes.groups(slug) if (a["pkg"] or a["ios_bundle"] or a["web_client"]) else [], aff=affinity.of(slug), aff_modes=affinity.MODES,
                 aff_default=affinity.DEFAULT_NAME, smoke_text=smoke.text_of(slug), smoke_last=db.kv_get(f"smoke_last:{slug}"), redis=services.redis(slug), pre=db.app(preprod.of(slug) or ""),
                 prod=db.app(preprod.prod_of(slug) or ""),
                 redis_st=(cache.get(f"redis:{slug}", 20, _redis_state, a, wait=False) or {"state": "…"})
@@ -814,14 +824,18 @@ async def app_preprod(request: Request, slug: str):
     return go(f"/apps/{slug}#preprod")
 
 
-def _rc_url(a):
-    """Adresse publique de la configuration à distance d'une appli (hôte des routes de son domaine principal)."""
-    if not a["pkg"]:
+def _rc_url(a, key):
+    """Adresse publique de la configuration à distance d'un client mobile (hôte des routes de son domaine)."""
+    if not key:
         return None
     for name, m in P.manifests().items():
-        if a["pkg"] in m:
-            return f"https://{D.get(name)['hub']}.{name}/.well-known/apps/{a['pkg']}.json"
+        if key in m:
+            return f"https://{D.get(name)['hub']}.{name}/.well-known/apps/{key}.json"
     return None
+
+
+def _client_names(a):
+    return [n for n, on in (("client Android", a["pkg"]), ("client iOS", a["ios_bundle"]), ("client web", a["web_client"])) if on]
 
 
 @app.post("/apps/{slug}/remote-config")

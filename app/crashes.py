@@ -1,6 +1,7 @@
 """Rapports de plantage des applis Android, sans service extérieur.
 
-Point d'envoi public : POST https://<hôte des routes>.<domaine>/.well-known/hangar/crash/<package>
+Point d'envoi public : POST https://<hôte des routes>.<domaine>/.well-known/hangar/crash/<package ou bundle iOS> ;
+clients web : POST /.well-known/hangar/crash sur l'adresse de l'appli (Caddy le réécrit en …/crash/web/<appli>).
 Caddy le transmet à un petit serveur interne de la console (127.0.0.1:8099 ; les nœuds qui reçoivent le trafic
 passent par le réseau privé, 10.88.0.1:8099). En-tête X-Hangar-Key (clé de l'appli, donnée par sa configuration
 à distance) ; corps JSON : {version_name, version_code, os, device, exception, message, stacktrace}.
@@ -26,6 +27,7 @@ MAX_BODY = 64 * 1024
 _rate = {}            # clé -> [début de fenêtre, compte]
 _rl = threading.Lock()
 _started = False
+PLATFORMS = {"android": "Android", "ios": "iOS", "web": "web"}
 FRAMEWORK = ("java.", "javax.", "kotlin.", "kotlinx.", "android.", "androidx.", "com.android.", "dalvik.", "sun.",
              "libcore.", "com.google.android.", "okhttp3.", "retrofit2.")
 
@@ -52,17 +54,45 @@ def _limited(k, limit, window):
         return n > limit
 
 
-def fingerprint(exc, trace, pkg):
-    """Empreinte stable d'un plantage : type d'exception + 3 premières lignes « at » du code de l'appli
-    (sinon les 3 premières tout court), sans numéros de ligne."""
-    frames = [l.strip()[3:] for l in (trace or "").splitlines() if l.strip().startswith("at ")]
+def _frames(trace):
+    """Lignes d'appel d'une trace : Java/Kotlin et Chrome (« at … »), Firefox/Safari (« fonction@adresse »),
+    Swift/iOS (« 3  MonAppli  0x… fonction + 12 »)."""
+    out = []
+    for l in (trace or "").splitlines():
+        t = l.strip()
+        if t.startswith("at "):
+            out.append(t[3:])
+        elif "@" in t and ("http" in t or ".js" in t):
+            out.append(t)
+        elif re.match(r"^\d+\s+\S+\s+0x[0-9a-f]+ ", t):
+            out.append(" ".join(t.split()[3:]))
+    return out
+
+
+def _clean(frame):
+    """Sans numéros de ligne/colonne, adresses, paramètres d'URL ni empreintes de fichiers construits."""
+    f = re.sub(r"\(.*?\)", "", frame)
+    f = re.sub(r"\?[^\s:)]*", "", f)
+    f = re.sub(r":\d+(:\d+)?", "", f)
+    f = re.sub(r"\+ \d+$", "", f)
+    f = re.sub(r"[.-][0-9a-f]{6,}(?=\.js)", "", f)
+    return f.strip()
+
+
+def fingerprint(exc, trace, pkg, platform="android"):
+    """Empreinte stable d'un plantage : plateforme + type d'exception + 3 premières lignes d'appel du code de
+    l'appli (sinon les 3 premières tout court), sans numéros de ligne."""
+    frames = _frames(trace)
     root = pkg.rsplit(".", 1)[0] if pkg.count(".") >= 2 else pkg
     mine = [f for f in frames if f.startswith(root) or not f.startswith(FRAMEWORK)]
-    top = [re.sub(r"\(.*?\)", "", f) for f in (mine or frames)[:3]]
-    return hashlib.sha1(("|".join([exc or "?"] + top)).encode()).hexdigest()[:12], (top[0] if top else "")
+    top = [_clean(f) for f in (mine or frames)[:3]]
+    if not top and trace:   # trace sans forme connue : première ligne utile
+        top = [_clean(trace.strip().splitlines()[0])[:120]]
+    base = "|".join([exc or "?"] + top) if platform == "android" else "|".join([platform, exc or "?"] + top)
+    return hashlib.sha1(base.encode()).hexdigest()[:12], (top[0] if top else "")
 
 
-def record(slug, pkg, data, now=None):
+def record(slug, pkg, data, now=None, platform="android"):
     """Enregistre un rapport ; alerte si c'est un nouveau groupe ou une régression. Retourne l'empreinte."""
     now = now or time.time()
     s = lambda k, n: str(data.get(k) or "")[:n]   # noqa: E731
@@ -71,24 +101,25 @@ def record(slug, pkg, data, now=None):
         vcode = int(data.get("version_code") or 0)
     except (TypeError, ValueError):
         vcode = 0
-    fp, top = fingerprint(exc, trace, pkg)
-    db.x("INSERT INTO crashes(slug, ts, fp, vname, vcode, os, device, exc, msg, trace) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-         (slug, now, fp, s("version_name", 40), vcode, s("os", 60), s("device", 80), exc, msg, trace))
+    fp, top = fingerprint(exc, trace, pkg, platform)
+    db.x("INSERT INTO crashes(slug, ts, fp, vname, vcode, os, device, exc, msg, trace, platform) "
+         "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         (slug, now, fp, s("version_name", 40), vcode, s("os", 60), s("device", 80), exc, msg, trace, platform))
     g = db.one("SELECT * FROM crash_groups WHERE slug = ? AND fp = ?", (slug, fp))
     a = db.app(slug)
     name = a["name"] if a else slug
     if not g:
-        db.x("INSERT INTO crash_groups(slug, fp, first, last, count, status, exc, msg, top, vmax) "
-             "VALUES(?, ?, ?, ?, 1, 'open', ?, ?, ?, ?)", (slug, fp, now, now, exc, msg[:300], top, vcode))
-        P.log("error", slug, f"nouveau plantage Android : {exc or '?'} {('à ' + top) if top else ''}"[:300])
-        alerts.send(f"{name} : nouveau plantage Android", f"{exc}: {msg[:200]}\n{top}\nVersion {s('version_name', 40)} "
+        db.x("INSERT INTO crash_groups(slug, fp, first, last, count, status, exc, msg, top, vmax, platform) "
+             "VALUES(?, ?, ?, ?, 1, 'open', ?, ?, ?, ?, ?)", (slug, fp, now, now, exc, msg[:300], top, vcode, platform))
+        P.log("error", slug, f"nouveau plantage {PLATFORMS[platform]} : {exc or '?'} {('à ' + top) if top else ''}"[:300])
+        alerts.send(f"{name} : nouveau plantage {PLATFORMS[platform]}", f"{exc}: {msg[:200]}\n{top}\nVersion {s('version_name', 40)} "
                     f"({vcode}), {s('device', 80)}", priority=4, tags=["boom"], key=f"crash:{slug}:{fp}", cooldown=3600)
         return fp
     reopen = g["status"] == "resolved" and vcode > (g["resolved_code"] or 0)
     db.x("UPDATE crash_groups SET last = ?, count = count + 1, vmax = max(vmax, ?), status = ? WHERE slug = ? AND fp = ?",
          (now, vcode, "open" if reopen else g["status"], slug, fp))
     if reopen:
-        P.log("error", slug, f"plantage Android revenu après correction : {exc} (version {vcode})")
+        P.log("error", slug, f"plantage {PLATFORMS[platform]} revenu après correction : {exc} (version {vcode})")
         alerts.send(f"{name} : un plantage corrigé revient", f"{exc}: {msg[:200]}\n{top}\nVersion {s('version_name', 40)} "
                     f"({vcode}), marqué corrigé en {g['resolved_code']}.", priority=4, tags=["boom"],
                     key=f"crash:{slug}:{fp}", cooldown=3600)
@@ -143,11 +174,17 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
-        m = re.fullmatch(r"/\.well-known/hangar/crash/([A-Za-z0-9_.]{3,150})", self.path.split("?")[0])
+        m = re.fullmatch(r"/\.well-known/hangar/crash/(web/)?([A-Za-z0-9_.-]{1,150})", self.path.split("?")[0])
         if not m:
             return self._out(404, "inconnu")
-        pkg = m.group(1)
-        a = db.one("SELECT * FROM apps WHERE pkg = ?", (pkg,))
+        ident = m.group(2)
+        if m.group(1):   # client web : relayé par le Caddy de l'adresse de l'appli
+            a = db.one("SELECT * FROM apps WHERE slug = ? AND web_client = 1", (ident,))
+            platform, pkg = "web", ident
+        else:
+            a = db.one("SELECT * FROM apps WHERE pkg = ? OR ios_bundle = ?", (ident, ident))
+            platform = "android" if a and a["pkg"] == ident else "ios"
+            pkg = ident
         if not a:
             return self._out(404, "appli inconnue")
         ip = (self.headers.get("X-Real-IP") or self.client_address[0])[:64]
@@ -167,7 +204,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 raise ValueError
         except ValueError:
             return self._out(400, "JSON attendu")
-        record(a["slug"], pkg, data)
+        record(a["slug"], pkg, data, platform=platform)
         return self._out(204)
 
     def log_message(self, *a):

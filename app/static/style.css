@@ -253,3 +253,6 @@ html.navigating::before{content:"";position:fixed;top:0;left:0;height:3px;width:
 .kindcard.more{border-style:dashed}
 .clientbox{border:1px dashed var(--line);border-radius:10px;padding:10px 14px}
 .clientbox summary{cursor:pointer;min-height:24px}
+.clientcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px}
+.ccard{border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:3px;min-width:0;word-break:break-all}
+.codebox{white-space:pre;overflow:auto;margin:10px 0 0;font-size:.78rem;background:var(--sunken);padding:12px;border-radius:8px}

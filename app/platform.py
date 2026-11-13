@@ -389,6 +389,15 @@ def render_caddyfile(s, apps, here=LOCAL):
             if tunnel:
                 L.append("\timport tunnel")
             L += ["\timport hangar_log", f"\tlog_append hangar_app {slug}", "\tencode zstd gzip"]
+            if a["web_client"]:   # client web : script, configuration et envoi des erreurs, sur l'adresse de l'appli
+                coll = f"{'127.0.0.1' if here == LOCAL else node_wg(LOCAL)}:8099"
+                L += ["\thandle /.well-known/hangar/client.js {", f"\t\troot * {PUBLIC}/_clients",
+                      "\t\trewrite * /hangar-client.js", '\t\theader Cache-Control "public, max-age=300"', "\t\tfile_server", "\t}",
+                      "\thandle /.well-known/hangar/config.json {", f"\t\troot * {PUBLIC}/_clients",
+                      f"\t\trewrite * /{slug}.json", '\t\theader Cache-Control "no-cache"', "\t\tfile_server", "\t}",
+                      "\thandle /.well-known/hangar/crash {", "\t\trequest_body {", "\t\t\tmax_size 64KB", "\t\t}",
+                      f"\t\trewrite * /.well-known/hangar/crash/web/{slug}",
+                      f"\t\treverse_proxy {coll} {{", "\t\t\theader_up X-Real-IP {client_ip}", "\t\t}", "\t}"]
             L += _upstream(a, None, "\t", here)
             L.append("}")
     if any_tunnel:
@@ -413,11 +422,13 @@ def manifests():
             continue
         m = {}
         for a in db.apps():
-            if not a["pkg"]:
+            keys = [k for k in (a["pkg"], a["ios_bundle"]) if k]   # package Android et bundle iOS
+            if not keys:
                 continue
             u = D.primary_url(a["slug"], rts.get(a["slug"], []), doms, domain=name)
             if u:
-                m[a["pkg"]] = u
+                for k in keys:
+                    m[k] = u
         out[name] = m
     return out
 
@@ -669,6 +680,7 @@ def write_manifests():
         files.update(remoteconfig.files(name, f"{doms[name]['hub']}.{name}", m))
         for fname, content in public_pages(f"{doms[name]['hub']}.{name}", contact).items():
             files[f"{name}/{fname}"] = content
+    files.update(remoteconfig.web_files())   # clients web : public/_clients/
     from . import statuspage
     if statuspage.host():   # gardée dans l'envoi aux nœuds (qui remplace tout le dossier public)
         files[f"{statuspage.DIR}/index.html"] = statuspage.render()[0]
@@ -853,6 +865,8 @@ def check_app_entry(e):
     name = e.get("name")
     chk(isinstance(name, str) and 0 < len(name) <= 80 and not re.search(r"[\x00-\x1f\x7f]", name), "nom")
     chk(not e.get("pkg") or (isinstance(e["pkg"], str) and PKG.match(e["pkg"])), "package")
+    chk(not e.get("ios_bundle") or (isinstance(e["ios_bundle"], str) and re.fullmatch(r"[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+", e["ios_bundle"])), "bundle iOS")
+    chk(e.get("web_client", 0) in (0, 1, True, False), "client web")
     src = e.get("source", "image")
     chk(src in ("image", "git"), "source")
     img = e.get("image")

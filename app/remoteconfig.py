@@ -1,12 +1,10 @@
-"""Configuration à distance des applis Android, servie par Caddy à côté de apps.json :
-    https://<hôte des routes>.<domaine>/.well-known/apps/<package>.json
-L'appli la lit au démarrage (comme apps.json) :
-- version minimale (versionCode) : en dessous, l'appli demande de se mettre à jour, et ne s'utilise plus ;
-- version conseillée : en dessous, elle le propose sans bloquer ;
-- interrupteurs de fonctionnalités (« cle = valeur ») ;
-- message d'annonce (info ou avertissement), avec une date de fin ;
-- adresse et clé d'envoi des rapports de plantage (crashes.py).
-Réglage kv « remote_config » : {slug: {min_code, rec_code, flags, message, level, until}}.
+"""Configuration à distance des clients d'une appli (Android, iOS, navigateur), servie par Caddy :
+- applis mobiles : https://<hôte des routes>.<domaine>/.well-known/apps/<package ou bundle>.json, à côté de apps.json ;
+- client web : https://<adresse de l'appli>/.well-known/hangar/config.json (même origine, pas de CORS), avec le
+  script https://<adresse de l'appli>/.well-known/hangar/client.js.
+Contenu : version minimale (bloquante) et conseillée par plateforme, interrupteurs « cle = valeur », message
+d'annonce avec date de fin, adresse et clé d'envoi des plantages (crashes.py).
+Réglage kv « remote_config » : {slug: {min_code, rec_code, ios_min, ios_rec, ios_store, flags, message, level, until}}.
 """
 import json
 import re
@@ -15,11 +13,12 @@ import time
 from . import db
 
 KEY = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
+DIR = "_clients"   # dans public/ : config.json de chaque client web, et le script commun
 
 
 def of(slug):
-    return {"min_code": None, "rec_code": None, "flags": "", "message": "", "level": "info", "until": "",
-            **((db.kv_get("remote_config") or {}).get(slug) or {})}
+    return {"min_code": None, "rec_code": None, "ios_min": None, "ios_rec": None, "ios_store": "", "flags": "",
+            "message": "", "level": "info", "until": "", **((db.kv_get("remote_config") or {}).get(slug) or {})}
 
 
 def parse_flags(text):
@@ -57,44 +56,117 @@ def save(slug, f):
         if not v:
             return None
         if not re.fullmatch(r"\d{1,10}", v) or int(v) > 2_100_000_000:
-            raise ValueError("versionCode : un nombre entier (celui de build.gradle)")
+            raise ValueError("numéro de version : un nombre entier (versionCode Android, numéro de build iOS)")
         return int(v)
-    c = {"min_code": code("min_code"), "rec_code": code("rec_code"), "flags": (f.get("flags") or "").strip(),
+    c = {"min_code": code("min_code"), "rec_code": code("rec_code"), "ios_min": code("ios_min"), "ios_rec": code("ios_rec"),
+         "ios_store": (f.get("ios_store") or "").strip()[:300], "flags": (f.get("flags") or "").strip(),
          "message": (f.get("message") or "").strip()[:500], "level": "warn" if f.get("level") == "warn" else "info",
          "until": (f.get("until") or "").strip()}
     parse_flags(c["flags"])
     if c["until"] and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", c["until"]):
         raise ValueError("date de fin au format AAAA-MM-JJ")
-    if c["min_code"] and c["rec_code"] and c["rec_code"] < c["min_code"]:
-        raise ValueError("la version conseillée ne peut pas être plus ancienne que la version minimale")
+    for lo, hi in (("min_code", "rec_code"), ("ios_min", "ios_rec")):
+        if c[lo] and c[hi] and c[hi] < c[lo]:
+            raise ValueError("la version conseillée ne peut pas être plus ancienne que la version minimale")
+    if c["ios_store"] and not c["ios_store"].startswith("https://apps.apple.com/"):
+        raise ValueError("lien App Store : https://apps.apple.com/…")
     allv = db.kv_get("remote_config") or {}
     allv[slug] = c
     db.kv_set("remote_config", allv)
 
 
-def build(a, url, hub):
-    """Contenu du fichier public d'une appli."""
+def platform_of(a, key):
+    if key and key == a["pkg"]:
+        return "android"
+    if key and key == a["ios_bundle"]:
+        return "ios"
+    return "web"
+
+
+def build(a, url, hub, platform="android", key=None):
+    """Contenu du fichier public d'un client."""
     from . import crashes
+    key = key or (a["pkg"] if platform == "android" else a["ios_bundle"] if platform == "ios" else None)
     c = of(a["slug"])
     msg = None
     if c["message"] and (not c["until"] or c["until"] >= time.strftime("%Y-%m-%d")):
         msg = {"text": c["message"], "level": c["level"], "until": c["until"] or None}
-    return {
-        "package": a["pkg"], "url": url,
-        "min_version_code": c["min_code"], "recommended_version_code": c["rec_code"],
-        "store_url": f"https://play.google.com/store/apps/details?id={a['pkg']}",
-        "flags": parse_flags(c["flags"]), "message": msg,
-        "crash_url": f"https://{hub}/.well-known/hangar/crash/{a['pkg']}", "crash_key": crashes.key(a["slug"]),
-        "updated": int(time.time()),
-    }
+    out = {"app": a["slug"], "platform": platform, "url": url, "flags": parse_flags(c["flags"]), "message": msg,
+           "crash_key": crashes.key(a["slug"]), "updated": int(time.time())}
+    if platform == "android":
+        out.update(package=key, min_version_code=c["min_code"], recommended_version_code=c["rec_code"],
+                   store_url=f"https://play.google.com/store/apps/details?id={key}",
+                   crash_url=f"https://{hub}/.well-known/hangar/crash/{key}")
+    elif platform == "ios":
+        out.update(bundle=key, min_version_code=c["ios_min"], recommended_version_code=c["ios_rec"],
+                   store_url=c["ios_store"] or None, crash_url=f"https://{hub}/.well-known/hangar/crash/{key}")
+    else:
+        out.update(crash_url="/.well-known/hangar/crash")   # même origine que la page
+    return out
 
 
 def files(name, hub, manifest):
-    """{chemin relatif dans public/: contenu} pour un domaine : un fichier par appli de son apps.json."""
-    by_pkg = {a["pkg"]: a for a in db.apps() if a["pkg"]}
+    """{chemin relatif dans public/: contenu} pour un domaine : un fichier par client mobile de son apps.json."""
+    owners = {}
+    for a in db.apps():
+        for k in (a["pkg"], a["ios_bundle"]):
+            if k:
+                owners[k] = a
     out = {}
-    for pkg, url in manifest.items():
-        a = by_pkg.get(pkg)
+    for key, url in manifest.items():
+        a = owners.get(key)
         if a:
-            out[f"{name}/.well-known/apps/{pkg}.json"] = json.dumps(build(a, url, hub), indent=1, ensure_ascii=False)
+            out[f"{name}/.well-known/apps/{key}.json"] = json.dumps(build(a, url, hub, platform_of(a, key), key),
+                                                                   indent=1, ensure_ascii=False)
     return out
+
+
+def web_files():
+    """public/_clients/ : config.json de chaque appli avec un client web, et le script commun."""
+    from . import platform as P
+    out = {}
+    for a in db.apps():
+        if a["web_client"]:
+            out[f"{DIR}/{a['slug']}.json"] = json.dumps(build(a, P.primary_url(a) or "", "", "web"), indent=1,
+                                                        ensure_ascii=False)
+    if out:
+        out[f"{DIR}/hangar-client.js"] = CLIENT_JS
+    return out
+
+
+CLIENT_JS = r"""/* Hangar : client web (configuration à distance, erreurs du navigateur). Servi par Hangar. */
+(function () {
+  if (window.hangar) return;
+  var h = window.hangar = { flags: {}, message: null, ready: null, sent: 0 };
+  var BASE = '/.well-known/hangar/';
+  h.ready = fetch(BASE + 'config.json', { credentials: 'omit', cache: 'no-cache' }).then(function (r) { return r.json(); })
+    .then(function (c) {
+      h.config = c; h.flags = c.flags || {}; h.message = c.message;
+      try { window.dispatchEvent(new CustomEvent('hangar:config', { detail: c })); } catch (e) {}
+      return c;
+    }).catch(function () { return null; });
+  var seen = {};
+  function send(kind, msg, stack) {
+    if (h.sent >= 5) return;                       // 5 rapports au plus par page
+    var sig = kind + '|' + msg + '|' + (stack || '').slice(0, 200);
+    if (seen[sig]) return; seen[sig] = 1; h.sent++;
+    h.ready.then(function (c) {
+      if (!c || !c.crash_key) return;
+      var body = JSON.stringify({ exception: kind, message: String(msg || '').slice(0, 1000), stacktrace: String(stack || '').slice(0, 15000),
+        version_name: (document.querySelector('meta[name="app-version"]') || {}).content || '', version_code: 0,
+        os: navigator.platform || '', device: navigator.userAgent.slice(0, 80), page: location.pathname });
+      fetch(c.crash_url, { method: 'POST', keepalive: true, credentials: 'omit',
+        headers: { 'Content-Type': 'application/json', 'X-Hangar-Key': c.crash_key }, body: body }).catch(function () {});
+    });
+  }
+  window.addEventListener('error', function (e) {
+    if (!e.error && !e.message) return;
+    send((e.error && e.error.name) || 'Error', e.message, (e.error && e.error.stack) || (e.filename + ':' + e.lineno + ':' + e.colno));
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    var r = e.reason || {};
+    send(r.name || 'UnhandledRejection', r.message || String(r), r.stack || '');
+  });
+  h.report = function (err) { send((err && err.name) || 'Error', (err && err.message) || String(err), err && err.stack); };
+})();
+"""

@@ -892,7 +892,7 @@ def client_id():
 
 ARCHIVE_KEEP = 10
 APP_KEYS = ["name", "pkg", "expose", "sub", "source", "image", "version", "port", "health_path", "mem_mb", "env",
-            "db", "db_password", "desired", "data_user", "kind"]
+            "db", "db_password", "desired", "data_user", "kind", "ios_bundle", "web_client"]
 NAME_RE = re.compile(r"^hangar-[0-9]{8}-[0-9]{6}(-import)?\.tar\.gz$")
 
 

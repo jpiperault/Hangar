@@ -89,3 +89,70 @@ def test_point_d_envoi(appli):
     crashes._rate.clear()
     srv.shutdown()
     assert db.one("SELECT count(*) n FROM crashes")["n"] == 1
+
+
+def test_ios_et_web(appli):
+    db.update_app("mon-jeu", ios_bundle="fr.exemple.jeu.ios", web_client=1)
+    remoteconfig.save("mon-jeu", {"min_code": "12", "ios_min": "300", "ios_rec": "310",
+                                  "ios_store": "https://apps.apple.com/app/id1"})
+    a = db.app("mon-jeu")
+    ios = remoteconfig.build(a, "https://jeu.exemple.fr/", "apps.exemple.fr", "ios")
+    assert ios["min_version_code"] == 300 and ios["store_url"].startswith("https://apps.apple.com")
+    assert ios["crash_url"].endswith("/crash/fr.exemple.jeu.ios")
+    web = json.loads(remoteconfig.web_files()["_clients/mon-jeu.json"])
+    assert web["platform"] == "web" and web["crash_url"] == "/.well-known/hangar/crash" and "min_version_code" not in web
+    assert "hangar-client.js" in "".join(remoteconfig.web_files())
+    with pytest.raises(ValueError):
+        remoteconfig.save("mon-jeu", {"ios_store": "http://ailleurs"})
+    db.update_app("mon-jeu", ios_bundle="", web_client=0)
+
+
+def test_empreintes_web_et_ios():
+    js1 = "TypeError: x is null\n    at score (https://jeu.exemple.fr/assets/index-3f9a2b7c.js:42:17)\n    at onClick (https://jeu.exemple.fr/assets/index-3f9a2b7c.js:10:3)"
+    js2 = js1.replace("3f9a2b7c", "aa11bb22").replace(":42:17", ":44:2")                  # nouveau build
+    ff = "score@https://jeu.exemple.fr/assets/index-3f9a2b7c.js:42:17\nonClick@https://jeu.exemple.fr/assets/index-3f9a2b7c.js:10:3"
+    f1, top = crashes.fingerprint("TypeError", js1, "mon-jeu", "web")
+    assert f1 == crashes.fingerprint("TypeError", js2, "mon-jeu", "web")[0] and "score" in top
+    assert crashes.fingerprint("TypeError", ff, "mon-jeu", "web")[0] != f1                # autre navigateur : autre groupe
+    ios = "0   CoreFoundation 0x1a2b __exceptionPreprocess + 164\n3   Jeu 0x10045 Jeu.GameVC.load() + 88"
+    assert crashes.fingerprint("NSRangeException", ios, "fr.exemple.jeu", "ios")[1]
+
+
+def test_point_d_envoi_ios_et_web(appli):
+    db.update_app("mon-jeu", ios_bundle="fr.exemple.jeu.ios", web_client=1)
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), crashes._Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}/.well-known/hangar/crash/"
+    k = crashes.key("mon-jeu")
+    body = json.dumps({"exception": "TypeError", "stacktrace": "at f (https://x/a.js:1:1)"}).encode()
+    for path in ("fr.exemple.jeu.ios", "web/mon-jeu"):
+        req = urllib.request.Request(base + path, data=body, method="POST",
+                                     headers={"Content-Type": "application/json", "X-Hangar-Key": k})
+        assert urllib.request.urlopen(req, timeout=5).status == 204
+    srv.shutdown()
+    crashes._rate.clear()
+    assert sorted(r["platform"] for r in db.q("SELECT platform FROM crashes")) == ["ios", "web"]
+    db.update_app("mon-jeu", ios_bundle="", web_client=0)
+
+
+def test_caddy_client_web(app_row, monkeypatch):
+    import shutil
+    import subprocess
+    from app import domains as D
+    from app import platform as P
+    if not shutil.which("caddy"):
+        pytest.skip("caddy absent")
+    db.x("INSERT OR IGNORE INTO domains(name, mode, hub, created_at) VALUES('exemple.fr', 'tunnel', 'apps', 0)")
+    if not db.app("mon-jeu"):
+        db.insert_app("mon-jeu", {**app_row, "state": "ok", "created_at": 0})
+    db.update_app("mon-jeu", web_client=1)
+    D.set_routes("mon-jeu", [{"kind": "sub", "domain": "exemple.fr", "sub": "jeu"}])
+    conf = P.render_caddyfile({**db.settings(), "tunnel_bind": "127.0.0.1:8080"}, db.apps())
+    assert "rewrite * /.well-known/hangar/crash/web/mon-jeu" in conf and "rewrite * /mon-jeu.json" in conf
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".caddy", delete=False) as fh:
+        fh.write(conf)
+    r = subprocess.run(["caddy", "validate", "--config", fh.name, "--adapter", "caddyfile"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr[-400:]
+    db.update_app("mon-jeu", web_client=0)
+    D.set_routes("mon-jeu", [])
