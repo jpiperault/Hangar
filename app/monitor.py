@@ -10,7 +10,7 @@ import time
 import urllib.error
 import urllib.request
 
-from . import alerts, applogs, backup, db, ha, jobs, nodes, registry, report, security, stats, statuspage, system
+from . import alerts, applogs, backup, cache, db, limits, ha, jobs, nodes, registry, report, security, stats, statuspage, system
 from . import platform as P
 
 _fails = {}            # slug -> échecs consécutifs
@@ -154,6 +154,47 @@ def check_nodes():
                       f"Nœud {nm} : pare-feu de nouveau en place", priority=5)
 
 
+_restarts = {}   # slug -> nombre de redémarrages vu au passage précédent
+
+
+def check_usage(now=None):
+    """Chaque minute : mémoire près de la limite (5 min d'affilée), processeur bridé (10 min), appli qui a redémarré
+    toute seule (tuée faute de mémoire ou plantée)."""
+    now = now or time.time()
+    since = int(now) - 11 * 60
+    rows = {}
+    for r in db.q("SELECT app, t, cpu, mem FROM stats_res WHERE t >= ? ORDER BY t", (since,)):
+        rows.setdefault(r["app"], []).append(r)
+    details = cache.get("mon_containers", 30, P.container_details, wait=False) or {}
+    for a in db.apps():
+        slug = a["slug"]
+        if a["desired"] != "running" or a["state"] == "deploying":
+            continue
+        rs = rows.get(slug, [])
+        last5 = [r for r in rs if r["t"] >= now - 6 * 60]
+        high = len(last5) >= 5 and all((r["mem"] or 0) >= a["mem_mb"] * 0.9 for r in last5)
+        _flag(f"memhigh:{slug}", high, f"{a['name']} : mémoire presque pleine",
+              f"Plus de 90 % de ses {a['mem_mb']} Mo depuis 5 minutes : elle risque d'être tuée. Augmente « RAM max » "
+              "dans ses Réglages, ou cherche une fuite de mémoire.", f"{a['name']} : mémoire revenue à la normale")
+        c = limits.cpus(slug)
+        if c:
+            busy = len(rs) >= 10 and sum(r["cpu"] or 0 for r in rs) / len(rs) >= c * 100 * 0.9
+            _flag(f"cpu:{slug}", busy, f"{a['name']} : processeur bridé",
+                  f"Elle utilise sa limite de {c} cœur(s) depuis 10 minutes : elle ralentit. Augmente « Processeur max » "
+                  "ou cherche ce qui l'occupe.", f"{a['name']} : processeur revenu sous sa limite", priority=3)
+        d = details.get(slug)
+        if d:
+            prev = _restarts.get(slug)
+            _restarts[slug] = d["restarts"]
+            if prev is not None and d["restarts"] > prev:
+                why = "tuée faute de mémoire" if d.get("oom") else "plantée"
+                P.log("error", slug, f"a redémarré toute seule ({why})")
+                alerts.send(f"{a['name']} a redémarré toute seule", f"Le conteneur a été {why}"
+                            + (f" : sa limite de {a['mem_mb']} Mo ne suffit pas." if d.get("oom") else
+                               ". Regarde ses logs autour de cette heure."),
+                            priority=4, tags=["warning"], key=f"restart:{slug}", cooldown=3600)
+
+
 def check_versions(slug=None):
     """Cherche une version plus récente pour les applis en image. Retourne le nombre de nouveautés."""
     found = 0
@@ -238,7 +279,7 @@ def _loop():
         for name, fn in (("stats", stats.collect_requests), ("res", stats.collect_resources), ("host", stats.collect_host),
                          ("apps", check_apps), ("sys", check_system),
                          ("nodes", nodes.check_all), ("nodes_health", check_nodes), ("ha", ha.tick),
-                         ("jobs", jobs.tick), ("logs", applogs.tick),
+                         ("jobs", jobs.tick), ("logs", applogs.tick), ("usage", check_usage),
                          ("status", statuspage.tick)):
             try:
                 fn()

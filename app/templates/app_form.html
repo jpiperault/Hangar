@@ -325,6 +325,11 @@
 </form>
 
 <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+  <form class="panel" id="limites" method="post" action="/apps/{{ a.slug }}/limits" style="display:flex;flex-direction:column;gap:10px">
+    <h2 style="margin:0">Processeur max</h2>
+    <p class="hint" style="margin:0">Sans limite, une appli qui s'emballe peut prendre tout le processeur du nœud et ralentir les autres. Nombre de cœurs (0,5 = la moitié d'un cœur) ; vide = sans limite. Alerte si elle reste à sa limite 10 minutes, si sa mémoire dépasse 90 % pendant 5 minutes, ou si elle redémarre toute seule (tuée faute de mémoire, plantée).</p>
+    <div class="inlinefield"><input name="cpus" value="{{ cpus if cpus else '' }}" inputmode="decimal" placeholder="sans limite" aria-label="Processeur max en cœurs" style="max-width:9em"><span class="hint">cœur(s)</span><button class="btn sm primary" {{ 'disabled' if a.status == 'deploying' }}>Enregistrer</button></div>
+  </form>
   <form class="panel" id="verifs" method="post" action="/apps/{{ a.slug }}/smoke" style="display:flex;flex-direction:column;gap:10px">
     <h2 style="margin:0">Vérifications après déploiement</h2>
     <p class="hint" style="margin:0">En plus de <code>{{ a.health_path }}</code>, ces adresses doivent répondre comme prévu pour qu'une nouvelle version soit gardée ; sinon la précédente revient. Une par ligne : <code>/chemin [code] [texte attendu]</code>, code 200 par défaut, <code>{version}</code> remplacé par la version déployée.</p>

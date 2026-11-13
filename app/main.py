@@ -1,6 +1,5 @@
 """Console Hangar : routes web."""
 import asyncio
-import calendar
 import ipaddress
 import json
 import os
@@ -17,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import access, alerts, applogs, backup, cache, cloudflare, smoke, crypt, dataimport, db, dbadmin, ha, jobs, monitor, move, nodes, preprod, report, security, services, stats, statuspage, system
+from . import access, alerts, applogs, backup, cache, cloudflare, limits, smoke, crypt, dataimport, db, dbadmin, ha, jobs, monitor, move, nodes, preprod, report, security, services, stats, statuspage, system
 from . import domains as D
 from . import platform as P
 
@@ -480,7 +479,7 @@ async def _app_ctx(request, slug):
                 ranges=list(stats.RANGES), others=others, dsize=dsize, domains=D.all_domains(), cf=cloudflare.status(),
                 safety=backup.safety_copies(slug), maint=P.maintenance(slug),
                 jobs=[{**j, "desc": jobs.describe(j), "busy": jobs.is_running(slug, j["id"])} for j in jobs.of(slug)],
-                job_days=jobs.DAYS, smoke_text=smoke.text_of(slug), smoke_last=db.kv_get(f"smoke_last:{slug}"), redis=services.redis(slug), pre=db.app(preprod.of(slug) or ""),
+                job_days=jobs.DAYS, cpus=limits.cpus(slug), smoke_text=smoke.text_of(slug), smoke_last=db.kv_get(f"smoke_last:{slug}"), redis=services.redis(slug), pre=db.app(preprod.of(slug) or ""),
                 prod=db.app(preprod.prod_of(slug) or ""),
                 redis_st=(cache.get(f"redis:{slug}", 20, _redis_state, a, wait=False) or {"state": "…"})
                 if services.redis(slug) else None)
@@ -801,6 +800,27 @@ async def app_preprod(request: Request, slug: str):
     except ValueError as e:
         flash(request, f"Préproduction : {e}", "error")
     return go(f"/apps/{slug}#preprod")
+
+
+@app.post("/apps/{slug}/limits")
+async def app_limits(request: Request, slug: str):
+    a = db.app(slug)
+    if not a:
+        return go("/")
+    f = await request.form()
+    before = limits.cpus(slug)
+    try:
+        limits.save(slug, f.get("cpus"))
+    except ValueError as e:
+        flash(request, str(e), "error")
+        return go(f"/apps/{slug}#limites")
+    after = limits.cpus(slug)
+    if after != before:
+        P.log("info", slug, f"processeur max : {after} cœur(s)" if after else "processeur : sans limite")
+        if a["state"] != "deploying":
+            P.spawn(P.deploy, slug, a["version"], "config", dict(a))
+        flash(request, ("Limite de processeur enregistrée" if after else "Limite de processeur retirée") + " : l'appli est redéployée.")
+    return go(f"/apps/{slug}#limites")
 
 
 @app.post("/apps/{slug}/smoke")
@@ -1904,27 +1924,6 @@ def _services():
     return out
 
 
-def _containers():
-    def one(node):
-        rc, out = P.dk(node, "ps", "-a", "--filter", "label=fr.hangar.app", "--format", "{{.ID}}", timeout=20)
-        ids = out.split() if rc == 0 else []
-        if not ids:
-            return ""
-        return P.dk(node, "inspect", "-f", '{{index .Config.Labels "fr.hangar.app"}}\t{{.RestartCount}}\t'
-                    '{{.State.StartedAt}}\t{{.State.OOMKilled}}', *ids, timeout=20)[1]
-    res = {}
-    for out in P._on_nodes(one).values():
-        for line in out.splitlines():
-            parts = line.split("\t")
-            if len(parts) == 4:
-                try:
-                    ts = calendar.timegm(time.strptime(parts[2][:19], "%Y-%m-%dT%H:%M:%S"))   # Docker donne l'heure UTC
-                except ValueError:
-                    ts = None
-                res[parts[0]] = {"restarts": int(parts[1] or 0), "started": ts, "oom": parts[3] == "true"}
-    return res
-
-
 def _postgres():
     q = ("SELECT datname, pg_database_size(datname) FROM pg_database WHERE datname NOT IN ('template0','template1') "
          "ORDER BY 2 DESC;")
@@ -1936,7 +1935,7 @@ def _postgres():
             "max": mx.strip() if rc2 == 0 else "?"}
 
 
-cache.keep_warm("mon_containers", 30, _containers)
+cache.keep_warm("mon_containers", 30, P.container_details)
 cache.keep_warm("mon_pg", 60, _postgres)
 
 
@@ -1947,7 +1946,7 @@ async def monitoring(request: Request):
     hs = stats.host_charts(stats.host_series(rng), host["mem_total"])
     rows = await asyncio.to_thread(P.apps_with_status)
     req, spark, res24 = stats.apps_overview()
-    cont = await asyncio.to_thread(cache.get, "mon_containers", 30, _containers)
+    cont = await asyncio.to_thread(cache.get, "mon_containers", 30, P.container_details)
     svc = await asyncio.to_thread(cache.get, "mon_services", 15, _services)
     pg = await asyncio.to_thread(cache.get, "mon_pg", 60, _postgres)
     for a in rows:

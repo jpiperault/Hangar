@@ -1,5 +1,6 @@
 """Opérations sur la plateforme : fichiers compose, Docker, Caddy, PostgreSQL."""
 import base64
+import calendar
 import concurrent.futures
 import gzip
 import html
@@ -992,6 +993,9 @@ def write_compose(a, version, instance=None, role=None):
     }
     if tzs["apps"] and tzs["tz"]:   # images sans tzdata : le fichier de l'hôte suffit à la plupart
         svc["volumes"].append("/etc/localtime:/etc/localtime:ro")
+    from . import limits
+    if limits.cpus(a["slug"]):        # processeur borné : une appli qui s'emballe ne ralentit pas ses voisines
+        svc["cpus"] = limits.cpus(a["slug"])
     if role is None:
         from . import ha
         role = ha.role_of(a["slug"], instance)
@@ -1134,6 +1138,28 @@ def _to_mb(v):
         return 0
     n, u = float(m.group(1)), m.group(2)
     return round(n * {"B": 1 / 1048576, "KiB": 1 / 1024, "KB": 1 / 1024, "MiB": 1, "MB": 1, "GiB": 1024, "GB": 1024}[u])
+
+
+def container_details():
+    """Par appli : redémarrages, heure de démarrage, tuée faute de mémoire (dernier arrêt)."""
+    def one(node):
+        rc, out = dk(node, "ps", "-a", "--filter", "label=fr.hangar.app", "--format", "{{.ID}}", timeout=20)
+        ids = out.split() if rc == 0 else []
+        if not ids:
+            return ""
+        return dk(node, "inspect", "-f", '{{index .Config.Labels "fr.hangar.app"}}\t{{.RestartCount}}\t'
+                    '{{.State.StartedAt}}\t{{.State.OOMKilled}}', *ids, timeout=20)[1]
+    res = {}
+    for out in _on_nodes(one).values():
+        for line in out.splitlines():
+            parts = line.split("\t")
+            if len(parts) == 4:
+                try:
+                    ts = calendar.timegm(time.strptime(parts[2][:19], "%Y-%m-%dT%H:%M:%S"))   # Docker donne l'heure UTC
+                except ValueError:
+                    ts = None
+                res[parts[0]] = {"restarts": int(parts[1] or 0), "started": ts, "oom": parts[3] == "true"}
+    return res
 
 
 def mem_usage():
@@ -1449,8 +1475,9 @@ def delete(slug):
         os.makedirs(keep, exist_ok=True)
         os.chmod(keep, 0o700)
         d, node = app_dir(slug), a["node"]
-        from . import ha, preprod, services
+        from . import ha, limits, preprod, services
         services.drop(slug)
+        limits.drop(slug)
         preprod.forget(slug)
         if ha.get(slug):   # haute dispo : base dédiée rapatriée dans le PostgreSQL partagé, secours et instances retirés
             ha.disable(slug, "suppression", locked=True)
