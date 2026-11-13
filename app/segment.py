@@ -41,10 +41,17 @@ def _slugs():
 
 
 def _dbports():
+    """Ports privés ouverts à une appli seulement : sa base dédiée (haute dispo) et son Redis partagé (instances)."""
     try:
-        return [(r["slug"], int(r["db_port"])) for r in db.q("SELECT slug, db_port FROM ha WHERE db_port IS NOT NULL")]
+        out = [(r["slug"], int(r["db_port"])) for r in db.q("SELECT slug, db_port FROM ha WHERE db_port IS NOT NULL")]
     except Exception:
         return []
+    from . import services
+    for slug in {s for s, _ in out} | {r["slug"] for r in db.q("SELECT slug FROM ha")}:
+        p = services.shared_port(slug)
+        if p:
+            out.append((slug, p))
+    return out
 
 
 def render():

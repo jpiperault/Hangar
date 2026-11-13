@@ -378,13 +378,15 @@
       {% if redis_st.db0 %}<dt>Clés</dt><dd class="mono">{{ redis_st.db0 }}</dd>{% endif %}
       <dt>Version</dt><dd>Valkey {{ redis_st.valkey_version or redis_st.redis_version or '—' }}</dd>
     </dl>
-    <p class="hint" style="margin:0">Données persistantes dans <code>data/.hangar-redis</code> : sauvegardées, restaurées et déplacées avec data/. Joignable seulement par l'appli (réseau cloisonné). Plein, il refuse les écritures au lieu d'effacer des clés.</p>
+    <p class="hint" style="margin:0">Données persistantes dans <code>data/.hangar-redis</code> : sauvegardées, restaurées et déplacées avec data/. Joignable seulement par l'appli (réseau cloisonné). Plein, il refuse les écritures au lieu d'effacer des clés.
+      {% if ha and ha.h.mode == 'replicas' %}<br><strong>Instances multiples :</strong> un seul Redis, sur le nœud principal ({{ a.node }}), que les instances des autres nœuds joignent par le réseau privé. Si ce nœud tombe, la bascule le recrée vide sur le nouveau nœud principal.
+      {% elif ha %}<br><strong>Secours à chaud :</strong> sa copie part vers le secours avec data/ ; en cas de bascule, il redémarre là-bas avec les données de la dernière copie (quelques minutes au plus).{% endif %}</p>
     <div class="inlinefield"><input type="hidden" name="on" value="1"><input name="mem" type="number" min="32" max="4096" value="{{ redis.mem }}" aria-label="Mémoire de Redis en Mo"><button class="btn sm">Changer la mémoire</button></div>
     <div><button class="btn sm link" formaction="/apps/{{ a.slug }}/services/redis?off=1" data-confirm="Retirer Redis ? L'appli est redéployée sans lui ; ses données restent dans data/.hangar-redis.">Retirer Redis</button></div>
     {% else %}
-    <p class="hint" style="margin:0">Cache, files d'attente, sessions, classements, état des parties… Un Redis (Valkey) propre à l'appli, sur son réseau cloisonné, persistant et sauvegardé. L'appli reçoit <code>REDIS_URL</code> et est redéployée.{% if ha %} <strong>Pas encore possible avec la haute dispo.</strong>{% endif %}</p>
+    <p class="hint" style="margin:0">Cache, files d'attente, sessions, classements, état des parties… Un Redis (Valkey) propre à l'appli, sur son réseau cloisonné, persistant et sauvegardé. L'appli reçoit <code>REDIS_URL</code> et est redéployée.{% if ha %} Haute dispo : {{ "un seul Redis sur le nœud principal, partagé par les instances par le réseau privé" if ha.h.mode == 'replicas' else "il suit l'appli, sa copie part vers le secours avec data/" }}.{% endif %}</p>
     <input type="hidden" name="on" value="1">
-    <div class="inlinefield"><input name="mem" type="number" min="32" max="4096" value="128" aria-label="Mémoire de Redis en Mo"><span class="hint">Mo</span><button class="btn sm primary" {{ 'disabled' if ha or a.status == 'deploying' }}>Ajouter Redis</button></div>
+    <div class="inlinefield"><input name="mem" type="number" min="32" max="4096" value="128" aria-label="Mémoire de Redis en Mo"><span class="hint">Mo</span><button class="btn sm primary" {{ 'disabled' if a.status == 'deploying' }}>Ajouter Redis</button></div>
     {% endif %}
   </form>
 </div>

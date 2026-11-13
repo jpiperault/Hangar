@@ -967,8 +967,7 @@ def write_compose(a, version, instance=None, role=None):
     if a["db"]:
         env["DATABASE_URL"] = db_url(a, node)
     from . import services
-    extra, extra_env = services.compose_extra(a, f"hangar-{a['slug']}", f"{app_dir(a['slug'])}/data") \
-        if instance is None else ({}, {})
+    extra, extra_env = services.compose_extra(a, f"hangar-{a['slug']}", f"{app_dir(a['slug'])}/data", instance)
     env.update(extra_env)
     from . import system
     tzs = system.tz_settings()

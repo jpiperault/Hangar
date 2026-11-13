@@ -29,7 +29,7 @@ table inet platform {
 		iifname "hg-*" oifname "hg-*" accept
 		# DNS (le résolveur est souvent la box) et bases dédiées de la haute dispo par le réseau privé
 		iifname { "docker0", "br-*", "hg-*" } meta l4proto { tcp, udp } th dport 53 accept
-		iifname { "docker0", "br-*", "hg-*" } ip daddr 10.88.0.0/24 tcp dport 28001-38000 accept
+		iifname { "docker0", "br-*", "hg-*" } ip daddr 10.88.0.0/24 tcp dport 28001-48000 accept
 		iifname { "docker0", "br-*", "hg-*" } ct state new ip daddr @private4 counter drop
 		iifname { "docker0", "br-*", "hg-*" } ct state new ip6 daddr { fc00::/7, fe80::/10 } counter drop
 	}

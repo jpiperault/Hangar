@@ -446,8 +446,6 @@ async def ha_enable(request: Request, slug: str):
     err = await asyncio.to_thread(ha.validate, a, mode, chosen, bool(f.get("ack")))
     if not err and (ha.get(slug) or a["state"] == "deploying"):
         err = "Une opération est déjà en cours sur cette appli."
-    if not err and services.redis(slug):
-        err = "Cette appli a un Redis : la haute dispo n'est pas encore possible avec lui (onglet Base et services)."
     if err:
         flash(request, err, "error")
         return go(f"/apps/{slug}#hautedispo")

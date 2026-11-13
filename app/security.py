@@ -335,7 +335,7 @@ def render_nft(p, web):
           "\t\t# entre réseaux d'applis : table hangarapps",
           "\t\tiifname \"hg-*\" oifname \"hg-*\" accept",
           "\t\tiifname { \"docker0\", \"br-*\", \"hg-*\" } meta l4proto { tcp, udp } th dport 53 accept",
-          f"\t\tiifname {{ \"docker0\", \"br-*\", \"hg-*\" }} ip daddr {N.WG_NET} tcp dport {P.HOST_PORT_MIN + 10000}-38000 accept",
+          f"\t\tiifname {{ \"docker0\", \"br-*\", \"hg-*\" }} ip daddr {N.WG_NET} tcp dport {P.HOST_PORT_MIN + 10000}-48000 accept",
           f"\t\tiifname {{ \"docker0\", \"br-*\", \"hg-*\" }} ct state new ip daddr {{ {PRIVATE4} }} counter drop",
           "\t\tiifname { \"docker0\", \"br-*\", \"hg-*\" } ct state new ip6 daddr { fc00::/7, fe80::/10 } counter drop",
           "\t}", "}"]
