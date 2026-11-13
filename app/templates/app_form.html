@@ -107,6 +107,7 @@
   <a href="#reglages" data-tab="reglages">Réglages</a>
   {% if a.db %}<a href="#base" data-tab="base">Base de données</a>{% endif %}
   <a href="#hautedispo" data-tab="hautedispo">Haute dispo et nœud</a>
+  <a href="#taches" data-tab="taches">Tâches{% if jobs %} <span class="hint">{{ jobs | length }}</span>{% endif %}</a>
   <a href="#restauration" data-tab="restauration">Revenir en arrière{% if safety %} <span class="hint">{{ safety | length }}</span>{% endif %}</a>
 </nav>
 
@@ -356,6 +357,48 @@
   </form>
   {% endif %}
   {% if not others and not ha %}<section class="panel"><h2>Nœud</h2><p class="hint">Pas d'autre nœud pour déplacer cette appli : ajoute-en un dans la page <a href="/nodes">Nœuds</a>.</p></section>{% endif %}
+</div>
+
+<div data-pane="taches" style="display:flex;flex-direction:column;gap:20px">
+  <section class="panel" id="taches-liste">
+    <h2>Tâches planifiées</h2>
+    <p class="hint">Une commande lancée dans le conteneur de l'appli (<code>sh -c</code>, avec ses variables d'environnement), à heure fixe : nettoyage, calcul de classements, rappels… 30 minutes au plus ; une alerte part si elle échoue. Elle ne tourne que si l'appli est en marche.</p>
+    {% for j in jobs %}{% set l = j['last'] or {} %}
+    <div class="cert" style="align-items:flex-start">
+      <span style="min-width:0"><strong>{{ j.name }}</strong> <span class="hint">{{ j.desc }}{{ ' · désactivée' if not j.on }}</span><br>
+        <code style="word-break:break-all">{{ j.cmd }}</code><br>
+        {% if j.busy %}<span class="pill s-deploying">en cours</span>
+        {% elif l.rc is defined %}<span class="{{ 'lv-ok' if l.rc == 0 else 'lv-error' }}">{{ '✓' if l.rc == 0 else '✕ code ' ~ l.rc }}</span>
+          <span class="hint">{{ l.ts | ago }}{{ ' (à la main)' if l.manual }} · {{ l.dur }} s</span>
+          {% if l.out %}<details><summary class="hint">Sortie</summary><pre class="mono" style="white-space:pre-wrap;max-height:240px;overflow:auto;margin:6px 0 0">{{ l.out }}</pre></details>{% endif %}
+        {% else %}<span class="hint">jamais lancée</span>{% endif %}</span>
+      <span class="acts">
+        <form class="inline" method="post" action="/apps/{{ a.slug }}/jobs/{{ j.id }}/run"><button class="btn sm" {{ 'disabled' if j.busy or a.status != 'running' }}>Lancer</button></form>
+        <form class="inline" method="post" action="/apps/{{ a.slug }}/jobs/{{ j.id }}/toggle"><button class="btn sm">{{ 'Désactiver' if j.on else 'Réactiver' }}</button></form>
+        <form class="inline" method="post" action="/apps/{{ a.slug }}/jobs/{{ j.id }}/delete" data-confirm="Supprimer la tâche « {{ j.name }} » ?"><button class="btn sm link">Supprimer</button></form>
+      </span>
+    </div>
+    {% else %}<p class="hint">Aucune tâche pour l'instant.</p>{% endfor %}
+  </section>
+  <form class="panel" method="post" action="/apps/{{ a.slug }}/jobs" autocomplete="off" style="display:flex;flex-direction:column;gap:10px">
+    <h2 style="margin:0">Ajouter une tâche</h2>
+    <div class="row2">
+      <div class="field"><label for="jname">Nom</label><input id="jname" name="name" maxlength="80" required placeholder="Purge des parties terminées"></div>
+      <div class="field"><label for="jkind">Fréquence</label><select id="jkind" name="kind"><option value="daily">Chaque jour</option><option value="weekly">Chaque semaine</option><option value="minutes">Toutes les N minutes</option></select></div>
+    </div>
+    <div class="field"><label for="jcmd">Commande</label><textarea id="jcmd" name="cmd" maxlength="2000" required spellcheck="false" style="min-height:52px" placeholder="python manage.py purge_games --older-than 30d"></textarea></div>
+    <div class="row3">
+      <div class="field" data-jk="daily weekly"><label for="jat">Heure</label><input id="jat" name="at" value="03:00" pattern="[0-2][0-9]:[0-5][0-9]"></div>
+      <div class="field" data-jk="weekly"><label for="jdow">Jour</label><select id="jdow" name="dow">{% for d in job_days %}<option value="{{ loop.index0 }}">{{ d }}</option>{% endfor %}</select></div>
+      <div class="field" data-jk="minutes"><label for="jevery">Toutes les (minutes)</label><input id="jevery" name="every" type="number" min="5" max="1440" value="60"></div>
+    </div>
+    <div><button class="btn sm primary">Ajouter</button></div>
+  </form>
+  <script nonce="{{ csp_nonce }}">
+  (function () { var k = document.getElementById('jkind');
+    function sync() { document.querySelectorAll('[data-jk]').forEach(function (e) { e.hidden = e.dataset.jk.split(' ').indexOf(k.value) < 0; }); }
+    k.addEventListener('change', sync); sync(); })();
+  </script>
 </div>
 
 <div data-pane="restauration">

@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import access, alerts, backup, cloudflare, crypt, dataimport, db, dbadmin, ha, monitor, move, nodes, report, security, stats, system
+from . import access, alerts, applogs, backup, cloudflare, crypt, dataimport, db, dbadmin, ha, jobs, monitor, move, nodes, report, security, stats, system
 from . import domains as D
 from . import platform as P
 
@@ -421,7 +421,9 @@ async def _app_ctx(request, slug):
                 ha_inst=[c for c in others if c["id"] != a["node"]],
                 refresh=a["status"] == "deploying" or bool(busy), registries=P.registry_logins(), st=st, dbi=dbi,
                 ranges=list(stats.RANGES), others=others, dsize=dsize, domains=D.all_domains(), cf=cloudflare.status(),
-                safety=backup.safety_copies(slug), maint=P.maintenance(slug))
+                safety=backup.safety_copies(slug), maint=P.maintenance(slug),
+                jobs=[{**j, "desc": jobs.describe(j), "busy": jobs.is_running(slug, j["id"])} for j in jobs.of(slug)],
+                job_days=jobs.DAYS)
 
 
 # ---------------------------------------------------------------- haute disponibilité
@@ -627,6 +629,39 @@ async def app_maintenance(request: Request, slug: str):
     return go(f"/apps/{slug}#maintenance")
 
 
+@app.post("/apps/{slug}/jobs")
+async def app_job_add(request: Request, slug: str):
+    if not db.app(slug):
+        return go("/")
+    f = await request.form()
+    try:
+        jobs.add(slug, jobs.validate(f))
+        P.log("info", slug, f"tâche planifiée « {(f.get('name') or '').strip()[:80]} » ajoutée")
+        flash(request, "Tâche ajoutée.")
+    except ValueError as e:
+        flash(request, f"Tâche refusée : {e}", "error")
+    return go(f"/apps/{slug}#taches")
+
+
+@app.post("/apps/{slug}/jobs/{jid}/{op}")
+async def app_job_op(request: Request, slug: str, jid: str, op: str):
+    a = db.app(slug)
+    j = next((x for x in jobs.of(slug) if x["id"] == jid), None) if a else None
+    if not j:
+        return go(f"/apps/{slug}#taches" if a else "/")
+    if op == "run":
+        P.spawn(jobs.run, slug, jid, True)
+        flash(request, f"Tâche « {j['name']} » lancée : son résultat s'affiche ici à la fin.")
+    elif op == "toggle":
+        jobs.toggle(slug, jid)
+        flash(request, f"Tâche « {j['name']} » {'désactivée' if j.get('on', True) else 'réactivée'}.")
+    elif op == "delete":
+        jobs.remove(slug, jid)
+        P.log("info", slug, f"tâche planifiée « {j['name']} » supprimée")
+        flash(request, f"Tâche « {j['name']} » supprimée.")
+    return go(f"/apps/{slug}#taches")
+
+
 @app.post("/apps/{slug}/{action}")
 async def app_action(request: Request, slug: str, action: str):
     a = get_app_or_404(slug)
@@ -659,8 +694,26 @@ async def app_action(request: Request, slug: str, action: str):
 @app.get("/apps/{slug}/logs")
 async def app_logs(request: Request, slug: str):
     a = get_app_or_404(slug)
-    out = await asyncio.to_thread(P.logs, slug)
-    return render(request, "logs.html", title=f"Logs · {a['name']}", nav="apps", a=a, logs=out)
+    qp = request.query_params
+    period = qp.get("p") if qp.get("p") in applogs.PERIODS else ""
+    q, err = (qp.get("q") or "")[:200], qp.get("e") == "1"
+    lines, total, cut = await asyncio.to_thread(applogs.read, slug, period, q, err)
+    return render(request, "logs.html", title=f"Logs · {a['name']}", nav="apps", a=a, lines=lines, total=total,
+                  cut=cut, period=period, q=q, err=err, periods=applogs.PERIODS, la=applogs.settings(slug))
+
+
+@app.post("/apps/{slug}/logs/alerts")
+async def app_log_alerts(request: Request, slug: str):
+    get_app_or_404(slug)
+    f = await request.form()
+    try:
+        applogs.save(slug, f.get("on") == "on", f.get("patterns") or "")
+        s = applogs.settings(slug)
+        P.log("info", slug, "alertes sur les logs " + (f"actives ({len(s['patterns'].splitlines())} motif(s))" if s["on"] else "coupées"))
+        flash(request, "Alertes sur les logs enregistrées.")
+    except ValueError as e:
+        flash(request, f"Refusé : {e}", "error")
+    return go(f"/apps/{slug}/logs#alertes")
 
 
 # ---------------------------------------------------------------- domaines
