@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="bar"><div><div class="crumb"><a href="/settings#audit">Accès et comptes</a> /</div><h1>Journal des actions</h1></div>
+  <form method="get" class="inlinefield"><select name="u" aria-label="Compte" data-autosubmit><option value="">Tous les comptes</option>{% for u in users %}<option {{ 'selected' if u == who }}>{{ u }}</option>{% endfor %}</select></form></div>
+<p class="hint">Les 500 dernières actions{{ ' de ' ~ who if who }}. Le contenu des formulaires n'est jamais enregistré (mots de passe, variables).</p>
+{% include "_audit_rows.html" %}
+{% endblock %}

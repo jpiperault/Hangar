@@ -1,0 +1,12 @@
+{% set rows = rows if rows is defined else audit %}
+<div class="tablebox"><table>
+  <thead><tr><th>Quand</th><th>Compte</th><th>Action</th><th>Résultat</th><th>Adresse</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr><td class="mono">{{ r.ts | when }}</td><td>{{ r.username or '—' }}</td>
+      <td><span class="mono">{{ r.method }} {{ r.path }}</span>{% if r.detail %}<div class="pk">{{ r.detail }}</div>{% endif %}</td>
+      <td><span class="{{ 'lv-ok' if r.status and r.status < 400 else 'lv-error' }}">{{ {200: 'fait', 303: 'fait', 302: 'fait', 403: 'refusé', 404: 'introuvable'}.get(r.status, r.status) }}</span></td>
+      <td class="mono">{{ r.ip }}</td></tr>
+  {% else %}<tr><td colspan="5" class="empty">Aucune action pour l'instant.</td></tr>{% endfor %}
+  </tbody>
+</table></div>

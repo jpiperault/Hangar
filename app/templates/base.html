@@ -26,6 +26,7 @@
     <div class="foot">
       <span class="lanpill">LAN uniquement</span>
       <span class="mono">{{ s.home }}</span>
+      {% if role == 'lecture' %}<span class="pill s-stopped" title="Ce compte voit tout mais ne peut rien changer">lecture seule</span>{% endif %}
       <form method="post" action="/logout"><button class="btn sm link" type="submit">Se déconnecter ({{ user }})</button></form>
     </div>
   </nav>

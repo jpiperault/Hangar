@@ -30,6 +30,7 @@ def uptime_days(slug, days=30, now=None):
 
 def purge(keep_days=95):
     db.x("DELETE FROM uptime WHERE day < ?", (time.strftime("%Y-%m-%d", time.localtime(time.time() - keep_days * 86400)),))
+    db.x("DELETE FROM audit WHERE ts < ?", (time.time() - 180 * 86400,))   # journal des actions : 180 jours
 
 
 def _pct(v):

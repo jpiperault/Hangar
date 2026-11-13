@@ -32,7 +32,10 @@
     <h2>Comptes</h2>
     {% for u in users %}
     <details class="cert" style="display:block">
-      <summary style="display:flex;justify-content:space-between;align-items:center;cursor:pointer"><span class="mono">{{ u.username }}{{ ' (toi)' if u.username == user }}</span><span class="btn sm">Gérer</span></summary>
+      <summary style="display:flex;justify-content:space-between;align-items:center;cursor:pointer"><span><span class="mono">{{ u.username }}{{ ' (toi)' if u.username == user }}</span> <span class="pill {{ 's-stopped' if u.role == 'lecture' else 's-running' }}">{{ 'lecture seule' if u.role == 'lecture' else 'administrateur' }}</span></span><span class="btn sm">Gérer</span></summary>
+      {% if u.username != user %}<form method="post" action="/users/{{ u.username }}/role" class="inlinefield" style="margin-top:10px">
+        <select name="role" aria-label="Droits de {{ u.username }}"><option value="admin" {{ 'selected' if u.role != 'lecture' }}>Administrateur</option><option value="lecture" {{ 'selected' if u.role == 'lecture' }}>Lecture seule</option></select>
+        <button class="btn sm">Changer les droits</button></form>{% endif %}
       <form method="post" action="/users/{{ u.username }}/password" autocomplete="off" style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
         {% if u.username == user %}<div class="field"><label for="cur-{{ loop.index }}">Mot de passe actuel</label><input id="cur-{{ loop.index }}" name="current" type="password" autocomplete="current-password" required></div>{% endif %}
         <div class="row2">
@@ -48,14 +51,23 @@
     {% endfor %}
     <form method="post" action="/users/add" autocomplete="off" style="display:flex;flex-direction:column;gap:10px;margin-top:6px">
       <h3 style="margin:0;font-size:.95rem">Ajouter un compte</h3>
-      <div class="field"><label for="nu">Identifiant</label><input id="nu" name="username" spellcheck="false" required></div>
+      <div class="row2">
+        <div class="field"><label for="nu">Identifiant</label><input id="nu" name="username" spellcheck="false" required></div>
+        <div class="field"><label for="nrole">Droits</label><select id="nrole" name="role"><option value="admin">Administrateur</option><option value="lecture">Lecture seule</option></select></div>
+      </div>
       <div class="row2">
         <div class="field"><label for="npw">Mot de passe</label><input id="npw" name="password" type="password" minlength="10" autocomplete="new-password" required></div>
         <div class="field"><label for="npw2">Confirmation</label><input id="npw2" name="password2" type="password" minlength="10" autocomplete="new-password" required></div>
       </div>
-      <span class="hint">10 caractères au moins. Tous les comptes ont les mêmes droits. En secours, <code>hangar passwd</code> en root remet le mot de passe d'admin.</span>
+      <span class="hint">10 caractères au moins. <strong>Lecture seule</strong> : voit tout (applis, supervision, journal, logs), ne change rien, ne télécharge ni archive ni export de base, et ne voit pas le mot de passe des sauvegardes ; il peut changer son propre mot de passe. En secours, <code>hangar passwd</code> en root remet le mot de passe d'admin.</span>
       <div><button class="btn sm">Créer le compte</button></div>
     </form>
+  </section>
+
+  <section class="panel" id="audit">
+    <div class="bar"><h2>Journal des actions</h2><a class="btn sm link" href="/settings/audit">Tout voir</a></div>
+    <p class="hint">Chaque action faite dans la console (et chaque téléchargement d'archive ou d'export de base) : qui, quand, depuis quelle adresse, et le résultat. Gardé 180 jours.</p>
+    {% include "_audit_rows.html" %}
   </section>
 </div>
 

@@ -89,6 +89,10 @@ CREATE TABLE IF NOT EXISTS routes (               -- adresses publiques des appl
 );
 CREATE UNIQUE INDEX IF NOT EXISTS routes_host ON routes(domain, sub) WHERE kind = 'sub';
 CREATE UNIQUE INDEX IF NOT EXISTS routes_path ON routes(slug, domain) WHERE kind = 'path';
+CREATE TABLE IF NOT EXISTS audit (                -- actions faites dans la console : qui, quoi, résultat
+    id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL, username TEXT, ip TEXT, method TEXT NOT NULL,
+    path TEXT NOT NULL, status INTEGER, detail TEXT
+);
 CREATE TABLE IF NOT EXISTS uptime (               -- healthchecks de la console : réussis / faits, par appli et par jour
     app TEXT NOT NULL, day TEXT NOT NULL, ok INTEGER NOT NULL, total INTEGER NOT NULL, PRIMARY KEY (app, day)
 );
@@ -141,6 +145,9 @@ def init():
             _c.execute("ALTER TABLE nodes ADD COLUMN ssh_user TEXT NOT NULL DEFAULT 'root'")
         if "node" not in cols:   # nœud qui héberge l'appli ('local' = la machine de la console)
             _c.execute("ALTER TABLE apps ADD COLUMN node TEXT NOT NULL DEFAULT 'local'")
+        ucols = {r["name"] for r in _c.execute("PRAGMA table_info(users)").fetchall()}
+        if "role" not in ucols:   # admin : tous les droits ; lecture : voit tout (sauf secrets), ne change rien
+            _c.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'")
         if "latest_version" not in cols:  # dernière version trouvée sur le registre
             _c.execute("ALTER TABLE apps ADD COLUMN latest_version TEXT")
             _c.execute("ALTER TABLE apps ADD COLUMN latest_checked REAL")

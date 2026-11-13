@@ -7,6 +7,7 @@ import os
 import re
 import secrets
 import time
+import urllib.parse
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
@@ -72,6 +73,30 @@ def _ago(ts):
     return f"il y a {d // 86400:.0f} j"
 
 
+AUDIT_GET = ("/download", "/db/export")   # lectures qui sortent des données : tracées aussi
+READONLY_OK = ("/logout",)
+
+
+def _readonly_refused(request, user):
+    """Message de refus si un compte en lecture seule tente une action (ou une lecture de secrets), sinon None."""
+    if getattr(request.state, "role", "admin") != "lecture":
+        return None
+    p = request.url.path
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return "Compte en lecture seule : téléchargement réservé aux administrateurs." if p.endswith(AUDIT_GET) else None
+    if p in READONLY_OK or p == f"/users/{user}/password":
+        return None
+    return "Compte en lecture seule : cette action est réservée aux administrateurs."
+
+
+def _audit(request, user, ip, status, detail=None):
+    try:
+        db.x("INSERT INTO audit(ts, username, ip, method, path, status, detail) VALUES(?, ?, ?, ?, ?, ?, ?)",
+             (time.time(), user, ip, request.method, request.url.path[:300], status, detail))
+    except Exception:
+        pass
+
+
 @app.middleware("http")
 async def guard(request: Request, call_next):
     ip = request.client.host if request.client else ""
@@ -93,7 +118,7 @@ async def guard(request: Request, call_next):
     request.state.nonce = secrets.token_urlsafe(16)
     if not request.url.path.startswith(("/login", "/static")):
         u, sid = request.session.get("user"), request.session.get("sid")
-        row = db.one("SELECT s.seen FROM sessions s JOIN users u ON u.username = s.username "
+        row = db.one("SELECT s.seen, u.role FROM sessions s JOIN users u ON u.username = s.username "
                      "WHERE s.id = ? AND s.username = ?", (sid or "", u or "")) if u and sid else None
         now = time.time()
         if not row or now - row["seen"] > SESSION_IDLE:   # déconnectée, compte supprimé ou inactive trop longtemps
@@ -103,7 +128,18 @@ async def guard(request: Request, call_next):
             return RedirectResponse("/login", status_code=303)
         if now - row["seen"] > 60:
             db.x("UPDATE sessions SET seen = ? WHERE id = ?", (now, sid))
+        request.state.role = row["role"]
+        refused = _readonly_refused(request, u)
+        if refused:
+            _audit(request, u, ip, 403, "refusé : compte en lecture seule")
+            request.session["flash"] = {"msg": refused, "kind": "error"}
+            back = request.headers.get("referer") or "/"
+            path = urllib.parse.urlsplit(back).path if back.startswith(("http", "/")) else "/"
+            return RedirectResponse(path if path.startswith("/") and not path.startswith("//") else "/", status_code=303)
     response = await call_next(request)
+    if request.method not in ("GET", "HEAD", "OPTIONS") or request.url.path.endswith(AUDIT_GET):
+        _audit(request, request.session.get("user") or (request.url.path == "/login" and "(connexion)") or None, ip,
+               response.status_code)
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "same-origin"
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -158,7 +194,7 @@ def _sec_alerts():
 def render(request, name, status_code=200, **ctx):
     ctx.setdefault("title", "Hangar")
     ctx.update(flash=request.session.pop("flash", None), s=db.settings(), csp_nonce=getattr(request.state, "nonce", ""),
-               user=request.session.get("user"), app_count=len(db.apps()), sec_alerts=_sec_alerts())
+               user=request.session.get("user"), role=getattr(request.state, "role", "admin"), app_count=len(db.apps()), sec_alerts=_sec_alerts())
     return tpl.TemplateResponse(request, name, ctx, status_code=status_code)
 
 
@@ -967,7 +1003,8 @@ async def save_tunnel_token(request: Request):
 async def settings_page(request: Request):
     return render(request, "settings.html", title="Réglages", nav="settings", acc=access.current(),
                   ips=access.local_ips(), pending=access.pending(), client=request.client.host,
-                  users=db.q("SELECT username FROM users ORDER BY username"), registries=P.registry_logins(),
+                  users=db.q("SELECT username, role FROM users ORDER BY username"), registries=P.registry_logins(),
+                  audit=db.q("SELECT * FROM audit ORDER BY id DESC LIMIT 15"),
                   aform=request.session.pop("aform", None), aerr=request.session.pop("aerr", None))
 
 
@@ -1038,8 +1075,10 @@ async def users_add(request: Request):
     if err:
         flash(request, err, "error")
         return go("/settings#comptes")
-    db.x("INSERT INTO users(username, hash) VALUES(?, ?)", (name, ph.hash(pw)))
-    P.log("ok", "console", f"compte {name} créé par {request.session.get('user')}")
+    role = "lecture" if f.get("role") == "lecture" else "admin"
+    db.x("INSERT INTO users(username, hash, role) VALUES(?, ?, ?)", (name, ph.hash(pw), role))
+    P.log("ok", "console", f"compte {name} ({'lecture seule' if role == 'lecture' else 'administrateur'}) créé par "
+          f"{request.session.get('user')}")
     flash(request, f"Compte {name} créé.")
     return go("/settings#comptes")
 
@@ -1078,12 +1117,43 @@ async def users_remove(request: Request, name: str):
         flash(request, "Tu ne peux pas supprimer ton propre compte.", "error")
     elif db.one("SELECT COUNT(*) AS n FROM users")["n"] <= 1:
         flash(request, "Il faut garder au moins un compte.", "error")
+    elif _last_admin(name):
+        flash(request, "Il faut garder au moins un compte administrateur.", "error")
     else:
         db.x("DELETE FROM users WHERE username = ?", (name,))
         db.x("DELETE FROM sessions WHERE username = ?", (name,))
         P.log("info", "console", f"compte {name} supprimé par {me}")
         flash(request, f"Compte {name} supprimé, ses sessions sont fermées.")
     return go("/settings#comptes")
+
+
+def _last_admin(name):
+    u = db.one("SELECT role FROM users WHERE username = ?", (name,))
+    return bool(u and u["role"] == "admin" and db.one("SELECT COUNT(*) AS n FROM users WHERE role = 'admin'")["n"] <= 1)
+
+
+@app.post("/users/{name}/role")
+async def users_role(request: Request, name: str):
+    f = await request.form()
+    role = "lecture" if f.get("role") == "lecture" else "admin"
+    if not db.one("SELECT 1 FROM users WHERE username = ?", (name,)):
+        return go("/settings#comptes")
+    if role == "lecture" and _last_admin(name):
+        flash(request, "Il faut garder au moins un compte administrateur.", "error")
+        return go("/settings#comptes")
+    db.x("UPDATE users SET role = ? WHERE username = ?", (role, name))
+    P.log("info", "console", f"compte {name} : {'lecture seule' if role == 'lecture' else 'administrateur'} "
+          f"(par {request.session.get('user')})")
+    flash(request, f"Compte {name} : {'lecture seule' if role == 'lecture' else 'administrateur'}.")
+    return go("/settings#comptes")
+
+
+@app.get("/settings/audit")
+async def audit_page(request: Request):
+    who = request.query_params.get("u") or ""
+    rows = db.q("SELECT * FROM audit WHERE (? = '' OR username = ?) ORDER BY id DESC LIMIT 500", (who, who))
+    return render(request, "audit.html", title="Journal des actions", nav="settings", rows=rows, who=who,
+                  users=[r["username"] for r in db.q("SELECT DISTINCT username FROM audit WHERE username IS NOT NULL")])
 
 
 # ---------------------------------------------------------------- prompt de déploiement
@@ -1161,7 +1231,7 @@ async def backups_page(request: Request):
                   dests=ds, cur=cur, runs=backup.last_runs(12), last_ok=backup.last_ok(), busy=busy or arch_busy,
                   arch_busy=arch_busy, snaps=snaps, snap_err=snap_err, nas=backup.nas_info(),
                   pending=backup.auth_pending(), google_url=backup._auth.get("google_url"),
-                  pw=backup.password(), keep=keep, next_run=nxt.strip(), apps=db.apps(), refresh=busy or arch_busy,
+                  pw=backup.password() if getattr(request.state, "role", "admin") == "admin" else None, keep=keep, next_run=nxt.strip(), apps=db.apps(), refresh=busy or arch_busy,
                   folder=backup.FOLDER, own_client=backup.client_id(), archives=backup.archives(),
                   snap_busy=snap_busy, restore_tests=backup.restore_tests(), imports=dataimport.pending(), safety=backup.safety_copies(),
                   app_names={a['slug']: a['name'] for a in db.apps()})
