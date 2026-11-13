@@ -141,7 +141,7 @@
 
   <section class="panel" id="import">
     <h2>Importer des données dans une appli</h2>
-    <p class="hint">Pour amener dans Hangar les données d'une instance hébergée ailleurs (kit de migration, voir <code>docs/prompt-migration.md</code>), ou reprendre une seule appli d'une archive d'un autre serveur, même sous un autre identifiant. Fichier <code>.tar.gz</code> qui contient <code>db.dump</code> (export <code>pg_dump -Fc</code>, PostgreSQL 17 au plus) et/ou un dossier <code>data/</code>. Il est vérifié à l'envoi ; tu choisis ensuite l'appli qui le reçoit.</p>
+    <p class="hint">Pour amener dans Hangar les données d'une instance hébergée ailleurs (kit de migration : <a href="/prompt/migration">prompt de migration</a> à donner à Claude), ou reprendre une seule appli d'une archive d'un autre serveur, même sous un autre identifiant. Fichier <code>.tar.gz</code> qui contient <code>db.dump</code> (export <code>pg_dump -Fc</code>, PostgreSQL 17 au plus) et/ou un dossier <code>data/</code>. Il est vérifié à l'envoi ; tu choisis ensuite l'appli qui le reçoit.</p>
     {% for x in imports %}
       <div class="cert"><span><span class="mono">{{ x.filename or x.name }}</span> <span class="hint">{{ x.ts | when }} · {{ x.size | size }}{{ ' · base' if x.dump }}{{ ' · ' ~ x.files ~ ' fichier(s)' if x.data }}</span></span>
         <span class="acts">

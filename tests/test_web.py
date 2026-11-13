@@ -84,3 +84,11 @@ def test_limite_d_essais(client):
                     follow_redirects=False)
     assert r.headers["location"].endswith("/login"), "le bon mot de passe ne doit plus passer après 5 échecs"
     client.cookies.clear()
+
+
+def test_prompt_de_migration(client):
+    client.post("/login", data={"username": "admin", "password": "bon-mot-de-passe"}, headers=SAME)
+    r = client.get("/prompt/migration")
+    assert r.status_code == 200 and "Kit de migration" in r.text and "&lt;!--" not in r.text
+    assert '"<slug>"' in r.text or "&lt;slug&gt;" in r.text or "\\u003cslug\\u003e" in r.text
+    client.cookies.clear()

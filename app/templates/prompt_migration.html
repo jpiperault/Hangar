@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block main %}
+{% include "_gen_style.html" %}
+<div class="bar">
+  <div><div class="crumb"><a href="/prompt">Prompt de déploiement</a> /</div><h1>Prompt de migration</h1></div>
+</div>
+<p class="gen-intro">Pour amener dans Hangar les données d'une instance de l'appli hébergée ailleurs. Remplis ce que tu sais, copie le prompt et colle-le dans Claude, dans le dépôt de l'appli : il y crée un kit (<code>migration/export.sh</code>, <code>verify.sh</code>, <code>MIGRATION.md</code>). Le fichier produit sur l'ancien serveur s'envoie ensuite dans <a href="/backups#import">Sauvegardes › Importer des données dans une appli</a>. Un champ vide garde son <code>&lt;…&gt;</code> : Claude posera la question.</p>
+<div class="gen-grid">
+<form id="f" autocomplete="off">
+  <fieldset>
+    <legend>L'appli dans Hangar</legend>
+    <div class="field"><label for="app">Appli qui recevra les données</label>
+      <select id="app"><option value="">— pas encore créée —</option>{% for x in apps %}<option value="{{ x.slug }}" {{ 'selected' if app and app.slug == x.slug }}>{{ x.name }} ({{ x.slug }})</option>{% endfor %}</select>
+      <span class="hint">Crée-la d'abord (même image et même version que l'ancienne instance, base activée si besoin) : ses réglages se remplissent ici.</span></div>
+    <div class="row2">
+      <div class="field"><label for="name">Nom</label><input id="name" spellcheck="false"></div>
+      <div class="field"><label for="slug">Identifiant</label><input id="slug" spellcheck="false"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label for="gh">Compte GitHub (ghcr.io)</label><input id="gh" spellcheck="false"></div>
+      <div class="field"><label for="version">Version déployée</label><input id="version" spellcheck="false"></div>
+    </div>
+    <div class="field"><label for="port">Port interne</label><input id="port" spellcheck="false" inputmode="numeric"></div>
+  </fieldset>
+  <fieldset>
+    <legend>L'instance de départ</legend>
+    <div class="field"><label for="server">Serveur</label><input id="server" placeholder="VPS OVH, NAS Synology, PC…" spellcheck="false"></div>
+    <div class="row2">
+      <div class="field"><label for="access">Accès</label><input id="access" placeholder="SSH root, utilisateur…" spellcheck="false"></div>
+      <div class="field"><label for="docker">Docker sur ce serveur</label><select id="docker"><option value="">je ne sais pas</option><option>disponible</option><option>non disponible</option></select></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label for="dbkind">Base</label><select id="dbkind"><option value="">je ne sais pas</option><option>PostgreSQL</option><option>MySQL / MariaDB</option><option>SQLite</option><option>aucune</option></select></div>
+      <div class="field"><label for="dbver">Version de la base</label><input id="dbver" placeholder="16.4" spellcheck="false"></div>
+    </div>
+    <div class="field"><label for="dbaccess">Accès à la base</label><input id="dbaccess" placeholder="conteneur « db » du compose, port 5432 local…" spellcheck="false">
+      <span class="hint">Où la trouver, <strong>sans mot de passe</strong> : le kit le lira dans une variable.</span></div>
+    <div class="field"><label for="files">Fichiers</label><input id="files" placeholder="/var/www/app/uploads, volume Docker « media », bucket S3…" spellcheck="false"></div>
+    <div class="row2">
+      <div class="field"><label for="srcver">Version de l'appli installée</label><input id="srcver" placeholder="1.4.2 ou un commit" spellcheck="false"></div>
+      <div class="field"><label for="volume">Volume approximatif</label><input id="volume" placeholder="base 200 Mo, fichiers 3 Go" spellcheck="false"></div>
+    </div>
+  </fieldset>
+</form>
+<section class="out" aria-label="Prompt généré">
+  <div class="outbar">
+    <div><span class="gen-label">Prompt généré</span><span class="stats" id="stats"></span></div>
+    <div class="btns"><button class="btn" type="button" id="copy">Copier le prompt</button></div>
+  </div>
+  <span class="toast" id="toast" role="status" aria-live="polite"></span>
+  <pre id="prompt" tabindex="0"></pre>
+</section>
+</div>
+<script nonce="{{ csp_nonce }}" id="tpl" type="application/json">{{ tpl | tojson }}</script>
+<script nonce="{{ csp_nonce }}" id="appsdata" type="application/json">{{ apps | tojson }}</script>
+<script nonce="{{ csp_nonce }}">
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var TPL = JSON.parse($('tpl').textContent), APPS = JSON.parse($('appsdata').textContent);
+  function v(id) { return String($(id).value || '').trim(); }
+  function fill(slug) {
+    var a = APPS.filter(function (x) { return x.slug === slug; })[0];
+    if (!a) return;
+    $('name').value = a.name; $('slug').value = a.slug; $('gh').value = a.gh; $('version').value = a.version;
+    $('port').value = a.port || '';
+    if (!a.db && !$('dbkind').value) $('dbkind').value = 'aucune';
+  }
+  function build() {
+    var db = v('dbkind') ? v('dbkind') + (v('dbver') && v('dbkind') !== 'aucune' ? ' ' + v('dbver') : '') : '';
+    var map = [   // valeur du formulaire, sinon le repère d'origine
+      ["<Nom de l'appli>", v('name')], ['<VPS, NAS, PC…>', v('server')], ['<SSH root / utilisateur…>', v('access')],
+      ['<disponible / non>', v('docker')], ['<PostgreSQL x.y / MySQL / SQLite / aucune>', db],
+      ['<URL de connexion, à passer en variable, jamais dans le code>', v('dbaccess')],
+      ['<dossier, volume Docker, S3…>', v('files')], ['<x.y.z ou commit>', v('srcver')],
+      ['<taille de la base, taille des fichiers>', v('volume')], ['<x.y.z>', v('version')], ['<version>', v('version')],
+      ['<port>', v('port')], ['<compte>', v('gh')], ['<slug>', v('slug')]
+    ];
+    var t = TPL;
+    map.forEach(function (m) { if (m[1]) t = t.split(m[0]).join(m[1]); });
+    $('prompt').textContent = t;
+    $('stats').textContent = ' · ' + t.split('\n').length + ' lignes · ' + (t.match(/<[^<>\n]{1,70}>/g) || []).filter(function (x) { return !/^<(rôle|base|date|…|rôle de l'appli)>$/.test(x); }).length + ' repère(s) à compléter';
+    return t;
+  }
+  $('app').addEventListener('change', function () { fill($('app').value); build(); });
+  $('f').addEventListener('input', build);
+  $('f').addEventListener('change', build);
+  var tt; function toast(m) { $('toast').textContent = m; clearTimeout(tt); tt = setTimeout(function () { $('toast').textContent = ''; }, 2500); }
+  $('copy').addEventListener('click', function () {
+    var text = build();
+    function fallback() { var r = document.createRange(); r.selectNodeContents($('prompt')); var s = window.getSelection(); s.removeAllRanges(); s.addRange(r); var ok = false; try { ok = document.execCommand('copy'); } catch (e) {} toast(ok ? 'Prompt copié.' : 'Texte sélectionné : fais Ctrl+C (ou Cmd+C).'); }
+    if (!navigator.clipboard || !window.isSecureContext) { fallback(); return; }
+    navigator.clipboard.writeText(text).then(function () { toast('Prompt copié. Colle-le dans Claude, dans le dépôt de l\'appli.'); }, fallback);
+  });
+  fill($('app').value); build();
+})();
+</script>
+{% endblock %}

@@ -1,7 +1,8 @@
 <!--
   Prompt à donner à Claude dans le projet de ton application, pour amener dans Hangar les données
   d'une instance hébergée ailleurs.
-  1. Remplis les <…> des sections « L'instance de départ » et « La cible ». Laisse un <…> si tu ne sais pas :
+  Plus simple : la console le remplit pour toi (Prompt de déploiement › Prompt de migration, /prompt/migration).
+  1. Sinon, remplis les <…> des sections « L'instance de départ » et « La cible ». Laisse un <…> si tu ne sais pas :
      Claude posera la question.
   2. Colle tout le fichier dans le prompt, ou enregistre-le dans le dépôt
      (par exemple docs/MIGRATION-HANGAR.md) et dis à Claude : « Suis docs/MIGRATION-HANGAR.md ».

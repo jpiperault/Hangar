@@ -914,6 +914,21 @@ async def prompt_page(request: Request):
                   apps=db.apps(), hangar=hangar)
 
 
+@app.get("/prompt/migration")
+async def prompt_migration_page(request: Request):
+    """Générateur du prompt de migration : docs/prompt-migration.md, rempli avec la fiche de l'appli et la source."""
+    txt = open(os.path.join(os.path.dirname(HERE), "docs", "prompt-migration.md")).read()
+    txt = re.sub(r"^<!--.*?-->\s*", "", txt, flags=re.S)
+    a = db.app(request.query_params.get("app") or "")
+    apps = []
+    for x in db.apps():
+        m = re.match(r"^ghcr\.io/([^/]+)/", x["image"] or "") if x["source"] == "image" else None
+        apps.append({"slug": x["slug"], "name": x["name"], "image": x["image"] if x["source"] == "image" else "",
+                     "gh": m.group(1) if m else "", "version": x["version"], "port": x["port"], "db": bool(x["db"])})
+    return render(request, "prompt_migration.html", title="Prompt de migration", nav="prompt", app=a, apps=apps,
+                  tpl=txt)
+
+
 # ---------------------------------------------------------------- journal
 
 @app.get("/journal")
