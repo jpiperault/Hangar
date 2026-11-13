@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import access, affinity, alerts, applogs, backup, cache, cloudflare, limits, smoke, crypt, dataimport, db, dbadmin, ha, jobs, monitor, move, nodes, preprod, report, security, services, stats, statuspage, system
+from . import access, affinity, alerts, applogs, backup, cache, cloudflare, crashes, limits, remoteconfig, smoke, crypt, dataimport, db, dbadmin, ha, jobs, monitor, move, nodes, preprod, report, security, services, stats, statuspage, system
 from . import domains as D
 from . import platform as P
 
@@ -27,6 +27,7 @@ ph = PasswordHasher()
 db.init()
 P.recover()
 monitor.start()
+crashes.start()   # point d'envoi des rapports de plantage (Caddy → 127.0.0.1:8099 / 10.88.0.1:8099)
 # mesures lentes gardées au chaud : les pages ne font jamais attendre un nœud
 cache.keep_warm("states", 20, P.container_states)
 cache.keep_warm("mem", 20, P.mem_usage)
@@ -479,7 +480,8 @@ async def _app_ctx(request, slug):
                 ranges=list(stats.RANGES), others=others, dsize=dsize, domains=D.all_domains(), cf=cloudflare.status(),
                 safety=backup.safety_copies(slug), maint=P.maintenance(slug),
                 jobs=[{**j, "desc": jobs.describe(j), "busy": jobs.is_running(slug, j["id"])} for j in jobs.of(slug)],
-                job_days=jobs.DAYS, cpus=limits.cpus(slug), aff=affinity.of(slug), aff_modes=affinity.MODES,
+                job_days=jobs.DAYS, cpus=limits.cpus(slug), rc=remoteconfig.of(slug),
+                rc_url=_rc_url(a), crash_groups=crashes.groups(slug) if a["pkg"] else [], aff=affinity.of(slug), aff_modes=affinity.MODES,
                 aff_default=affinity.DEFAULT_NAME, smoke_text=smoke.text_of(slug), smoke_last=db.kv_get(f"smoke_last:{slug}"), redis=services.redis(slug), pre=db.app(preprod.of(slug) or ""),
                 prod=db.app(preprod.prod_of(slug) or ""),
                 redis_st=(cache.get(f"redis:{slug}", 20, _redis_state, a, wait=False) or {"state": "…"})
@@ -801,6 +803,50 @@ async def app_preprod(request: Request, slug: str):
     except ValueError as e:
         flash(request, f"Préproduction : {e}", "error")
     return go(f"/apps/{slug}#preprod")
+
+
+def _rc_url(a):
+    """Adresse publique de la configuration à distance d'une appli (hôte des routes de son domaine principal)."""
+    if not a["pkg"]:
+        return None
+    for name, m in P.manifests().items():
+        if a["pkg"] in m:
+            return f"https://{D.get(name)['hub']}.{name}/.well-known/apps/{a['pkg']}.json"
+    return None
+
+
+@app.post("/apps/{slug}/remote-config")
+async def app_remote_config(request: Request, slug: str):
+    get_app_or_404(slug)
+    f = await request.form()
+    try:
+        remoteconfig.save(slug, f)
+        await asyncio.to_thread(P.apply_routing)   # fichiers publics réécrits et envoyés aux nœuds
+        P.log("info", slug, "configuration à distance de l'appli Android mise à jour")
+        flash(request, "Configuration publiée : les applis la lisent à leur prochain démarrage (cache d'une minute).")
+    except (ValueError, RuntimeError) as e:
+        flash(request, f"Configuration refusée : {e}", "error")
+    return go(f"/apps/{slug}#mobile")
+
+
+@app.get("/apps/{slug}/crashes/{fp}")
+async def app_crash(request: Request, slug: str, fp: str):
+    a = get_app_or_404(slug)
+    g = db.one("SELECT * FROM crash_groups WHERE slug = ? AND fp = ?", (slug, fp))
+    if not g:
+        return go(f"/apps/{slug}#mobile")
+    return render(request, "crash.html", title=f"Plantage · {a['name']}", nav="apps", a=a, g=g,
+                  items=crashes.latest(slug, fp, 20), versions=crashes.versions(slug, fp))
+
+
+@app.post("/apps/{slug}/crashes/{fp}/{op}")
+async def app_crash_op(request: Request, slug: str, fp: str, op: str):
+    get_app_or_404(slug)
+    if op in ("resolved", "open", "delete"):
+        crashes.set_status(slug, fp, op)
+        flash(request, {"resolved": "Marqué corrigé : une alerte partira s'il revient dans une version plus récente.",
+                        "open": "Rouvert.", "delete": "Groupe supprimé."}[op])
+    return go(f"/apps/{slug}#mobile")
 
 
 @app.post("/apps/{slug}/ha/affinity")

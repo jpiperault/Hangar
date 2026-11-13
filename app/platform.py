@@ -345,6 +345,13 @@ def render_caddyfile(s, apps, here=LOCAL):
             if tunnel:
                 L.append("\timport tunnel")
             L += ["\timport hangar_log", "\tencode zstd gzip",
+                  "\t# configuration à distance des applis Android (remoteconfig.py)",
+                  "\thandle /.well-known/apps/* {", f"\t\troot * {PUBLIC}/{name}",
+                  '\t\theader Cache-Control "public, max-age=60"', "\t\tfile_server", "\t}",
+                  "\t# rapports de plantage (crashes.py) : serveur interne de la console",
+                  "\thandle /.well-known/hangar/crash/* {", "\t\trequest_body {", "\t\t\tmax_size 64KB", "\t\t}",
+                  f"\t\treverse_proxy {'127.0.0.1' if here == LOCAL else node_wg(LOCAL)}:8099 {{",
+                  "\t\t\theader_up X-Real-IP {client_ip}", "\t\t}", "\t}",
                   "\thandle /.well-known/apps.json {",
                   f"\t\troot * {PUBLIC}/{name}",
                   '\t\theader Cache-Control "public, max-age=300"',
@@ -646,8 +653,10 @@ def write_manifests():
     files = {}
     doms = D.by_name()
     contact = db.settings().get("public_contact") or ""
+    from . import remoteconfig
     for name, m in manifests().items():
         files[f"{name}/.well-known/apps.json"] = json.dumps(m, indent=2, ensure_ascii=False)
+        files.update(remoteconfig.files(name, f"{doms[name]['hub']}.{name}", m))
         for fname, content in public_pages(f"{doms[name]['hub']}.{name}", contact).items():
             files[f"{name}/{fname}"] = content
     from . import statuspage

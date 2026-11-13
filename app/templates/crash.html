@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="bar"><div><div class="crumb"><a href="/">Applications</a> / <a href="/apps/{{ a.slug }}#mobile">{{ a.name }}</a> /</div>
+  <h1>{{ g.exc or 'Plantage' }}</h1><span class="hint">{{ g.count }} fois · premier {{ g.first | ago }} · dernier {{ g.last | ago }} · {{ 'à corriger' if g.status == 'open' else 'corrigé en ' ~ g.resolved_code }}</span></div></div>
+<section class="panel">
+  <h2>Versions touchées</h2>
+  {% for v in versions %}<div class="cert"><span class="mono">{{ v.vname or '?' }} ({{ v.vcode }})</span><span class="hint">{{ v.n }} rapport{{ 's' if v.n > 1 }}</span></div>{% endfor %}
+</section>
+{% for c in items %}
+<section class="panel" style="margin-top:16px">
+  <div class="bar" style="margin:0"><h2 style="margin:0;font-size:1rem">{{ c.ts | when }}</h2><span class="hint">{{ c.vname }} ({{ c.vcode }}) · {{ c.device }} · {{ c.os }}</span></div>
+  <p class="mono" style="word-break:break-all">{{ c.exc }}: {{ c.msg }}</p>
+  {% if loop.first %}<pre class="log" style="max-height:480px">{{ c.trace }}</pre>{% else %}<details><summary class="hint">Trace</summary><pre class="log" style="max-height:360px">{{ c.trace }}</pre></details>{% endif %}
+</section>
+{% endfor %}
+{% endblock %}

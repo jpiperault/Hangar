@@ -18,6 +18,8 @@ table inet platform {
 		tcp dport { 80, 443 } accept
 		udp dport 443 accept
 		ip saddr @lan tcp dport { 22, 8443 } accept
+		# rapports de plantage des applis : relayés par le Caddy des nœuds, par le réseau privé
+		iifname "wg-hangar" ip saddr 10.88.0.0/24 tcp dport 8099 accept
 		ip6 saddr fe80::/10 tcp dport 22 accept
 	}
 

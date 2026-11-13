@@ -93,6 +93,16 @@ CREATE TABLE IF NOT EXISTS audit (                -- actions faites dans la cons
     id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL, username TEXT, ip TEXT, method TEXT NOT NULL,
     path TEXT NOT NULL, status INTEGER, detail TEXT
 );
+CREATE TABLE IF NOT EXISTS crashes (              -- rapports de plantage des applis Android (crashes.py)
+    id INTEGER PRIMARY KEY AUTOINCREMENT, slug TEXT NOT NULL, ts REAL NOT NULL, fp TEXT NOT NULL, vname TEXT,
+    vcode INTEGER, os TEXT, device TEXT, exc TEXT, msg TEXT, trace TEXT
+);
+CREATE INDEX IF NOT EXISTS crashes_fp ON crashes(slug, fp);
+CREATE TABLE IF NOT EXISTS crash_groups (         -- un groupe par empreinte : compte, dates, statut
+    slug TEXT NOT NULL, fp TEXT NOT NULL, first REAL NOT NULL, last REAL NOT NULL, count INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open', resolved_code INTEGER, exc TEXT, msg TEXT, top TEXT, vmax INTEGER,
+    PRIMARY KEY (slug, fp)
+);
 CREATE TABLE IF NOT EXISTS uptime (               -- healthchecks de la console : réussis / faits, par appli et par jour
     app TEXT NOT NULL, day TEXT NOT NULL, ok INTEGER NOT NULL, total INTEGER NOT NULL, PRIMARY KEY (app, day)
 );

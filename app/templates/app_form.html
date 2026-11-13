@@ -108,6 +108,7 @@
   <a href="#base" data-tab="base">Base et services</a>
   <a href="#hautedispo" data-tab="hautedispo">Haute dispo et nœud</a>
   <a href="#taches" data-tab="taches">Tâches{% if jobs %} <span class="hint">{{ jobs | length }}</span>{% endif %}</a>
+  <a href="#mobile" data-tab="mobile">Appli mobile{% if crash_groups | selectattr('status', 'equalto', 'open') | list %} <span class="pill s-error">{{ crash_groups | selectattr('status', 'equalto', 'open') | list | length }}</span>{% endif %}</a>
   <a href="#restauration" data-tab="restauration">Revenir en arrière</a>
 </nav>
 
@@ -440,6 +441,95 @@
     function sync() { document.querySelectorAll('[data-jk]').forEach(function (e) { e.hidden = e.dataset.jk.split(' ').indexOf(k.value) < 0; }); }
     k.addEventListener('change', sync); sync(); })();
   </script>
+</div>
+
+<div data-pane="mobile" style="display:flex;flex-direction:column;gap:20px">
+  {% if not a.pkg %}
+  <section class="panel"><h2>Appli mobile</h2><p class="hint">Indique le <strong>package Android</strong> de l'appli dans l'onglet Réglages (ex. <code>fr.piperault.cuistory</code>) pour lui donner une configuration à distance et recevoir ses rapports de plantage.</p></section>
+  {% else %}
+  <form class="panel" id="config-distance" method="post" action="/apps/{{ a.slug }}/remote-config" style="display:flex;flex-direction:column;gap:10px">
+    <h2 style="margin:0">Configuration à distance</h2>
+    <p class="hint" style="margin:0">Lue par l'appli Android au démarrage{% if rc_url %} : <a href="{{ rc_url }}" target="_blank" rel="noopener" class="mono">{{ rc_url }}</a>{% else %} (l'appli doit avoir une adresse sur un domaine avec un hôte de routes){% endif %}. Publiée tout de suite, sans passer par le Play Store.</p>
+    <div class="row2">
+      <div class="field"><label for="rcmin">Version minimale (versionCode)</label><input id="rcmin" name="min_code" value="{{ rc.min_code or '' }}" inputmode="numeric" placeholder="aucune">
+        <span class="hint">En dessous, l'appli bloque et demande la mise à jour.</span></div>
+      <div class="field"><label for="rcrec">Version conseillée (versionCode)</label><input id="rcrec" name="rec_code" value="{{ rc.rec_code or '' }}" inputmode="numeric" placeholder="aucune">
+        <span class="hint">En dessous, elle propose la mise à jour sans bloquer.</span></div>
+    </div>
+    <div class="field"><label for="rcflags">Interrupteurs (une par ligne : <code>cle = valeur</code>)</label>
+      <textarea id="rcflags" name="flags" spellcheck="false" style="min-height:70px" placeholder="nouveau_menu = true&#10;max_joueurs = 8&#10;theme = hiver">{{ rc.flags }}</textarea>
+      <span class="hint">Valeurs : true/false, nombres ou texte. L'appli les lit dans <code>flags</code>.</span></div>
+    <div class="field"><label for="rcmsg">Message d'annonce</label><input id="rcmsg" name="message" value="{{ rc.message }}" maxlength="500" placeholder="Maintenance prévue dimanche de 8 h à 9 h"></div>
+    <div class="row2">
+      <div class="field"><label for="rclvl">Type</label><select id="rclvl" name="level"><option value="info">Information</option><option value="warn" {{ 'selected' if rc.level == 'warn' }}>Avertissement</option></select></div>
+      <div class="field"><label for="rcuntil">Jusqu'au (inclus)</label><input id="rcuntil" name="until" type="date" value="{{ rc.until }}"></div>
+    </div>
+    <div><button class="btn sm primary">Publier</button></div>
+  </form>
+
+  <section class="panel" id="plantages">
+    <h2>Plantages</h2>
+    {% for g in crash_groups %}
+    <div class="cert" style="align-items:flex-start">
+      <span style="min-width:0"><span class="pill {{ 's-error' if g.status == 'open' else 's-running' }}">{{ 'à corriger' if g.status == 'open' else 'corrigé' }}</span>
+        <a href="/apps/{{ a.slug }}/crashes/{{ g.fp }}"><strong>{{ g.exc or 'Exception' }}</strong></a>
+        <div class="hint" style="word-break:break-all">{{ g.msg[:160] }}{% if g.top %}<br><code>{{ g.top }}</code>{% endif %}</div>
+        <span class="hint">{{ g.count }} fois · dernier {{ g.last | ago }} · premier {{ g.first | ago }} · jusqu'à la version {{ g.vmax }}{% if g.status == 'resolved' %} · corrigé en {{ g.resolved_code }}{% endif %}</span></span>
+      <span class="acts">
+        {% if g.status == 'open' %}<form class="inline" method="post" action="/apps/{{ a.slug }}/crashes/{{ g.fp }}/resolved"><button class="btn sm">Corrigé</button></form>
+        {% else %}<form class="inline" method="post" action="/apps/{{ a.slug }}/crashes/{{ g.fp }}/open"><button class="btn sm">Rouvrir</button></form>{% endif %}
+        <form class="inline" method="post" action="/apps/{{ a.slug }}/crashes/{{ g.fp }}/delete" data-confirm="Supprimer ce groupe et ses rapports ?"><button class="btn sm link">Supprimer</button></form>
+      </span>
+    </div>
+    {% else %}<p class="hint">Aucun plantage reçu. Ajoute le code ci-dessous à l'appli Android pour les recevoir ici.</p>{% endfor %}
+    <p class="hint">Regroupés par type d'erreur et premières lignes du code de l'appli. Alerte au premier plantage d'un nouveau groupe, et si un groupe marqué corrigé revient dans une version plus récente. Gardés 90 jours ; rien de personnel (ni adresse IP, ni identifiant).</p>
+  </section>
+
+  <section class="panel">
+    <details><summary><strong>Code à ajouter à l'appli Android</strong> <span class="hint">(Kotlin, sans bibliothèque)</span></summary>
+<pre class="mono" style="white-space:pre;overflow:auto;margin-top:10px;font-size:.78rem">// 1. Au démarrage (Application.onCreate) : configuration à distance, en arrière-plan
+val CONFIG = "{{ rc_url or 'https://apps.<domaine>/.well-known/apps/' ~ a.pkg ~ '.json' }}"
+thread {
+    runCatching {
+        val c = JSONObject(URL(CONFIG).readText())
+        prefs.edit().putString("hangar_config", c.toString()).apply()   // relue au démarrage suivant si pas de réseau
+        val code = BuildConfig.VERSION_CODE
+        if (!c.isNull("min_version_code") &amp;&amp; code &lt; c.getInt("min_version_code")) { /* écran « Mets à jour » bloquant → c.getString("store_url") */ }
+        else if (!c.isNull("recommended_version_code") &amp;&amp; code &lt; c.getInt("recommended_version_code")) { /* proposer la mise à jour */ }
+        val flags = c.getJSONObject("flags")          // ex. flags.optBoolean("nouveau_menu")
+        if (!c.isNull("message")) { /* afficher c.getJSONObject("message").getString("text") */ }
+    }
+}
+
+// 2. Rapports de plantage : écrits au moment du plantage, envoyés au démarrage suivant
+val prev = Thread.getDefaultUncaughtExceptionHandler()
+Thread.setDefaultUncaughtExceptionHandler { t, e ->
+    runCatching {
+        File(filesDir, "crash.json").writeText(JSONObject()
+            .put("version_name", BuildConfig.VERSION_NAME).put("version_code", BuildConfig.VERSION_CODE)
+            .put("os", "Android ${Build.VERSION.RELEASE}").put("device", "${Build.MANUFACTURER} ${Build.MODEL}")
+            .put("exception", e.javaClass.name).put("message", e.message ?: "")
+            .put("stacktrace", e.stackTraceToString().take(15000)).toString())
+    }
+    prev?.uncaughtException(t, e)
+}
+thread {   // au démarrage : envoi du rapport en attente
+    val f = File(filesDir, "crash.json")
+    val c = runCatching { JSONObject(prefs.getString("hangar_config", "{}")!!) }.getOrNull()
+    if (f.exists() &amp;&amp; c != null &amp;&amp; c.has("crash_url")) runCatching {
+        (URL(c.getString("crash_url")).openConnection() as HttpURLConnection).run {
+            requestMethod = "POST"; doOutput = true; connectTimeout = 5000; readTimeout = 5000
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("X-Hangar-Key", c.getString("crash_key"))
+            outputStream.use { it.write(f.readBytes()) }
+            if (responseCode in 200..299 || responseCode == 400 || responseCode == 413) f.delete()
+        }
+    }
+}</pre>
+    <p class="hint">Le prompt de déploiement peut aussi demander à Claude de l'intégrer (onglet Appli Android du générateur).</p>
+    </details>
+  </section>
+  {% endif %}
 </div>
 
 <div data-pane="restauration">

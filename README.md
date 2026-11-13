@@ -52,6 +52,7 @@ FastAPI + Jinja, sans build front. Elle écoute en HTTPS (certificat auto-signé
 - **Processeur max** par appli, et alertes quand une appli frôle sa mémoire, reste bridée ou redémarre toute seule.
 - **Affinité par partie** en instances multiples : même partie (en-tête, paramètre, cookie ou adresse) → même instance.
 - **Comptes en lecture seule** et **journal des actions** (qui a fait quoi, quand, depuis où).
+- **Applis Android** : configuration à distance (version minimale ou conseillée, interrupteurs de fonctionnalités, annonce) servie à côté de `apps.json`, et **rapports de plantage** reçus par Hangar, regroupés, avec alerte au premier plantage d'un groupe et en cas de régression.
 - **Page de statut publique** (`status.<domaine>`) : état et disponibilité sur 30 jours des applis choisies.
 - Liste des noms publics (sans joker), avec leur état DNS et Cloudflare. Remplacement du jeton du tunnel, avec retour à l'ancien si cloudflared ne se connecte pas.
 
