@@ -10,7 +10,7 @@ import time
 import urllib.error
 import urllib.request
 
-from . import alerts, backup, db, ha, nodes, registry, security, stats, system
+from . import alerts, backup, db, ha, nodes, registry, report, security, stats, system
 from . import platform as P
 
 _fails = {}            # slug -> échecs consécutifs
@@ -40,6 +40,9 @@ def check_apps():
         t0 = time.time()
         ok, why = _probe(a)
         health[slug] = {"ok": ok, "ms": (time.time() - t0) * 1000, "ts": time.time(), "why": why}
+        if not P.maintenance(slug):   # disponibilité (rapport, page de statut) : une maintenance voulue ne compte pas
+            db.x("INSERT INTO uptime(app, day, ok, total) VALUES(?, ?, ?, 1) ON CONFLICT(app, day) DO UPDATE SET "
+                 "ok = ok + excluded.ok, total = total + 1", (slug, time.strftime("%Y-%m-%d"), 1 if ok else 0))
         if ok:
             _fails[slug] = 0
             if slug in _down:
@@ -246,6 +249,8 @@ def _loop():
         _every("updates", 24 * 3600, check_updates)
         _every("auto_updates", 300, system.auto_tick)   # sans effet hors de la plage de nuit, ou si l'option est coupée
         _every("backup_age", 3600, check_backup_age)
+        _every("weekly_report", 600, report.maybe_send)
+        _every("purge_uptime", 86400, report.purge)
         time.sleep(max(5, 60 - (time.time() - t0)))
 
 

@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import access, alerts, backup, cloudflare, crypt, dataimport, db, dbadmin, ha, monitor, move, nodes, security, stats, system
+from . import access, alerts, backup, cloudflare, crypt, dataimport, db, dbadmin, ha, monitor, move, nodes, report, security, stats, system
 from . import domains as D
 from . import platform as P
 
@@ -1452,6 +1452,13 @@ async def system_update(request: Request, cid: str):
     except (ValueError, RuntimeError) as e:
         flash(request, str(e), "error")
     return go(f"/system#maj-{node}" if re.fullmatch(r"[a-z0-9][a-z0-9-]{0,30}", node) else "/system")
+
+
+@app.post("/system/report")
+async def system_report(request: Request):
+    sent, err = await asyncio.to_thread(report.send, None, True)
+    flash(request, "Rapport envoyé sur ntfy." if sent else f"Rapport non envoyé : {err}", "ok" if sent else "error")
+    return go("/system#alertes")
 
 
 @app.post("/system/alerts")

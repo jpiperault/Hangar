@@ -109,10 +109,12 @@
         <li>PostgreSQL ou le tunnel s'arrête ;</li>
         <li>un nœud ne répond plus, a son disque ou sa mémoire presque pleins, ou perd Docker, PostgreSQL, son pare-feu ou Caddy (entrée web directe).</li>
       </ul>
+      Chaque lundi à 9 h, un rapport résume la semaine : disponibilité et trafic de chaque appli, sauvegardes, mises à jour en attente, disque et mémoire des machines, incidents.
       Une alerte plus discrète signale aussi une nouvelle version d'appli ou de composant (console ou nœud), et rappelle une mise à jour qui attend depuis plus de 14 jours.</span>
     <div class="bar" style="justify-content:flex-start">
       <button class="btn primary sm">Enregistrer</button>
       <button class="btn sm" formaction="/system/alerts/test">Envoyer un test</button>
+      <button class="btn sm" formaction="/system/report">Envoyer le rapport de la semaine</button>
     </div>
   </form>
 

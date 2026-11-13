@@ -89,6 +89,9 @@ CREATE TABLE IF NOT EXISTS routes (               -- adresses publiques des appl
 );
 CREATE UNIQUE INDEX IF NOT EXISTS routes_host ON routes(domain, sub) WHERE kind = 'sub';
 CREATE UNIQUE INDEX IF NOT EXISTS routes_path ON routes(slug, domain) WHERE kind = 'path';
+CREATE TABLE IF NOT EXISTS uptime (               -- healthchecks de la console : réussis / faits, par appli et par jour
+    app TEXT NOT NULL, day TEXT NOT NULL, ok INTEGER NOT NULL, total INTEGER NOT NULL, PRIMARY KEY (app, day)
+);
 """
 
 _lock = threading.RLock()
