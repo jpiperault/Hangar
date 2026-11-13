@@ -92,3 +92,10 @@ def test_prompt_de_migration(client):
     assert r.status_code == 200 and "Kit de migration" in r.text and "&lt;!--" not in r.text
     assert '"<slug>"' in r.text or "&lt;slug&gt;" in r.text or "\\u003cslug\\u003e" in r.text
     client.cookies.clear()
+
+
+def test_adresses_orphelines(app_row):
+    from app import domains as D
+    from app import platform as P
+    D.set_routes("disparue", [{"kind": "sub", "domain": "exemple.fr", "sub": "disparue"}])
+    assert "disparue" in P.drop_orphan_routes() and not D.routes("disparue")

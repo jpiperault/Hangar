@@ -987,7 +987,11 @@ async def domains_page(request: Request):
     doms = D.all_domains()
     usage = {d["name"]: db.one("SELECT COUNT(DISTINCT slug) AS n FROM routes WHERE domain = ?", (d["name"],))["n"]
              for d in doms}
+    by = {}
+    for r in db.q("SELECT DISTINCT r.domain, a.slug, a.name FROM routes r JOIN apps a ON a.slug = r.slug ORDER BY a.name"):
+        by.setdefault(r["domain"], []).append(r)
     return render(request, "domains.html", title="Domaines", nav="domains", doms=doms, usage=usage, names=names,
+                  users_of=by,
                   missing=[n for n in names if n["ok"] is False], cf=cloudflare.status(), entries=_entry_choices(),
                   tunnel_id=P.tunnel_id(), tunnel=P.tunnel_status(), form=request.session.pop("dform", None))
 

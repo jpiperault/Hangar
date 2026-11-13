@@ -37,8 +37,12 @@
     {% if d.is_default %}<input type="hidden" name="default" value="on">{% endif %}
     <div class="acts" style="justify-content:space-between">
       <button class="btn primary sm">Enregistrer et recharger Caddy</button>
-      {% if not usage[d.name] and doms | length > 1 %}<button class="btn sm danger" formaction="/domains/{{ d.name }}/remove" data-confirm="Retirer {{ d.name }} ?">Retirer</button>{% endif %}
+      {% set blocked = usage[d.name] or doms | length <= 1 %}
+      <button class="btn sm danger" formaction="/domains/{{ d.name }}/remove" formnovalidate data-confirm="Retirer {{ d.name }} ? Caddy ne le servira plus, ni sur la console ni sur les nœuds." {{ 'disabled' if blocked }}>Retirer</button>
     </div>
+    {% if usage[d.name] %}<p class="hint" style="margin:0">Pour retirer ce domaine, enlève d'abord les adresses qu'il porte dans {{ 'la fiche de' if users_of.get(d.name, []) | length == 1 else 'les fiches de' }} :
+      {% for u in users_of.get(d.name, []) %}<a href="/apps/{{ u.slug }}#reglages">{{ u.name }}</a>{{ ', ' if not loop.last }}{% endfor %} (onglet Réglages, bloc des adresses).</p>
+    {% elif doms | length <= 1 %}<p class="hint" style="margin:0">C'est le seul domaine : ajoute-en un autre avant de pouvoir retirer celui-ci.</p>{% endif %}
   </form>
   {% endfor %}
 

@@ -159,11 +159,21 @@ def app_host(a):
     return "127.0.0.1" if is_local(a.get("node")) else node_wg(a["node"])
 
 
+def drop_orphan_routes():
+    """Adresses d'applis qui n'existent plus (suppressions d'avant ce correctif) : retirées."""
+    gone = [r["slug"] for r in db.q("SELECT DISTINCT slug FROM routes WHERE slug NOT IN (SELECT slug FROM apps)")]
+    for slug in gone:
+        D.set_routes(slug, [])
+        log("info", slug, "adresses d'une appli supprimée retirées")
+    return gone
+
+
 def recover():
     """Au démarrage : un déploiement interrompu par un redémarrage passe en erreur."""
     for a in db.q("SELECT slug FROM apps WHERE state = 'deploying'"):
         db.update_app(a["slug"], state="error")
         log("warn", a["slug"], "déploiement interrompu par un redémarrage de la console")
+    drop_orphan_routes()
 
 
 # ---------------------------------------------------------------- variables d'environnement
@@ -1512,6 +1522,7 @@ def delete(slug):
         if os.path.isdir(d):
             shutil.move(d, f"{keep}/files")
         db.x("DELETE FROM apps WHERE slug = ?", (slug,))
+        D.set_routes(slug, [])   # ses adresses partent avec elle (sinon elles bloquent le retrait d'un domaine)
         log("warn", slug, f"supprimée, fichiers et dump conservés dans {keep}")
     apply_routing()
 
