@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import access, affinity, alerts, kinds, applogs, backup, cache, cloudflare, crashes, limits, remoteconfig, smoke, crypt, dataimport, db, dbadmin, ha, jobs, monitor, move, nodes, preprod, report, security, services, stats, statuspage, system
+from . import access, affinity, alerts, gameports, kinds, applogs, backup, cache, cloudflare, crashes, limits, remoteconfig, smoke, crypt, dataimport, db, dbadmin, ha, jobs, monitor, move, nodes, preprod, report, security, services, stats, statuspage, system
 from . import domains as D
 from . import platform as P
 
@@ -244,9 +244,20 @@ def validate(f, cur=None):
         elif db.app(d["slug"]):
             e["slug"] = "Cet identifiant est déjà utilisé."
 
-    d["routes"], err = D.parse_routes(f, d["slug"] or "-")
-    if err:
-        e["routes"] = err
+    if kinds.http(d["kind"]):
+        d["routes"], err = D.parse_routes(f, d["slug"] or "-")
+        if err:
+            e["routes"] = err
+    else:   # sans page web : pas d'adresse publique
+        d["routes"] = []
+    d["_ports"] = None
+    if kinds.get(d["kind"]).get("ports"):
+        try:
+            d["_ports"] = gameports.parse(f.get("gports") or "", d["slug"], cur["node"] if cur else f.get("node"))
+            if not d["_ports"]:
+                e["gports"] = "Indique au moins un port public, par exemple « tcp 25565 »."
+        except ValueError as x:
+            e["gports"] = str(x)
 
     for key, lo, hi, default, msg in (("port", 1, 65535, 8080, "Port entre 1 et 65535."),
                                       ("mem_mb", 32, 4096, 256, "Entre 32 et 4096 Mo.")):
@@ -424,6 +435,7 @@ async def home(request: Request):
     rows = await asyncio.to_thread(P.apps_with_status)
     return render(request, "apps.html", title="Applications", nav="apps", apps=rows, req24=stats.requests_24h(),
                   kind_list=kinds.choices(), kind_names={k: v["short"] for k, v in kinds.KINDS.items()},
+                  ports={a["slug"]: gameports.text(a["slug"]) for a in rows},
                   refresh=any(r["status"] == "deploying" for r in rows),
                   ram_total=sum(r["ram"] for r in rows))
 
@@ -460,9 +472,11 @@ async def create_app(request: Request):
     if errors:
         return render(request, "app_form.html", 400, title="Nouvelle application", nav="apps", a=d, new=True,
                       errors=errors, registries=P.registry_logins(), reg_user=f.get("reg_user") or "",
-                      node_choices=node_choices(), best=None, domains=D.all_domains(), kinds=kinds.choices())
+                      node_choices=node_choices(), best=None, domains=D.all_domains(), kinds=kinds.choices(),
+                      gports=f.get("gports") or "")
     slug = d.pop("slug")
     rts = d.pop("routes")
+    gameports.save(slug, d.pop("_ports") or [])
     d.update(host_port=P.next_host_port(), state="deploying", desired="running", created_at=time.time(),
              db_password=secrets.token_hex(16) if d["db"] else None)
     db.insert_app(slug, d)
@@ -489,7 +503,8 @@ async def _app_ctx(request, slug):
     hst = await asyncio.to_thread(ha.status, slug)
     busy = (hst and (hst["busy"] or hst["h"]["state"] == "setup"))
     return dict(title=a["name"], nav="apps", a=a, new=False, errors={}, events=events, names=names, ha=hst,
-                kinds=kinds.choices(), kind=kinds.get(a["kind"]),
+                kinds=kinds.choices(), kind=kinds.get(a["kind"]), gports=gameports.text(slug),
+                public_addr=_public_addr(a),
                 console_only=nodes.console_role()["manage_only"],
                 ha_nodes=[c for c in node_choices("standby") if c["id"] != a["node"]],
                 ha_inst=[c for c in others if c["id"] != a["node"]],
@@ -605,13 +620,16 @@ async def save_app(request: Request, slug: str):
     if errors:
         ctx = await _app_ctx(request, slug)
         ctx["a"].update(d)          # saisie conservée, adresses comprises
-        ctx.update(errors=errors, refresh=False, reg_user=f.get("reg_user") or "")
+        ctx.update(errors=errors, refresh=False, reg_user=f.get("reg_user") or "", gports=f.get("gports") or "")
         return render(request, "app_form.html", 400, **ctx)
     d.pop("slug")
     rts = d.pop("routes")
     D.set_routes(slug, rts)
-    runtime = ("port", "health_path", "mem_mb", "source", "image", "env", "db", "data_user")
-    changed = [k for k in runtime if str(d[k]) != str(cur[k])]
+    new_ports = d.pop("_ports") or []
+    ports_changed = new_ports != gameports.of(slug)
+    gameports.save(slug, new_ports)
+    runtime = ("port", "health_path", "mem_mb", "source", "image", "env", "db", "data_user", "kind")
+    changed = [k for k in runtime if str(d[k]) != str(cur[k])] + (["ports publics"] if ports_changed else [])
     if logged and cur["state"] == "error":
         changed.append("identifiants du registre")  # le téléchargement avait échoué : on retente
     if d["db"] and not cur["db_password"]:
@@ -832,6 +850,12 @@ def _rc_url(a, key):
         if key in m:
             return f"https://{D.get(name)['hub']}.{name}/.well-known/apps/{key}.json"
     return None
+
+
+def _public_addr(a):
+    """Adresse publique de la machine d'une appli (serveur de jeu : là où les joueurs se connectent)."""
+    n = P.node_row(a["node"])
+    return (n["address"] if n and not P.is_local(a["node"]) else None) or access.current().get("ip") or "?"
 
 
 def _client_names(a):

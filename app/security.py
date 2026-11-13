@@ -688,8 +688,11 @@ def checks(n, obs=None):
     if obs.get("reboot"):
         add("reboot", "warn", "Redémarrage", "requis pour finir une mise à jour (noyau…)" +
             (f" : prévu à {p['reboot']}" if p["reboot"] else ""))
-    if obs.get("docker_public"):
-        add("docker", "error", "Docker", "ports publiés sur toutes les adresses, hors pare-feu : " + ", ".join(obs["docker_public"]))
+    from . import gameports
+    want = {f"{c}:{p}" for c, p in gameports.expected(n["id"])}
+    stray = [x for x in obs.get("docker_public") or [] if x not in want]
+    if stray:
+        add("docker", "error", "Docker", "ports publiés sur toutes les adresses, hors pare-feu : " + ", ".join(stray))
     allowed = {p["ssh_port"]} if p["ssh_mode"] != "closed" else set()
     allowed |= {80, 443} if web_needed(n["id"]) else set()
     for x in p["extra"]:

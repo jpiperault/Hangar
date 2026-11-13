@@ -36,7 +36,7 @@
     </div>
   </div>
 
-  <div class="group">
+  <div class="group" data-kinds="web api mobile">
     <span class="lbl">Adresses publiques</span>
     <div class="field {{ 'bad' if errors.slug }}"><label for="slug">Identifiant</label>
       <input id="slug" name="slug" value="{{ a.slug }}" spellcheck="false" {{ 'readonly' if not new }} placeholder="courses">
@@ -91,10 +91,13 @@
       {{ err('node') }}<span class="hint">La machine qui fait tourner l'appli et sa base. Conseillé : celle qui a le plus de mémoire libre (total moins la RAM réservée par les applis).</span></div>
     {% endif %}
     <div class="row3">
-      <div class="field {{ 'bad' if errors.port }}"><label for="port">Port interne</label><input id="port" name="port" type="number" min="1" max="65535" value="{{ a.port }}">{{ err('port') }}</div>
-      <div class="field {{ 'bad' if errors.health_path }}"><label for="health_path">Healthcheck</label><input id="health_path" name="health_path" value="{{ a.health_path }}" spellcheck="false">{{ err('health_path') }}</div>
+      <div class="field {{ 'bad' if errors.port }}" data-kinds="web api mobile"><label for="port">Port interne</label><input id="port" name="port" type="number" min="1" max="65535" value="{{ a.port }}">{{ err('port') }}</div>
+      <div class="field {{ 'bad' if errors.health_path }}" data-kinds="web api mobile"><label for="health_path">Adresse de santé</label><input id="health_path" name="health_path" value="{{ a.health_path }}" spellcheck="false">{{ err('health_path') }}</div>
       <div class="field {{ 'bad' if errors.mem_mb }}"><label for="mem_mb">RAM max (Mo)</label><input id="mem_mb" name="mem_mb" type="number" min="32" max="4096" value="{{ a.mem_mb }}">{{ err('mem_mb') }}</div>
     </div>
+    <div class="field {{ 'bad' if errors.gports }}" data-kinds="game"><label for="gports">Ports publics</label>
+      <input id="gports" name="gports" value="{{ gports or '' }}" spellcheck="false" placeholder="tcp 25565, udp 19132, tcp 8081:8080">
+      {{ err('gports') }}<span class="hint">Ouverts sur toutes les adresses de la machine (son adresse publique). « tcp 8081:8080 » : port public 8081 vers le port 8080 du conteneur. Le tunnel Cloudflare ne transporte que le web : les joueurs se connectent à l'adresse de la machine, ou à un nom DNS qui pointe vers elle.</span></div>
     <div class="field {{ 'bad' if errors.env }}"><label for="env">Variables d'environnement</label>
       <textarea id="env" name="env" spellcheck="false" placeholder="JWT_SECRET=...&#10;PUSH_ENABLED=true">{{ a.env if new else mask_env(a.env) }}</textarea>
       {{ err('env') }}<span class="hint">Une par ligne, CLE=valeur. Les valeurs des clés finissant par SECRET, KEY, TOKEN ou PASSWORD sont masquées : laisse ••••••  pour ne pas les changer.</span></div>
@@ -104,7 +107,7 @@
       {{ err('data_user') }}<span class="hint">Les fichiers persistants vont dans <code>/data</code> du conteneur (dossier <code>/srv/apps/{{ a.slug or '&lt;id&gt;' }}/data</code>). À chaque déploiement, ce dossier est attribué à l'utilisateur défini par <code>USER</code> dans l'image. Indique un UID (<code>1000</code> ou <code>1000:1000</code>) seulement si la détection échoue.</span></div>
   </div>
 
-  <details class="group clientbox" id="clientbox" {{ 'open' if a.pkg or a.ios_bundle or a.web_client or errors.pkg or errors.ios_bundle or (new and a.kind == 'mobile') }}>
+  <details class="group clientbox" id="clientbox" data-kinds="web api mobile" {{ 'open' if a.pkg or a.ios_bundle or a.web_client or errors.pkg or errors.ios_bundle or (new and a.kind == 'mobile') }}>
     <summary><span class="lbl" style="display:inline">Clients</span> <span class="hint">· facultatif{% if a.pkg or a.ios_bundle or a.web_client %} · {{ [a.pkg and 'Android', a.ios_bundle and 'iOS', a.web_client and 'web'] | select | join(', ') }}{% else %} · aucun{% endif %}</span></summary>
     <div class="row2" style="margin-top:10px">
       <div class="field {{ 'bad' if errors.pkg }}"><label for="pkg">Package Android</label><input id="pkg" name="pkg" value="{{ a.pkg }}" spellcheck="false" placeholder="fr.exemple.monappli">{{ err('pkg') }}</div>
@@ -147,6 +150,8 @@
     {% for n in names %}
     <div class="cert"><span class="mono">{{ n.name }}</span>{{ dnspill(n) }}</div>
     {% endfor %}
+    {% if kind.ports %}{% for p in gports.split(', ') if gports %}<div class="cert"><span class="mono">{{ public_addr }}:{{ p.split(' ')[1].split(':')[0] }}</span><span class="pill s-stopped">{{ p.split(' ')[0] | upper }} public{{ ' → conteneur ' ~ p.split(':')[1] if ':' in p }}</span></div>{% endfor %}
+    {% elif not kind.http %}<p class="hint" style="margin:0">Pas d'adresse publique : ce service n'est pas publié sur Internet. Sa santé, c'est son conteneur qui tourne.</p>{% endif %}
     {% for n in names if n.cf and n.cf.ok is false %}<span class="hint lv-error">{{ n.name }} : {{ n.cf.msg }}</span>{% endfor %}
     {% if names | selectattr('ok', 'false') | list %}
     <span class="hint">{% if cf and cf.token %}Hangar déclare ces noms chez Cloudflare tout seul ; la résolution DNS publique peut prendre quelques minutes.{% else %}Noms à déclarer à la main : voir <a href="/domains">Domaines</a>, ou donne un jeton d'API Cloudflare pour que Hangar le fasse.{% endif %}</span>
@@ -197,7 +202,7 @@
       <form class="inline" method="post" action="/apps/{{ a.slug }}/preprod?op=refresh" data-confirm="Remplacer la base et data/ d'ici par ceux de la production ? L'état actuel est mis de côté."><button class="btn sm" {{ 'disabled' if a.status == 'deploying' }}>Recopier les données de la production</button></form>
     </div>
   </section>
-  {% elif not new %}
+  {% elif not new and kind.http %}
   <section class="panel" id="preprod">
     <h2>Préproduction</h2>
     {% if pre %}
@@ -278,7 +283,7 @@
     </div>
   </div>
 
-  <div class="group">
+  <div class="group" data-kinds="web api mobile">
     <span class="lbl">Adresses publiques</span>
     <div class="field {{ 'bad' if errors.slug }}"><label for="slug">Identifiant</label>
       <input id="slug" name="slug" value="{{ a.slug }}" spellcheck="false" {{ 'readonly' if not new }} placeholder="courses">
@@ -333,10 +338,13 @@
       {{ err('node') }}<span class="hint">La machine qui fait tourner l'appli et sa base. Conseillé : celle qui a le plus de mémoire libre (total moins la RAM réservée par les applis).</span></div>
     {% endif %}
     <div class="row3">
-      <div class="field {{ 'bad' if errors.port }}"><label for="port">Port interne</label><input id="port" name="port" type="number" min="1" max="65535" value="{{ a.port }}">{{ err('port') }}</div>
-      <div class="field {{ 'bad' if errors.health_path }}"><label for="health_path">Healthcheck</label><input id="health_path" name="health_path" value="{{ a.health_path }}" spellcheck="false">{{ err('health_path') }}</div>
+      <div class="field {{ 'bad' if errors.port }}" data-kinds="web api mobile"><label for="port">Port interne</label><input id="port" name="port" type="number" min="1" max="65535" value="{{ a.port }}">{{ err('port') }}</div>
+      <div class="field {{ 'bad' if errors.health_path }}" data-kinds="web api mobile"><label for="health_path">Adresse de santé</label><input id="health_path" name="health_path" value="{{ a.health_path }}" spellcheck="false">{{ err('health_path') }}</div>
       <div class="field {{ 'bad' if errors.mem_mb }}"><label for="mem_mb">RAM max (Mo)</label><input id="mem_mb" name="mem_mb" type="number" min="32" max="4096" value="{{ a.mem_mb }}">{{ err('mem_mb') }}</div>
     </div>
+    <div class="field {{ 'bad' if errors.gports }}" data-kinds="game"><label for="gports">Ports publics</label>
+      <input id="gports" name="gports" value="{{ gports or '' }}" spellcheck="false" placeholder="tcp 25565, udp 19132, tcp 8081:8080">
+      {{ err('gports') }}<span class="hint">Ouverts sur toutes les adresses de la machine (son adresse publique). « tcp 8081:8080 » : port public 8081 vers le port 8080 du conteneur. Le tunnel Cloudflare ne transporte que le web : les joueurs se connectent à l'adresse de la machine, ou à un nom DNS qui pointe vers elle.</span></div>
     <div class="field {{ 'bad' if errors.env }}"><label for="env">Variables d'environnement</label>
       <textarea id="env" name="env" spellcheck="false" placeholder="JWT_SECRET=...&#10;PUSH_ENABLED=true">{{ a.env if new else mask_env(a.env) }}</textarea>
       {{ err('env') }}<span class="hint">Une par ligne, CLE=valeur. Les valeurs des clés finissant par SECRET, KEY, TOKEN ou PASSWORD sont masquées : laisse ••••••  pour ne pas les changer.</span></div>
@@ -346,7 +354,7 @@
       {{ err('data_user') }}<span class="hint">Les fichiers persistants vont dans <code>/data</code> du conteneur (dossier <code>/srv/apps/{{ a.slug or '&lt;id&gt;' }}/data</code>). À chaque déploiement, ce dossier est attribué à l'utilisateur défini par <code>USER</code> dans l'image. Indique un UID (<code>1000</code> ou <code>1000:1000</code>) seulement si la détection échoue.</span></div>
   </div>
 
-  <details class="group clientbox" id="clientbox" {{ 'open' if a.pkg or a.ios_bundle or a.web_client or errors.pkg or errors.ios_bundle or (new and a.kind == 'mobile') }}>
+  <details class="group clientbox" id="clientbox" data-kinds="web api mobile" {{ 'open' if a.pkg or a.ios_bundle or a.web_client or errors.pkg or errors.ios_bundle or (new and a.kind == 'mobile') }}>
     <summary><span class="lbl" style="display:inline">Clients</span> <span class="hint">· facultatif{% if a.pkg or a.ios_bundle or a.web_client %} · {{ [a.pkg and 'Android', a.ios_bundle and 'iOS', a.web_client and 'web'] | select | join(', ') }}{% else %} · aucun{% endif %}</span></summary>
     <div class="row2" style="margin-top:10px">
       <div class="field {{ 'bad' if errors.pkg }}"><label for="pkg">Package Android</label><input id="pkg" name="pkg" value="{{ a.pkg }}" spellcheck="false" placeholder="fr.exemple.monappli">{{ err('pkg') }}</div>
@@ -368,7 +376,7 @@
     <p class="hint" style="margin:0">Sans limite, une appli qui s'emballe peut prendre tout le processeur du nœud et ralentir les autres. Nombre de cœurs (0,5 = la moitié d'un cœur) ; vide = sans limite. Alerte si elle reste à sa limite 10 minutes, si sa mémoire dépasse 90 % pendant 5 minutes, ou si elle redémarre toute seule (tuée faute de mémoire, plantée).</p>
     <div class="inlinefield"><input name="cpus" value="{{ cpus if cpus else '' }}" inputmode="decimal" placeholder="sans limite" aria-label="Processeur max en cœurs" style="max-width:9em"><span class="hint">cœur(s)</span><button class="btn sm primary" {{ 'disabled' if a.status == 'deploying' }}>Enregistrer</button></div>
   </form>
-  <form class="panel" id="verifs" method="post" action="/apps/{{ a.slug }}/smoke" style="display:flex;flex-direction:column;gap:10px">
+  {% if kind.http %}<form class="panel" id="verifs" method="post" action="/apps/{{ a.slug }}/smoke" style="display:flex;flex-direction:column;gap:10px">
     <h2 style="margin:0">Vérifications après déploiement</h2>
     <p class="hint" style="margin:0">En plus de <code>{{ a.health_path }}</code>, ces adresses doivent répondre comme prévu pour qu'une nouvelle version soit gardée ; sinon la précédente revient. Une par ligne : <code>/chemin [code] [texte attendu]</code>, code 200 par défaut, <code>{version}</code> remplacé par la version déployée.</p>
     <textarea name="checks" spellcheck="false" style="min-height:70px" placeholder="/&#10;/api/v1/version 200 {version}&#10;/admin 302">{{ smoke_text }}</textarea>
@@ -377,6 +385,7 @@
     <div class="acts" style="justify-content:flex-start;gap:8px"><button class="btn sm primary">Enregistrer</button>
       <button class="btn sm" formaction="/apps/{{ a.slug }}/smoke?test=1" {{ 'disabled' if a.status != 'running' }}>Enregistrer et tester sur la version en ligne</button></div>
   </form>
+  {% endif %}
   <form class="panel danger" id="supprimer" method="post" action="/apps/{{ a.slug }}/delete">
     <h2>Supprimer l'application</h2>
     <p class="hint">Le conteneur et les adresses sont supprimés. Le dossier data/ et un dump de la base sont gardés dans /srv/backups/deleted.</p>
@@ -761,6 +770,17 @@ try { /* … */ } catch (e) { hangar.report(e); }</pre>{% endif %}
 })();
 </script>
 {% endif %}
+<script nonce="{{ csp_nonce }}">
+(function () {   // champs affichés selon le type d'appli (création : cartes ; fiche : liste)
+  document.querySelectorAll('form').forEach(function (f) {
+    var sel = f.querySelector('select[name=kind]'), radios = f.querySelectorAll('input[name=kind]');
+    if (!sel && !radios.length) return;
+    function kind() { if (sel) return sel.value; var r = f.querySelector('input[name=kind]:checked'); return r ? r.value : 'web'; }
+    function sync() { var k = kind(); f.querySelectorAll('[data-kinds]').forEach(function (el) { el.hidden = el.dataset.kinds.split(' ').indexOf(k) < 0; }); }
+    if (sel) sel.addEventListener('change', sync); radios.forEach(function (r) { r.addEventListener('change', sync); }); sync();
+  });
+})();
+</script>
 {% if new %}
 <script nonce="{{ csp_nonce }}">
 (function () {   // type d'appli : valeurs par défaut adaptées tant qu'on n'y a pas touché, bloc client mobile ouvert ou non

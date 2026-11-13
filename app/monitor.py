@@ -21,6 +21,12 @@ _started = False
 
 
 def _probe(a):
+    from . import kinds
+    if not kinds.http(a["kind"]):   # sans page web : le conteneur tourne-t-il ?
+        st = P._container_state(f"app-{a['slug']}-app-1", a["node"])
+        if not st:
+            return False, "conteneur absent"
+        return (st["status"] == "running"), ("" if st["status"] == "running" else f"conteneur {st['status']}")
     url = f"http://{P.app_host(a)}:{a['host_port']}{a['health_path']}"
     try:
         with urllib.request.urlopen(url, timeout=5):

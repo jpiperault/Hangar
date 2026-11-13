@@ -968,6 +968,9 @@ def registry_logout(registry):
 
 
 def _ports(a):
+    from . import gameports, kinds
+    if not kinds.http(a.get("kind")):   # sans page web : aucun port, sauf les ports publics d'un serveur de jeu
+        return gameports.compose_ports(a["slug"]) if kinds.get(a.get("kind")).get("ports") else []
     ports = [f"127.0.0.1:{a['host_port']}:{a['port']}"]
     wg = node_wg(a.get("node"))
     if wg and os.path.exists("/etc/wireguard/wg-hangar.conf"):
@@ -1290,7 +1293,24 @@ def container_report(name, lines=6, node=None):
     return "\n".join(out)
 
 
+def _wait_running(a, settle=30, timeout=90):
+    """Appli sans page web : saine si son conteneur tourne encore après `settle` secondes, sans redémarrer."""
+    node, name = a.get("node"), f"app-{a['slug']}-app-1"
+    st0 = _container_state(name, node)
+    base = st0["restarts"] if st0 else 0
+    for _ in range(max(1, min(settle, timeout) // 3)):
+        time.sleep(3)
+        st = _container_state(name, node)
+        if not st or st["status"] in ("exited", "dead") or st["restarts"] > base:
+            why = "absent" if not st else ("s'est arrêté" if st["status"] in ("exited", "dead") else "a redémarré")
+            return False, f"le conteneur {why} (code {st['code'] if st else '?'}).\n{container_report(name, node=node)}"
+    return True, f"conteneur en marche depuis {settle} s"
+
+
 def wait_health(a, timeout=90):
+    from . import kinds
+    if not kinds.http(a.get("kind")):
+        return _wait_running(a, timeout=timeout)
     node = a.get("node")
     url = f"http://{app_host(a)}:{a['host_port']}{a['health_path']}"
     name = f"app-{a['slug']}-app-1"
@@ -1511,8 +1531,9 @@ def delete(slug):
         os.makedirs(keep, exist_ok=True)
         os.chmod(keep, 0o700)
         d, node = app_dir(slug), a["node"]
-        from . import ha, limits, preprod, services
+        from . import gameports, ha, limits, preprod, services
         services.drop(slug)
+        gameports.save(slug, [])
         limits.drop(slug)
         preprod.forget(slug)
         if ha.get(slug):   # haute dispo : base dédiée rapatriée dans le PostgreSQL partagé, secours et instances retirés

@@ -78,6 +78,9 @@ def check(slug):
         raise ValueError("c'est déjà une préproduction")
     if of(slug):
         raise ValueError("cette appli a déjà une préproduction")
+    from . import kinds
+    if not kinds.http(a["kind"]):
+        raise ValueError("la préproduction n'existe que pour les applis web (pas d'adresse à dupliquer)")
     pre = target(slug)
     if db.app(pre):
         raise ValueError(f"une appli « {pre} » existe déjà")
