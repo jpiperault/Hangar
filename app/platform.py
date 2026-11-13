@@ -1351,6 +1351,14 @@ def deploy(slug, version, kind, previous=None):
             if a["db"]:
                 ensure_db(a)
             ok, detail = _up(a, version)
+            if ok and a["desired"] != "stopped":   # vérifications après déploiement (en plus du healthcheck)
+                from . import smoke
+                u = urllib.parse.urlsplit(D.primary_url(slug) or "")
+                sok, res = smoke.run(a, version, host=u.hostname)
+                if res:
+                    detail = f"{detail} ; {smoke.summary(res)}"
+                    db.kv_set(f"smoke_last:{slug}", {"ts": time.time(), "version": version, "results": res})
+                ok = sok
         except Exception as e:
             ok, detail = False, str(e)
         if ok:

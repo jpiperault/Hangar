@@ -325,6 +325,15 @@
 </form>
 
 <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+  <form class="panel" id="verifs" method="post" action="/apps/{{ a.slug }}/smoke" style="display:flex;flex-direction:column;gap:10px">
+    <h2 style="margin:0">Vérifications après déploiement</h2>
+    <p class="hint" style="margin:0">En plus de <code>{{ a.health_path }}</code>, ces adresses doivent répondre comme prévu pour qu'une nouvelle version soit gardée ; sinon la précédente revient. Une par ligne : <code>/chemin [code] [texte attendu]</code>, code 200 par défaut, <code>{version}</code> remplacé par la version déployée.</p>
+    <textarea name="checks" spellcheck="false" style="min-height:70px" placeholder="/&#10;/api/v1/version 200 {version}&#10;/admin 302">{{ smoke_text }}</textarea>
+    {% if smoke_last %}<div class="hint">Dernier passage ({{ smoke_last.version }}, {{ smoke_last.ts | ago }}{{ ', à la main' if smoke_last.manual }}) :
+      {% for r in smoke_last.results %}<div><span class="{{ 'lv-ok' if r.ok else 'lv-error' }}">{{ '✓' if r.ok else '✕' }}</span> <code>{{ r.path }}</code>{% if not r.ok %} · {{ r.why }}{% endif %}</div>{% endfor %}</div>{% endif %}
+    <div class="acts" style="justify-content:flex-start;gap:8px"><button class="btn sm primary">Enregistrer</button>
+      <button class="btn sm" formaction="/apps/{{ a.slug }}/smoke?test=1" {{ 'disabled' if a.status != 'running' }}>Enregistrer et tester sur la version en ligne</button></div>
+  </form>
   <form class="panel danger" id="supprimer" method="post" action="/apps/{{ a.slug }}/delete">
     <h2>Supprimer l'application</h2>
     <p class="hint">Le conteneur et les adresses sont supprimés. Le dossier data/ et un dump de la base sont gardés dans /srv/backups/deleted.</p>

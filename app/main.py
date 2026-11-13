@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import access, alerts, applogs, backup, cache, cloudflare, crypt, dataimport, db, dbadmin, ha, jobs, monitor, move, nodes, preprod, report, security, services, stats, statuspage, system
+from . import access, alerts, applogs, backup, cache, cloudflare, smoke, crypt, dataimport, db, dbadmin, ha, jobs, monitor, move, nodes, preprod, report, security, services, stats, statuspage, system
 from . import domains as D
 from . import platform as P
 
@@ -480,7 +480,7 @@ async def _app_ctx(request, slug):
                 ranges=list(stats.RANGES), others=others, dsize=dsize, domains=D.all_domains(), cf=cloudflare.status(),
                 safety=backup.safety_copies(slug), maint=P.maintenance(slug),
                 jobs=[{**j, "desc": jobs.describe(j), "busy": jobs.is_running(slug, j["id"])} for j in jobs.of(slug)],
-                job_days=jobs.DAYS, redis=services.redis(slug), pre=db.app(preprod.of(slug) or ""),
+                job_days=jobs.DAYS, smoke_text=smoke.text_of(slug), smoke_last=db.kv_get(f"smoke_last:{slug}"), redis=services.redis(slug), pre=db.app(preprod.of(slug) or ""),
                 prod=db.app(preprod.prod_of(slug) or ""),
                 redis_st=(cache.get(f"redis:{slug}", 20, _redis_state, a, wait=False) or {"state": "…"})
                 if services.redis(slug) else None)
@@ -801,6 +801,30 @@ async def app_preprod(request: Request, slug: str):
     except ValueError as e:
         flash(request, f"Préproduction : {e}", "error")
     return go(f"/apps/{slug}#preprod")
+
+
+@app.post("/apps/{slug}/smoke")
+async def app_smoke(request: Request, slug: str):
+    a = db.app(slug)
+    if not a:
+        return go("/")
+    f = await request.form()
+    try:
+        smoke.save(slug, f.get("checks") or "")
+    except ValueError as e:
+        flash(request, f"Vérifications refusées : {e}", "error")
+        return go(f"/apps/{slug}#verifs")
+    if request.query_params.get("test") == "1" and smoke.text_of(slug):
+        u = urllib.parse.urlsplit(D.primary_url(slug) or "")
+        ok, res = await asyncio.to_thread(smoke.run, a, a["version"], u.hostname, 1)
+        db.kv_set(f"smoke_last:{slug}", {"ts": time.time(), "version": a["version"], "results": res, "manual": True})
+        flash(request, ("Toutes les vérifications passent : " if ok else "Des vérifications échouent : ") + smoke.summary(res),
+              "ok" if ok else "error")
+    else:
+        P.log("info", slug, "vérifications après déploiement : " + (f"{len(smoke.parse(smoke.text_of(slug)))} adresse(s)"
+                                                                   if smoke.text_of(slug) else "aucune"))
+        flash(request, "Vérifications enregistrées : elles s'appliquent au prochain déploiement.")
+    return go(f"/apps/{slug}#verifs")
 
 
 @app.post("/apps/{slug}/{action}")
