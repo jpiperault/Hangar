@@ -48,6 +48,10 @@ FastAPI + Jinja, sans build front. Elle écoute en HTTPS (certificat auto-signé
 - **Redis (Valkey)** à la demande pour une appli : sur son réseau cloisonné, persistant dans `data/`, `REDIS_URL` injectée.
 - **Logs** consultables (période, recherche, erreurs seulement) et **alertes sur motif** (`Exception`, `OutOfMemory`…).
 - **Rapport hebdomadaire** sur ntfy le lundi : disponibilité, trafic, sauvegardes, mises à jour, machines, incidents.
+- **Vérifications après déploiement** : adresses qui doivent répondre comme prévu (code, texte, `{version}`) pour garder une nouvelle version.
+- **Processeur max** par appli, et alertes quand une appli frôle sa mémoire, reste bridée ou redémarre toute seule.
+- **Affinité par partie** en instances multiples : même partie (en-tête, paramètre, cookie ou adresse) → même instance.
+- **Comptes en lecture seule** et **journal des actions** (qui a fait quoi, quand, depuis où).
 - **Page de statut publique** (`status.<domaine>`) : état et disponibilité sur 30 jours des applis choisies.
 - Liste des noms publics (sans joker), avec leur état DNS et Cloudflare. Remplacement du jeton du tunnel, avec retour à l'ancien si cloudflared ne se connecte pas.
 

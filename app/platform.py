@@ -284,7 +284,8 @@ def _upstream(a, prefix, ind, here=LOCAL):
     lines = [f"{ind}reverse_proxy {' '.join(hosts)} {{",
              f"{ind}\theader_up X-Real-IP {{client_ip}}"]
     if len(hosts) > 1:   # instances multiples : répartition, et une instance qui ne répond plus est écartée
-        lines += [f"{ind}\tlb_policy round_robin", f"{ind}\tlb_try_duration 5s",
+        from . import affinity
+        lines += [f"{ind}\t{affinity.caddy_policy(a['slug'])}", f"{ind}\tlb_try_duration 5s",
                   f"{ind}\thealth_uri {a['health_path'] or '/'}", f"{ind}\thealth_interval 10s",
                   f"{ind}\thealth_timeout 3s", f"{ind}\thealth_status 2xx", f"{ind}\tfail_duration 30s"]
     if prefix:

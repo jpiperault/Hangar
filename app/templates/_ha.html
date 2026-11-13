@@ -30,6 +30,29 @@
       <form method="post" action="/apps/{{ a.slug }}/ha/resync" data-confirm="Refaire le secours de zéro (copie complète de la base et de data/) ?"><button class="btn sm">Resynchroniser</button></form>
       <form method="post" action="/apps/{{ a.slug }}/ha/disable" data-confirm="Retirer la haute dispo de {{ a.name }} ? La base revient dans le PostgreSQL partagé (courte coupure)."><button class="btn sm danger">Retirer</button></form>
     </div>
+    {% if h.mode == 'replicas' %}
+    <form id="affinite" method="post" action="/apps/{{ a.slug }}/ha/affinity" style="display:flex;flex-direction:column;gap:8px;margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
+      <span class="flabel">Affinité par partie</span>
+      <span class="hint">Pour un jeu : toutes les requêtes d'une même partie (ou d'un même joueur) vont sur la même instance. Sinon, chaque requête part sur l'instance suivante.</span>
+      <div class="row2">
+        <div class="field"><label for="affm">Choisir l'instance d'après</label><select id="affm" name="mode">{% for k, v in aff_modes.items() %}<option value="{{ k }}" {{ 'selected' if k == aff.mode }}>{{ v }}</option>{% endfor %}</select></div>
+        <div class="field" id="affn"><label for="affname">Nom</label><input id="affname" name="name" value="{{ aff.name }}" spellcheck="false" placeholder="X-Match-Id"></div>
+      </div>
+      <span class="hint" id="affh"></span>
+      <div><button class="btn sm">Enregistrer</button></div>
+    </form>
+    <script nonce="{{ csp_nonce }}">
+    (function () { var m = document.getElementById('affm'), n = document.getElementById('affname'), d = {{ aff_default | tojson }};
+      var help = {'': "", header: "L'appli cliente envoie l'identifiant de la partie dans cet en-tête (ex. X-Match-Id: 42). Sans lui, n'importe quelle instance.",
+        query: "L'identifiant de la partie est dans l'adresse : ?match=42 (pratique pour un WebSocket).",
+        cookie: "Caddy pose ce cookie à la première visite : un même joueur reste sur la même instance.",
+        ip: "Un même joueur (même adresse IP) reste sur la même instance. Attention : plusieurs joueurs derrière une même box vont ensemble."};
+      function sync() { var k = m.value; document.getElementById('affn').hidden = !(k in d);
+        if (k in d && (!n.value || Object.values(d).indexOf(n.value) >= 0)) n.value = d[k]; n.placeholder = d[k] || '';
+        document.getElementById('affh').textContent = help[k]; }
+      m.addEventListener('change', sync); sync(); })();
+    </script>
+    {% endif %}
     <details style="margin-top:10px"><summary class="hint">Réglages de la bascule</summary>
       <form method="post" action="/apps/{{ a.slug }}/ha/options" style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
         <label class="check"><input type="checkbox" name="auto" {{ 'checked' if h.auto }}><span>Bascule automatique si le nœud principal tombe</span></label>

@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import access, alerts, applogs, backup, cache, cloudflare, limits, smoke, crypt, dataimport, db, dbadmin, ha, jobs, monitor, move, nodes, preprod, report, security, services, stats, statuspage, system
+from . import access, affinity, alerts, applogs, backup, cache, cloudflare, limits, smoke, crypt, dataimport, db, dbadmin, ha, jobs, monitor, move, nodes, preprod, report, security, services, stats, statuspage, system
 from . import domains as D
 from . import platform as P
 
@@ -479,7 +479,8 @@ async def _app_ctx(request, slug):
                 ranges=list(stats.RANGES), others=others, dsize=dsize, domains=D.all_domains(), cf=cloudflare.status(),
                 safety=backup.safety_copies(slug), maint=P.maintenance(slug),
                 jobs=[{**j, "desc": jobs.describe(j), "busy": jobs.is_running(slug, j["id"])} for j in jobs.of(slug)],
-                job_days=jobs.DAYS, cpus=limits.cpus(slug), smoke_text=smoke.text_of(slug), smoke_last=db.kv_get(f"smoke_last:{slug}"), redis=services.redis(slug), pre=db.app(preprod.of(slug) or ""),
+                job_days=jobs.DAYS, cpus=limits.cpus(slug), aff=affinity.of(slug), aff_modes=affinity.MODES,
+                aff_default=affinity.DEFAULT_NAME, smoke_text=smoke.text_of(slug), smoke_last=db.kv_get(f"smoke_last:{slug}"), redis=services.redis(slug), pre=db.app(preprod.of(slug) or ""),
                 prod=db.app(preprod.prod_of(slug) or ""),
                 redis_st=(cache.get(f"redis:{slug}", 20, _redis_state, a, wait=False) or {"state": "…"})
                 if services.redis(slug) else None)
@@ -800,6 +801,22 @@ async def app_preprod(request: Request, slug: str):
     except ValueError as e:
         flash(request, f"Préproduction : {e}", "error")
     return go(f"/apps/{slug}#preprod")
+
+
+@app.post("/apps/{slug}/ha/affinity")
+async def ha_affinity(request: Request, slug: str):
+    get_app_or_404(slug)
+    f = await request.form()
+    try:
+        affinity.save(slug, f.get("mode") or "", f.get("name") or "")
+        await asyncio.to_thread(P.apply_routing)
+        a = affinity.of(slug)
+        P.log("info", slug, "affinité des instances : " + (f"{affinity.MODES[a['mode']]} {a['name']}".strip()
+                                                          if a["mode"] else "aucune"))
+        flash(request, "Affinité enregistrée : Caddy l'applique tout de suite.")
+    except (ValueError, RuntimeError) as e:
+        flash(request, f"Affinité refusée : {e}", "error")
+    return go(f"/apps/{slug}#affinite")
 
 
 @app.post("/apps/{slug}/limits")
