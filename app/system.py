@@ -181,13 +181,18 @@ def unit(cid, node=None):
 
 
 def running(cid=None, node=None):
-    """(machine, composant) de la mise à jour en cours, sinon None. Avec cid/node : seulement celle-là."""
+    """(machine, composant) de la mise à jour en cours, sinon None. Avec cid/node : seulement celle-là.
+    Une seule commande systemd pour toutes les unités hangar-maj-*."""
+    rc, out = P.run(["systemctl", "list-units", "hangar-maj-*", "--all", "--plain", "--no-legend",
+                     "--state=active,activating"], timeout=10)
+    active = {line.split()[0].removesuffix(".service") for line in out.splitlines() if line.strip()}
+    if not active:
+        return None
     for n, _name in machines():
         if node is not None and (n or P.LOCAL) != (node or P.LOCAL):
             continue
         for c in [cid] if cid else list(COMPONENTS):
-            rc, out = P.run(["systemctl", "is-active", unit(c, n)], timeout=10)
-            if out.strip() in ("active", "activating"):
+            if unit(c, n) in active:
                 return (n, c)
     return None
 
@@ -466,6 +471,8 @@ def apply_tz(tz, apps):
             set_tz(node, tz)
         except RuntimeError as e:
             errs.append(str(e))
+    from . import cache
+    cache.invalidate("tz_now", "sysinfo")
     P.log("ok" if not errs else "warn", "système", f"fuseau horaire : {tz}" + (f" ({'; '.join(errs)})" if errs else ""))
     # redémarrage différé : la réponse à la page part d'abord
     P.run(["systemd-run", "--on-active=3", "--collect", "--quiet", "systemctl", "restart", "hangar"], timeout=20)

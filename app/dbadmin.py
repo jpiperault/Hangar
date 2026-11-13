@@ -10,26 +10,43 @@ from . import platform as P
 SAFETY = "/srv/backups/avant-import"
 
 
+INFO_SQL = ("SELECT 'size', pg_database_size(current_database()), 0 "
+            "UNION ALL SELECT 'count', count(*), 0 FROM pg_stat_user_tables "
+            "UNION ALL (SELECT 't:' || schemaname || '.' || relname, n_live_tup, pg_total_relation_size(relid) "
+            "FROM pg_stat_user_tables ORDER BY 3 DESC LIMIT 12);")
+
+
 def info(slug):
+    """Taille, nombre de tables et tables les plus lourdes, en une seule commande (une sur le nœud, pas trois)."""
     n = P.db_name(slug)
     node, pg = P.pg_where(slug)
-    env = P.denv(node)
-    rc, out = P._psql(f"SELECT pg_database_size('{n}');", node, pg)
-    if rc:
-        return None
-    size = int(out.strip() or 0)
-    q = ("SELECT schemaname || '.' || relname, n_live_tup, pg_total_relation_size(relid) "
-         "FROM pg_stat_user_tables ORDER BY pg_total_relation_size(relid) DESC LIMIT 12;")
     p = subprocess.run(["docker", "exec", "-i", pg, "psql", "-U", "platform", "-d", n, "-qtA", "-F", "\t"],
-                       input=q, capture_output=True, text=True, timeout=30, env=env)
+                       input=INFO_SQL, capture_output=True, text=True, timeout=30, env=P.denv(node))
+    if p.returncode:
+        return None
+    size = count = 0
     tables = []
     for line in p.stdout.splitlines():
         parts = line.split("\t")
-        if len(parts) == 3:
-            tables.append({"name": parts[0].removeprefix("public."), "rows": int(parts[1]), "size": int(parts[2])})
-    rc, cnt = P.dk(node, "exec", pg, "psql", "-U", "platform", "-d", n, "-qtA", "-c",
-                     "SELECT count(*) FROM pg_stat_user_tables", timeout=30)
-    return {"name": n, "size": size, "tables": tables, "count": int(cnt.strip() or 0) if rc == 0 else len(tables)}
+        if len(parts) != 3:
+            continue
+        if parts[0] == "size":
+            size = int(parts[1] or 0)
+        elif parts[0] == "count":
+            count = int(parts[1] or 0)
+        elif parts[0].startswith("t:"):
+            tables.append({"name": parts[0][2:].removeprefix("public."), "rows": int(parts[1]), "size": int(parts[2])})
+    return {"name": n, "size": size, "tables": tables, "count": count}
+
+
+def cached_info(slug, wait=False):
+    from . import cache
+    return cache.get(f"dbinfo:{slug}", 60, info, slug, wait=wait)
+
+
+def forget(slug):
+    from . import cache
+    cache.invalidate(f"dbinfo:{slug}")
 
 
 def export_stream(slug):
@@ -110,6 +127,7 @@ def _start(a):
 
 def import_file(slug, path, kind):
     """Remplace le contenu de la base par un fichier .sql, .sql.gz ou .dump (pg_dump -Fc)."""
+    forget(slug)
     with P.op_lock:
         a = db.app(slug)
         n = P.db_name(slug)
@@ -152,6 +170,7 @@ def import_file(slug, path, kind):
 
 
 def reset(slug):
+    forget(slug)
     with P.op_lock:
         a = db.app(slug)
         db.update_app(slug, state="deploying")

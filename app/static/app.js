@@ -15,4 +15,24 @@
   document.addEventListener('change', function (e) {
     if (e.target.hasAttribute && e.target.hasAttribute('data-autosubmit') && e.target.form) e.target.form.submit();
   });
+
+  // blocs chargés après la page (lectures lentes sur un nœud) : data-lazy="/chemin/du/fragment"
+  document.querySelectorAll('[data-lazy]').forEach(function (el) {
+    fetch(el.getAttribute('data-lazy'), {credentials: 'same-origin'}).then(function (r) {
+      return r.ok ? r.text() : Promise.reject(r.status);
+    }).then(function (h) { el.innerHTML = h; el.removeAttribute('data-lazy'); })
+      .catch(function () { el.innerHTML = '<p class="hint">Lecture impossible pour l\'instant.</p>'; });
+  });
+
+  // barre de chargement : un lien interne ou un formulaire part, la page suivante arrive
+  function busy() { document.documentElement.classList.add('navigating'); }
+  window.addEventListener('pageshow', function () { document.documentElement.classList.remove('navigating'); });
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('a[href]');
+    if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || a.target || a.hasAttribute('download')) return;
+    var u = new URL(a.href, location.href);
+    if (u.origin !== location.origin || (u.pathname === location.pathname && u.search === location.search)) return;
+    busy();
+  });
+  document.addEventListener('submit', function (e) { if (!e.defaultPrevented) setTimeout(function () { if (!e.defaultPrevented) busy(); }, 0); });
 })();

@@ -220,6 +220,7 @@
     <input type="hidden" name="dest" value="{{ cur }}">
     {% if dests | length > 1 %}<nav class="seg" aria-label="Source">{% for d in dests %}<a class="segbtn {{ 'on' if d.id == cur }}" href="?d={{ d.id }}#restaurer">{{ d.name }}</a>{% endfor %}</nav>{% endif %}
     {% if snap_err %}<p class="hint lv-error">{{ snap_err }}</p>{% endif %}
+    {% if snap_busy %}<p class="hint">Liste en cours de mise à jour depuis la destination… recharge la page dans quelques secondes.</p>{% endif %}
     {% if snaps %}
     <div class="row2">
       <div class="field"><label for="rslug">Application</label>

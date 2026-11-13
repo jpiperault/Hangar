@@ -570,11 +570,30 @@ human = _h
 
 # ---------------------------------------------------------------- instantanés et restauration
 
-def snapshots(dest_id="gdrive", refresh=False):
-    """Instantanés d'une destination, du plus récent au plus ancien (cache 10 min)."""
+_snap_busy = set()   # destinations dont la liste est relue en arrière-plan
+
+
+def snapshots_refreshing(dest_id):
+    return dest_id in _snap_busy
+
+
+def snapshots(dest_id="gdrive", refresh=False, wait=False):
+    """Instantanés d'une destination, du plus récent au plus ancien. Cache de 10 min ; au-delà, la dernière liste
+    connue est rendue tout de suite et relue en arrière-plan (lire le dépôt distant prend plusieurs secondes)."""
     key = f"snapshots_{dest_id}"
     cached, ts = db.kv_get(key), db.kv_ts(key)
     if cached is not None and not refresh and ts and time.time() - ts < 600:
+        return cached, None
+    if cached is not None and not refresh and not wait:
+        if dest_id not in _snap_busy:
+            _snap_busy.add(dest_id)
+
+            def bg():
+                try:
+                    snapshots(dest_id, refresh=True)
+                finally:
+                    _snap_busy.discard(dest_id)
+            threading.Thread(target=bg, daemon=True).start()
         return cached, None
     d = dest(dest_id)
     if not d:
@@ -689,6 +708,8 @@ def _apply(a, src_data, src_dump, parts, label):
             P.prepare_data(a, a["version"])
             P.dk(node, "compose", "up", "-d", "--no-build", cwd=d, timeout=300)
     ok, detail = P.wait_health(a) if a["desired"] == "running" else (True, "appli arrêtée, non redémarrée")
+    from . import dbadmin
+    dbadmin.forget(slug)
     if maint:
         P.set_maintenance(slug, False, auto=True)
     db.update_app(slug, state="ok" if ok else "error")

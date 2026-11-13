@@ -15,7 +15,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import alerts, db
+from . import alerts, cache, db
 from . import domains as D
 
 PLATFORM = "/srv/platform"
@@ -1165,9 +1165,14 @@ def display_status(a, cs):
     return "error"
 
 
+def states():
+    """État des conteneurs de toutes les applis, depuis le cache (20 s au plus, rafraîchi en arrière-plan)."""
+    return cache.get("states", 20, container_states)
+
+
 def apps_with_status():
-    s, cs = db.settings(), container_states()
-    mem = mem_usage() if any(v[0] == "running" for v in cs.values()) else {}
+    s, cs = db.settings(), states()
+    mem = cache.get("mem", 20, mem_usage) if any(v[0] == "running" for v in cs.values()) else {}
     rows = []
     for a in db.apps():
         a = dict(a)

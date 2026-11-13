@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import access, alerts, applogs, backup, cloudflare, crypt, dataimport, db, dbadmin, ha, jobs, monitor, move, nodes, preprod, report, security, services, stats, statuspage, system
+from . import access, alerts, applogs, backup, cache, cloudflare, crypt, dataimport, db, dbadmin, ha, jobs, monitor, move, nodes, preprod, report, security, services, stats, statuspage, system
 from . import domains as D
 from . import platform as P
 
@@ -27,6 +27,9 @@ ph = PasswordHasher()
 db.init()
 P.recover()
 monitor.start()
+# mesures lentes gardées au chaud : les pages ne font jamais attendre un nœud
+cache.keep_warm("states", 20, P.container_states)
+cache.keep_warm("mem", 20, P.mem_usage)
 
 
 def _secret():
@@ -114,6 +117,23 @@ async def guard(request: Request, call_next):
 
 app.add_middleware(SessionMiddleware, secret_key=_secret(), session_cookie="hangar",
                    max_age=8 * 3600, same_site="strict", https_only=True)
+
+
+class _Gzip:
+    """Pages et fichiers statiques compressés ; jamais les téléchargements en flux (archives, exports)."""
+    SKIP = ("/download", "/db/export")
+
+    def __init__(self, app):
+        from starlette.middleware.gzip import GZipMiddleware
+        self.app, self.gz = app, GZipMiddleware(app, minimum_size=1024, compresslevel=5)
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and not scope["path"].endswith(self.SKIP):
+            return await self.gz(scope, receive, send)
+        return await self.app(scope, receive, send)
+
+
+app.add_middleware(_Gzip)
 
 
 # ---------------------------------------------------------------- aides
@@ -409,9 +429,10 @@ async def _app_ctx(request, slug):
     names = await asyncio.to_thread(P.app_public_names, a, db.settings())
     rng = request.query_params.get("r") if request.query_params.get("r") in stats.RANGES else "24h"
     st = stats.app_charts(stats.series(slug, rng), a["mem_mb"])
-    dbi = await asyncio.to_thread(dbadmin.info, slug) if a["db"] and a["status"] != "deploying" else None
+    dbi = dbadmin.cached_info(slug) if a["db"] and a["status"] != "deploying" else None   # sinon chargée après
     others = [c for c in node_choices() if c["id"] != a["node"]]
-    dsize = await asyncio.to_thread(P.dir_size, a["node"], f"{P.app_dir(slug)}/data") if others else None
+    dsize = await asyncio.to_thread(cache.get, f"dsize:{slug}", 300, P.dir_size, a["node"], f"{P.app_dir(slug)}/data") \
+        if others else None
     a["routes"] = D.routes(slug)
     hst = await asyncio.to_thread(ha.status, slug)
     busy = (hst and (hst["busy"] or hst["h"]["state"] == "setup"))
@@ -425,7 +446,8 @@ async def _app_ctx(request, slug):
                 jobs=[{**j, "desc": jobs.describe(j), "busy": jobs.is_running(slug, j["id"])} for j in jobs.of(slug)],
                 job_days=jobs.DAYS, redis=services.redis(slug), pre=db.app(preprod.of(slug) or ""),
                 prod=db.app(preprod.prod_of(slug) or ""),
-                redis_st=await asyncio.to_thread(_redis_state, a) if services.redis(slug) else None)
+                redis_st=(cache.get(f"redis:{slug}", 20, _redis_state, a, wait=False) or {"state": "…"})
+                if services.redis(slug) else None)
 
 
 # ---------------------------------------------------------------- haute disponibilité
@@ -774,6 +796,14 @@ async def app_action(request: Request, slug: str, action: str):
     return go(back)
 
 
+@app.get("/apps/{slug}/db/panel")
+async def app_db_panel(request: Request, slug: str):
+    """Bloc Base de données, chargé après la page quand le cache est vide (lecture sur le nœud)."""
+    a = get_app_or_404(slug)
+    dbi = await asyncio.to_thread(dbadmin.cached_info, slug, True) if a["db"] else None
+    return tpl.TemplateResponse(request, "_dbpanel.html", {"a": a, "dbi": dbi})
+
+
 @app.get("/apps/{slug}/logs")
 async def app_logs(request: Request, slug: str):
     a = get_app_or_404(slug)
@@ -1118,6 +1148,7 @@ async def backups_page(request: Request):
     if not backup.dest(cur):
         cur = ds[0]["id"] if ds else ""
     snaps, snap_err = (await asyncio.to_thread(backup.snapshots, cur)) if cur else ([], None)
+    snap_busy = backup.snapshots_refreshing(cur)
     keep = json.loads(db.settings().get("backup_keep") or "{}")
     nxt = P.run(["systemctl", "show", "platform-backup.timer", "-p", "NextElapseUSecRealtime", "--value"], timeout=10)[1]
     m = re.search(r"(\d{4})-(\d{2})-(\d{2}) (\d{2}:\d{2})", nxt)
@@ -1132,7 +1163,7 @@ async def backups_page(request: Request):
                   pending=backup.auth_pending(), google_url=backup._auth.get("google_url"),
                   pw=backup.password(), keep=keep, next_run=nxt.strip(), apps=db.apps(), refresh=busy or arch_busy,
                   folder=backup.FOLDER, own_client=backup.client_id(), archives=backup.archives(),
-                  restore_tests=backup.restore_tests(), imports=dataimport.pending(), safety=backup.safety_copies(),
+                  snap_busy=snap_busy, restore_tests=backup.restore_tests(), imports=dataimport.pending(), safety=backup.safety_copies(),
                   app_names={a['slug']: a['name'] for a in db.apps()})
 
 
@@ -1541,7 +1572,7 @@ async def backup_restore(request: Request):
 async def system_page(request: Request):
     chk = db.kv_get("sys_check")
     busy = await asyncio.to_thread(system.running)
-    info = await asyncio.to_thread(P.system_info)
+    info = await asyncio.to_thread(cache.get, "sysinfo", 600, P.system_info)
     events = db.q("SELECT * FROM events WHERE app IN ('système', 'alertes') ORDER BY id DESC LIMIT 12")
     mach = [{"id": n, "name": name, "chk": (chk or {}) if n == P.LOCAL else ((chk or {}).get("nodes") or {}).get(n)}
             for n, name in system.machines()]
@@ -1549,7 +1580,7 @@ async def system_page(request: Request):
                   busy=busy, comps=system.COMPONENTS, info=info, events=events, refresh=bool(busy), machines=mach,
                   since=db.kv_get("sys_pending_since") or {}, auto=system.auto_settings(),
                   tzs=system.tz_settings(), tz_common=system.TZ_COMMON, tz_all=system.timezones(),
-                  tz_now=await asyncio.to_thread(_tz_now))
+                  tz_now=await asyncio.to_thread(cache.get, "tz_now", 600, _tz_now))
 
 
 def _tz_now():
@@ -1811,6 +1842,10 @@ def _postgres():
             "max": mx.strip() if rc2 == 0 else "?"}
 
 
+cache.keep_warm("mon_containers", 30, _containers)
+cache.keep_warm("mon_pg", 60, _postgres)
+
+
 @app.get("/monitoring")
 async def monitoring(request: Request):
     rng = request.query_params.get("r") if request.query_params.get("r") in stats.RANGES else "24h"
@@ -1818,9 +1853,9 @@ async def monitoring(request: Request):
     hs = stats.host_charts(stats.host_series(rng), host["mem_total"])
     rows = await asyncio.to_thread(P.apps_with_status)
     req, spark, res24 = stats.apps_overview()
-    cont = await asyncio.to_thread(_containers)
-    svc = await asyncio.to_thread(_services)
-    pg = await asyncio.to_thread(_postgres)
+    cont = await asyncio.to_thread(cache.get, "mon_containers", 30, _containers)
+    svc = await asyncio.to_thread(cache.get, "mon_services", 15, _services)
+    pg = await asyncio.to_thread(cache.get, "mon_pg", 60, _postgres)
     for a in rows:
         a["h"] = monitor.health.get(a["slug"])
         a["r"] = req.get(a["slug"])

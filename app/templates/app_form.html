@@ -339,33 +339,9 @@
   {% if a.db %}
   <section class="panel" id="base">
     <h2>Base de données</h2>
-    {% if dbi %}
-    <dl class="facts">
-      <dt>Nom</dt><dd>{{ dbi.name }}</dd>
-      <dt>Taille</dt><dd>{{ dbi.size | size }}</dd>
-      <dt>Tables</dt><dd>{{ dbi.count }}</dd>
-    </dl>
-    {% if dbi.tables %}
-    <details><summary class="hint">Tables les plus lourdes</summary>
-      {% for t in dbi.tables %}<div class="cert"><span class="mono">{{ t.name }}</span><span class="hint">{{ '{:,}'.format(t.rows).replace(',', ' ') }} lignes · {{ t.size | size }}</span></div>{% endfor %}
-    </details>
-    {% endif %}
-    <a class="btn sm" href="/apps/{{ a.slug }}/db/export" download>Exporter (.sql.gz)</a>
-    <details><summary class="btn sm">Importer ou remettre à zéro</summary>
-      <form method="post" action="/apps/{{ a.slug }}/db/import" enctype="multipart/form-data" class="panel danger" style="padding:12px;margin-top:10px">
-        <div class="field"><label for="dbfile">Fichier .sql, .sql.gz ou .dump</label><input id="dbfile" name="file" type="file" accept=".sql,.gz,.dump" required></div>
-        <div class="field"><label for="iconfirm">Tape <code>{{ a.slug }}</code> pour confirmer</label><input id="iconfirm" name="confirm" autocomplete="off" spellcheck="false"></div>
-        <span class="hint">Remplace tout le contenu de la base. L'appli est arrêtée pendant l'import, et une copie de la base actuelle va d'abord dans /srv/backups/avant-import.</span>
-        <div><button class="btn danger sm">Importer</button></div>
-      </form>
-      <form method="post" action="/apps/{{ a.slug }}/db/reset" class="panel danger" style="padding:12px;margin-top:10px">
-        <div class="field"><label for="zconfirm">Remettre la base à zéro : tape <code>{{ a.slug }}</code></label><input id="zconfirm" name="confirm" autocomplete="off" spellcheck="false"></div>
-        <span class="hint">Base vide, recréée au démarrage par les migrations de l'appli. Copie de l'actuelle dans /srv/backups/avant-import.</span>
-        <div><button class="btn danger sm">Remettre à zéro</button></div>
-      </form>
-    </details>
-    <span class="hint">Depuis le serveur : <code>docker exec -it platform-postgres-1 psql -U platform {{ dbi.name }}</code></span>
-    {% else %}<p class="hint">Base indisponible pour l'instant.</p>{% endif %}
+    <div id="dbpanel" {{ 'data-lazy=/apps/' ~ a.slug ~ '/db/panel' if dbi is none }}>
+    {% if dbi is not none %}{% include "_dbpanel.html" %}{% else %}<p class="hint">Lecture de la base…</p>{% endif %}
+    </div>
   </section>
   {% endif %}
   {% if not a.db %}<section class="panel"><h2>Base de données</h2><p class="hint">Pas de base PostgreSQL pour cette appli. Pour en ajouter une, coche « Base PostgreSQL » dans l'onglet Réglages.</p></section>{% endif %}

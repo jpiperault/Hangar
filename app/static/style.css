@@ -237,3 +237,8 @@ table.mon td{vertical-align:middle}
 /* champs numériques : sans les flèches natives du navigateur, on tape la valeur */
 input[type=number]{-moz-appearance:textfield;appearance:textfield}
 input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+
+/* barre de chargement entre deux pages */
+html.navigating::before{content:"";position:fixed;top:0;left:0;height:3px;width:100%;z-index:1000;background:linear-gradient(90deg,transparent,var(--accent),transparent);background-size:40% 100%;background-repeat:no-repeat;animation:navbar 1s linear infinite}
+@keyframes navbar{from{background-position:-40% 0}to{background-position:140% 0}}
+@media (prefers-reduced-motion:reduce){html.navigating::before{animation:none;background:var(--accent);opacity:.6}}

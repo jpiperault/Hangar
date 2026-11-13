@@ -208,6 +208,9 @@ def update_app(slug, **fields):
     if fields:
         sets = ", ".join(f"{k} = ?" for k in fields)
         x(f"UPDATE apps SET {sets} WHERE slug = ?", list(fields.values()) + [slug])
+        if {"state", "desired", "node"} & set(fields):   # l'état des conteneurs a pu changer : relu au prochain affichage
+            from . import cache
+            cache.invalidate("states", "mem", "mon_containers")
 
 
 def kv_get(key, default=None):
