@@ -421,7 +421,7 @@ async def _app_ctx(request, slug):
                 ha_inst=[c for c in others if c["id"] != a["node"]],
                 refresh=a["status"] == "deploying" or bool(busy), registries=P.registry_logins(), st=st, dbi=dbi,
                 ranges=list(stats.RANGES), others=others, dsize=dsize, domains=D.all_domains(), cf=cloudflare.status(),
-                safety=backup.safety_copies(slug))
+                safety=backup.safety_copies(slug), maint=P.maintenance(slug))
 
 
 # ---------------------------------------------------------------- haute disponibilité
@@ -598,6 +598,33 @@ async def app_revert(request: Request, slug: str):
     flash(request, f"Retour arrière lancé pour {a['name']}. Son état actuel est d'abord mis de côté : "
           "tu pourras y revenir de la même façon.")
     return go(f"/apps/{slug}")
+
+
+@app.post("/apps/{slug}/restore-point")
+async def app_restore_point(request: Request, slug: str):
+    a = db.app(slug)
+    if not a:
+        return go("/")
+    f = await request.form()
+    try:
+        await asyncio.to_thread(backup.restore_point, slug, f.get("note") or "")
+        flash(request, "Point de restauration créé : tu peux y revenir depuis cette liste.")
+    except Exception as e:
+        flash(request, f"Point de restauration impossible : {str(e)[:300]}", "error")
+    return go(f"/apps/{slug}#securite")
+
+
+@app.post("/apps/{slug}/maintenance")
+async def app_maintenance(request: Request, slug: str):
+    a = db.app(slug)
+    if not a:
+        return go("/")
+    f = await request.form()
+    on = f.get("on") == "1"
+    await asyncio.to_thread(P.set_maintenance, slug, on, False, (f.get("msg") or "").strip())
+    P.log("info", slug, "mode maintenance " + ("activé : les visiteurs voient la page de maintenance (503)" if on else "désactivé"))
+    flash(request, "Mode maintenance activé." if on else "Mode maintenance désactivé : l'appli est de nouveau servie.")
+    return go(f"/apps/{slug}#maintenance")
 
 
 @app.post("/apps/{slug}/{action}")

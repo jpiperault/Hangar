@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 {% from "_dns.html" import dnspill %}
+{% macro rp_form() %}<form method="post" action="/apps/{{ a.slug }}/restore-point" class="inlinefield" style="margin:6px 0 10px">
+      <input name="note" maxlength="200" placeholder="Note (ex. avant la migration 2.0)" aria-label="Note du point de restauration" spellcheck="false">
+      <button class="btn sm primary" {{ 'disabled' if a.status == 'deploying' }}>Créer un point de restauration</button>
+    </form><span class="hint">Copie la base (export cohérent) et data/ maintenant, sans arrêter l'appli. À faire avant une opération risquée.</span>{% endmacro %}
 {% macro err(k) %}{% if errors.get(k) %}<span class="err">{{ errors[k] }}</span>{% endif %}{% endmacro %}
 {% block main %}
 <div class="bar">
@@ -162,6 +166,18 @@
     <span class="hint">Avant de basculer, la console attend que {{ a.health_path }} réponde. En cas d'échec, la version actuelle est remise en ligne.{% if a.source == 'image' %} Les nouvelles versions (tags x.y.z) sont recherchées toutes les 6 h{% if a.latest_checked %}, dernière fois {{ a.latest_checked | ago }}{% endif %}.{% endif %}</span>
     {% if a.source == 'image' %}<form method="post" action="/apps/{{ a.slug }}/versions/check"><button class="btn sm primary">Vérifier maintenant</button></form>{% endif %}
   </section>
+  {% set mt = maint %}
+  <form class="panel {{ 'danger' if mt }}" id="maintenance" method="post" action="/apps/{{ a.slug }}/maintenance" style="display:flex;flex-direction:column;gap:10px">
+    <h2 style="margin:0">Mode maintenance {% if mt %}<span class="pill s-deploying">actif{{ ' (automatique)' if mt.auto }}</span>{% endif %}</h2>
+    {% if mt %}
+    <p class="hint" style="margin:0">Depuis {{ mt.since | ago }}, les visiteurs voient une page « Maintenance en cours » (code 503, en-tête <code>X-Hangar-Maintenance: 1</code> pour l'appli Android).{% if mt.auto %} Posé par une restauration ou un import : il s'enlève tout seul à la fin.{% endif %}</p>
+    <input type="hidden" name="on" value="0"><div><button class="btn sm primary">Désactiver la maintenance</button></div>
+    {% else %}
+    <p class="hint" style="margin:0">Affiche une page « Maintenance en cours » (503) au lieu de l'appli, par exemple pendant une migration. Il se met tout seul pendant une restauration, un import ou un retour arrière.</p>
+    <input type="hidden" name="on" value="1">
+    <div class="inlinefield"><input name="msg" maxlength="300" placeholder="Message (facultatif)" aria-label="Message de maintenance"><button class="btn sm">Activer</button></div>
+    {% endif %}
+  </form>
 </div>
 <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
   {% if events %}
@@ -347,10 +363,11 @@
   <section class="panel" id="securite">
     <h2>Revenir en arrière</h2>
     <p class="hint">Avant chaque restauration ou import de données, l'état de l'appli est mis de côté. Tu peux le remettre : l'état actuel est lui-même mis de côté d'abord, donc un retour arrière s'annule de la même façon. Copies gardées 30 jours (toujours les 3 dernières).</p>
+    {{ rp_form() }}
     {% for c in safety %}
     <form class="cert" method="post" action="/apps/{{ a.slug }}/revert" data-confirm="Remettre {{ a.name }} dans son état du {{ c.ts | when }} ? L'appli est arrêtée quelques instants ; son état actuel est mis de côté.">
       <input type="hidden" name="copy" value="{{ c.name }}">
-      <span><span class="mono">{{ c.ts | when }}</span> <span class="hint">{{ c.size | size }}</span><br>
+      <span><span class="mono">{{ c.ts | when }}</span> <span class="hint">{{ c.size | size }}{{ ' · ' ~ c.note if c.note }}</span><br>
         {% if c.has_db %}<label class="check" style="display:inline-flex"><input type="checkbox" name="db" {{ 'checked' if a.db else 'disabled' }}><span>base{{ '' if a.db else ' (appli sans base)' }}</span></label>{% endif %}
         {% if c.has_data %}<label class="check" style="display:inline-flex"><input type="checkbox" name="data" checked><span>data/</span></label>{% endif %}</span>
       <span class="acts">
@@ -361,7 +378,7 @@
     {% endfor %}
   </section>
   {% endif %}
-  {% if not safety %}<section class="panel" id="securite"><h2>Revenir en arrière</h2><p class="hint">Aucune copie de sécurité pour l'instant. Avant chaque restauration ou import de données, l'état de l'appli est mis de côté ici. Pour revenir à une sauvegarde de nuit : page <a href="/backups">Sauvegardes</a>.</p></section>{% endif %}
+  {% if not safety %}<section class="panel" id="securite"><h2>Revenir en arrière</h2><p class="hint">Aucune copie de sécurité pour l'instant. Avant chaque restauration ou import de données, l'état de l'appli est mis de côté ici. Pour revenir à une sauvegarde de nuit : page <a href="/backups">Sauvegardes</a>.</p>{{ rp_form() }}</section>{% endif %}
 </div>
 {% endif %}
 

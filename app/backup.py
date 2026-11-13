@@ -645,6 +645,13 @@ def _pg_restore(slug, dump_path):
             P.log("warn", slug, "restauration de la base avec avertissements : " + " | ".join(errs[-3:]))
 
 
+def _reroute_quiet(slug):
+    try:
+        P.apply_routing()
+    except Exception as e:
+        P.log("warn", slug, f"routes non régénérées : {e}")
+
+
 def _apply(a, src_data, src_dump, parts, label):
     """Remplace data/ et/ou la base d'une appli existante. Appelant : tient P.op_lock."""
     slug, node = a["slug"], a["node"]
@@ -655,6 +662,7 @@ def _apply(a, src_data, src_dump, parts, label):
     if "db" in parts and not (src_dump and os.path.exists(src_dump)):
         raise RuntimeError("cette sauvegarde ne contient pas de base pour cette appli")
     os.makedirs(safe, mode=0o700, exist_ok=True)
+    maint = P.set_maintenance(slug, True, auto=True, msg="Restauration des données en cours.")
     P.dk(node, "compose", "stop", cwd=d, timeout=120)
     try:
         if "db" in parts:
@@ -670,11 +678,19 @@ def _apply(a, src_data, src_dump, parts, label):
                 P.pull_dir(node, f"{d}/data", f"{safe}/data")
                 os.makedirs(f"{safe}/data", exist_ok=True)   # data/ vide sur le nœud : la copie de sécurité en a un aussi
                 P.push_dir(node, src_data, f"{d}/data")
+    except BaseException:
+        if maint:   # échec : l'appli repart sur son état d'avant, la page de maintenance s'en va
+            maint = False
+            P.set_maintenance(slug, False, auto=True, reroute=False)
+            _reroute_quiet(slug)
+        raise
     finally:
         if a["desired"] == "running":
             P.prepare_data(a, a["version"])
             P.dk(node, "compose", "up", "-d", "--no-build", cwd=d, timeout=300)
     ok, detail = P.wait_health(a) if a["desired"] == "running" else (True, "appli arrêtée, non redémarrée")
+    if maint:
+        P.set_maintenance(slug, False, auto=True)
     db.update_app(slug, state="ok" if ok else "error")
     P.log("ok" if ok else "error", slug, f"restauration terminée depuis {label} ({detail}). "
           f"L'état d'avant est gardé dans {safe}")
@@ -711,10 +727,41 @@ def safety_copies(slug=None):
         if not m or (slug and m.group(1) != slug) or not os.path.isdir(f"{SAFETY}/{n}"):
             continue
         d = f"{SAFETY}/{n}"
+        try:
+            note = open(f"{d}/note.txt").read().strip()
+        except OSError:
+            note = ""
         out.append({"name": n, "slug": m.group(1), "ts": time.mktime(time.strptime(m.group(2), "%Y%m%d-%H%M%S")),
                     "has_db": os.path.exists(f"{d}/base-avant.sql.gz"), "has_data": os.path.isdir(f"{d}/data"),
-                    "size": _dsize(d)})
+                    "size": _dsize(d), "note": note})
     return sorted(out, key=lambda c: c["ts"], reverse=True)
+
+
+def restore_point(slug, note=""):
+    """Point de restauration à la demande : base (export cohérent) et data/ copiés dans une copie de sécurité,
+    sans arrêter l'appli. Retourne son nom."""
+    a = db.app(slug)
+    if not a:
+        raise RuntimeError("appli introuvable")
+    name = f"{slug}-{time.strftime('%Y%m%d-%H%M%S')}"
+    d = f"{SAFETY}/{name}"
+    os.makedirs(d, mode=0o700)
+    try:
+        if a["db"]:
+            P.dump_db(slug, f"{d}/base-avant.sql.gz")
+        if P.is_local(a["node"]):
+            src = f"{P.app_dir(slug)}/data"
+            if os.path.isdir(src):
+                shutil.copytree(src, f"{d}/data", symlinks=True)
+        else:
+            P.pull_dir(a["node"], f"{P.app_dir(slug)}/data", f"{d}/data")
+        os.makedirs(f"{d}/data", exist_ok=True)
+        P.write_private(f"{d}/note.txt", (note.strip()[:200] or "point de restauration manuel") + "\n")
+    except Exception:
+        shutil.rmtree(d, ignore_errors=True)
+        raise
+    P.log("ok", slug, f"point de restauration créé ({note.strip()[:80] or 'manuel'})")
+    return name
 
 
 def safety_copy(name):

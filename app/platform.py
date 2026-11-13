@@ -227,7 +227,53 @@ def next_host_port():
 
 # ---------------------------------------------------------------- Caddy
 
+MAINT_HTML = ("<!doctype html><html lang=fr><meta charset=utf-8><meta name=viewport content='width=device-width'>"
+              "<title>Maintenance</title><body style='font:17px/1.6 system-ui,sans-serif;max-width:560px;margin:15vh auto;"
+              "padding:0 16px;color:#1d2330'><h1 style='font-size:1.5rem'>Maintenance en cours</h1><p>{msg}</p>"
+              "<p style='color:#6b7385'>{name}</p></body></html>")
+
+
+def maintenance(slug=None):
+    """Appli(s) en maintenance : {slug: {on, auto, msg, since}}. Caddy y répond par une page 503."""
+    m = db.kv_get("maintenance") or {}
+    return m.get(slug) if slug else m
+
+
+def set_maintenance(slug, on, auto=False, msg="", reroute=True):
+    """auto : posée par une opération (restauration, import…) et retirée par elle, sans toucher à une maintenance
+    posée à la main."""
+    with routing_lock:
+        m = db.kv_get("maintenance") or {}
+        cur = m.get(slug)
+        if on:
+            if cur and not cur.get("auto") and auto:
+                return False   # déjà en maintenance à la main : l'opération n'y touche pas
+            m[slug] = {"on": True, "auto": auto, "msg": msg[:300], "since": time.time()}
+        else:
+            if not cur or (auto and not cur.get("auto")):
+                return False
+            m.pop(slug, None)
+        db.kv_set("maintenance", m)
+    if reroute:
+        try:
+            apply_routing()
+        except RuntimeError as e:
+            log("warn", slug, f"page de maintenance non appliquée : {e}")
+    return True
+
+
+def _maint_lines(a, ind):
+    m = maintenance(a["slug"])
+    msg = (m.get("msg") or "").strip() or "Le service revient dans quelques minutes. Merci de ta patience."
+    body = MAINT_HTML.format(msg=html.escape(msg, quote=False), name=html.escape(a["name"], quote=False))
+    body = body.replace("`", "'").replace("\n", " ")
+    return [f"{ind}header Retry-After 120", f"{ind}header X-Hangar-Maintenance 1", f"{ind}header Cache-Control no-store",
+            f'{ind}header Content-Type "text/html; charset=utf-8"', f"{ind}respond `{body}` 503"]
+
+
 def _upstream(a, prefix, ind, here=LOCAL):
+    if maintenance(a["slug"]):
+        return _maint_lines(a, ind)
     if a["desired"] == "stopped":
         return [f'{ind}respond "Service arrêté" 503']
     from . import ha
