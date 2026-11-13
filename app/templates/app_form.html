@@ -105,7 +105,7 @@
 <nav class="tabs" aria-label="Sections de l'appli">
   <a href="#apercu" data-tab="apercu">Vue d'ensemble</a>
   <a href="#reglages" data-tab="reglages">Réglages</a>
-  {% if a.db %}<a href="#base" data-tab="base">Base de données</a>{% endif %}
+  <a href="#base" data-tab="base">Base et services</a>
   <a href="#hautedispo" data-tab="hautedispo">Haute dispo et nœud</a>
   <a href="#taches" data-tab="taches">Tâches{% if jobs %} <span class="hint">{{ jobs | length }}</span>{% endif %}</a>
   <a href="#restauration" data-tab="restauration">Revenir en arrière{% if safety %} <span class="hint">{{ safety | length }}</span>{% endif %}</a>
@@ -305,7 +305,7 @@
 </div>
 </div>
 
-{% if a.db %}<div data-pane="base">
+<div data-pane="base" style="display:flex;flex-direction:column;gap:20px">
   {% if a.db %}
   <section class="panel" id="base">
     <h2>Base de données</h2>
@@ -338,7 +338,26 @@
     {% else %}<p class="hint">Base indisponible pour l'instant.</p>{% endif %}
   </section>
   {% endif %}
-</div>{% endif %}
+  {% if not a.db %}<section class="panel"><h2>Base de données</h2><p class="hint">Pas de base PostgreSQL pour cette appli. Pour en ajouter une, coche « Base PostgreSQL » dans l'onglet Réglages.</p></section>{% endif %}
+  <form class="panel" id="redis" method="post" action="/apps/{{ a.slug }}/services/redis" style="display:flex;flex-direction:column;gap:10px">
+    <h2 style="margin:0">Redis {% if redis %}<span class="pill {{ 's-running' if redis_st and redis_st.state == 'running' else 's-error' }}">{{ {'running': 'en marche', 'absent': 'pas encore créé'}.get(redis_st.state, redis_st.state) if redis_st else '?' }}</span>{% endif %}</h2>
+    {% if redis %}
+    <dl class="facts">
+      <dt>Adresse</dt><dd>variable <code>REDIS_URL</code> (hôte <code>redis</code>, port 6379, mot de passe compris)</dd>
+      <dt>Mémoire</dt><dd>{{ redis_st.used_memory_human or '—' }} utilisés sur {{ redis.mem }} Mo</dd>
+      {% if redis_st.db0 %}<dt>Clés</dt><dd class="mono">{{ redis_st.db0 }}</dd>{% endif %}
+      <dt>Version</dt><dd>Valkey {{ redis_st.valkey_version or redis_st.redis_version or '—' }}</dd>
+    </dl>
+    <p class="hint" style="margin:0">Données persistantes dans <code>data/.hangar-redis</code> : sauvegardées, restaurées et déplacées avec data/. Joignable seulement par l'appli (réseau cloisonné). Plein, il refuse les écritures au lieu d'effacer des clés.</p>
+    <div class="inlinefield"><input type="hidden" name="on" value="1"><input name="mem" type="number" min="32" max="4096" value="{{ redis.mem }}" aria-label="Mémoire de Redis en Mo"><button class="btn sm">Changer la mémoire</button></div>
+    <div><button class="btn sm link" formaction="/apps/{{ a.slug }}/services/redis?off=1" data-confirm="Retirer Redis ? L'appli est redéployée sans lui ; ses données restent dans data/.hangar-redis.">Retirer Redis</button></div>
+    {% else %}
+    <p class="hint" style="margin:0">Cache, files d'attente, sessions, classements, état des parties… Un Redis (Valkey) propre à l'appli, sur son réseau cloisonné, persistant et sauvegardé. L'appli reçoit <code>REDIS_URL</code> et est redéployée.{% if ha %} <strong>Pas encore possible avec la haute dispo.</strong>{% endif %}</p>
+    <input type="hidden" name="on" value="1">
+    <div class="inlinefield"><input name="mem" type="number" min="32" max="4096" value="128" aria-label="Mémoire de Redis en Mo"><span class="hint">Mo</span><button class="btn sm primary" {{ 'disabled' if ha or a.status == 'deploying' }}>Ajouter Redis</button></div>
+    {% endif %}
+  </form>
+</div>
 
 <div data-pane="hautedispo" style="display:flex;flex-direction:column;gap:20px">
   {% include "_ha.html" %}

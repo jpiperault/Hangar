@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import access, alerts, applogs, backup, cloudflare, crypt, dataimport, db, dbadmin, ha, jobs, monitor, move, nodes, report, security, stats, system
+from . import access, alerts, applogs, backup, cloudflare, crypt, dataimport, db, dbadmin, ha, jobs, monitor, move, nodes, report, security, services, stats, system
 from . import domains as D
 from . import platform as P
 
@@ -423,7 +423,8 @@ async def _app_ctx(request, slug):
                 ranges=list(stats.RANGES), others=others, dsize=dsize, domains=D.all_domains(), cf=cloudflare.status(),
                 safety=backup.safety_copies(slug), maint=P.maintenance(slug),
                 jobs=[{**j, "desc": jobs.describe(j), "busy": jobs.is_running(slug, j["id"])} for j in jobs.of(slug)],
-                job_days=jobs.DAYS)
+                job_days=jobs.DAYS, redis=services.redis(slug),
+                redis_st=await asyncio.to_thread(_redis_state, a) if services.redis(slug) else None)
 
 
 # ---------------------------------------------------------------- haute disponibilité
@@ -444,6 +445,8 @@ async def ha_enable(request: Request, slug: str):
     err = await asyncio.to_thread(ha.validate, a, mode, chosen, bool(f.get("ack")))
     if not err and (ha.get(slug) or a["state"] == "deploying"):
         err = "Une opération est déjà en cours sur cette appli."
+    if not err and services.redis(slug):
+        err = "Cette appli a un Redis : la haute dispo n'est pas encore possible avec lui (onglet Base et services)."
     if err:
         flash(request, err, "error")
         return go(f"/apps/{slug}#hautedispo")
@@ -660,6 +663,48 @@ async def app_job_op(request: Request, slug: str, jid: str, op: str):
         P.log("info", slug, f"tâche planifiée « {j['name']} » supprimée")
         flash(request, f"Tâche « {j['name']} » supprimée.")
     return go(f"/apps/{slug}#taches")
+
+
+@app.post("/apps/{slug}/services/redis")
+async def app_redis(request: Request, slug: str):
+    a = db.app(slug)
+    if not a:
+        return go("/")
+    f = await request.form()
+    if a["state"] == "deploying":
+        flash(request, "Une opération est en cours sur cette appli : réessaie dans un instant.", "error")
+        return go(f"/apps/{slug}#redis")
+    try:
+        if f.get("on") == "1" and request.query_params.get("off") != "1":
+            services.enable_redis(slug, f.get("mem") or 128)
+            msg = "Redis activé : l'appli est redéployée avec REDIS_URL."
+        else:
+            services.disable_redis(slug)
+            msg = "Redis retiré : l'appli est redéployée sans lui. Ses données restent dans data/.hangar-redis."
+    except ValueError as e:
+        flash(request, str(e), "error")
+        return go(f"/apps/{slug}#redis")
+    P.log("info", slug, msg.split(" :")[0])
+    P.spawn(P.deploy, slug, a["version"], "config", dict(a))
+    flash(request, msg)
+    return go(f"/apps/{slug}#redis")
+
+
+def _redis_state(a):
+    r = services.redis(a["slug"])
+    name = f"app-{a['slug']}-redis-1"
+    rc, st = P.dk(a["node"], "inspect", "-f", "{{.State.Status}}", name, timeout=20)
+    if rc:
+        return {"state": "absent"}
+    out = {"state": st.strip()}
+    if out["state"] == "running":
+        rc, info = P.dk(a["node"], "exec", name, "valkey-cli", "--no-auth-warning", "-a", r["password"], "info",
+                        timeout=20)
+        for line in info.splitlines() if rc == 0 else []:
+            k, _, v = line.strip().partition(":")
+            if k in ("used_memory_human", "db0", "redis_version", "valkey_version", "connected_clients"):
+                out[k] = v
+    return out
 
 
 @app.post("/apps/{slug}/{action}")

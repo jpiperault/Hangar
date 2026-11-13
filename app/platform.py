@@ -955,6 +955,10 @@ def write_compose(a, version, instance=None, role=None):
     env, _ = parse_env(a["env"])
     if a["db"]:
         env["DATABASE_URL"] = db_url(a, node)
+    from . import services
+    extra, extra_env = services.compose_extra(a, f"hangar-{a['slug']}", f"{app_dir(a['slug'])}/data") \
+        if instance is None else ({}, {})
+    env.update(extra_env)
     svc = {
         "image": image_ref(a, version),
         "restart": "unless-stopped",
@@ -976,7 +980,7 @@ def write_compose(a, version, instance=None, role=None):
         svc["labels"]["fr.hangar.ha-role"] = role
     if a["source"] == "git":
         svc["build"] = {"context": f"{a['image']}#{version}"}
-    doc = {"name": f"app-{a['slug']}", "services": {"app": svc},
+    doc = {"name": f"app-{a['slug']}", "services": {"app": svc, **extra},
            "networks": {f"hangar-{a['slug']}": {"external": True}}}
     d = app_dir(a["slug"])
     os.makedirs(d, mode=0o700, exist_ok=True)
@@ -1413,7 +1417,8 @@ def delete(slug):
         os.makedirs(keep, exist_ok=True)
         os.chmod(keep, 0o700)
         d, node = app_dir(slug), a["node"]
-        from . import ha
+        from . import ha, services
+        services.drop(slug)
         if ha.get(slug):   # haute dispo : base dédiée rapatriée dans le PostgreSQL partagé, secours et instances retirés
             ha.disable(slug, "suppression", locked=True)
             a = db.app(slug)
