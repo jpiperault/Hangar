@@ -36,7 +36,8 @@ FastAPI + Jinja, sans build front. Elle écoute en HTTPS (certificat auto-signé
 - **Déplacement** d'une appli vers un autre nœud depuis sa fiche : copie de `data/` pendant que l'appli tourne, puis coupure courte (copie finale, base, démarrage) et bascule des routes seulement si la cible répond ; sinon retour sur le nœud d'origine.
 - Les **sauvegardes** couvrent tous les nœuds : le `data/` des applis distantes est recopié chaque nuit sur la console avant l'envoi chiffré ; restauration et archives fonctionnent quel que soit le nœud.
 - **Archives manuelles** `.tar.gz` à télécharger (fiche, base et `data/` de chaque appli), restaurables ici ou sur un autre serveur Hangar : les applis absentes sont recréées.
-- **Alertes ntfy** sur le téléphone : appli qui ne répond plus, échec de déploiement, de sauvegarde ou de mise à jour, disque, mémoire, PostgreSQL, tunnel.
+- **Supervision** de toutes les machines (console et nœuds) : processeur, mémoire, disque, Docker, PostgreSQL, Caddy, pare-feu.
+- **Alertes ntfy** sur le téléphone : appli qui ne répond plus, échec de déploiement, de sauvegarde ou de mise à jour, disque, mémoire, PostgreSQL, tunnel ; pour chaque nœud : injoignable, disque, mémoire, Docker, PostgreSQL, pare-feu, Caddy s'il reçoit le web en direct.
 - **Nouvelles versions** : les tags x.y.z des images sont vérifiés toutes les 6 h, avec un bouton pour déployer la nouvelle version.
 - **Base de données** de chaque appli : taille, tables, export `.sql.gz`, import (`.sql`, `.sql.gz`, `.dump`) et remise à zéro, avec copie de sécurité.
 - **Mises à jour système** (Debian, Docker, Caddy, cloudflared, PostgreSQL) de la console et de chaque nœud, depuis la page Système, avec retour à la version précédente si le service ne repart pas et rappel si une mise à jour attend depuis plus de 14 jours.

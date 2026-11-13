@@ -1,5 +1,6 @@
 """Surveillance en tâche de fond (un fil dans la console) :
-- chaque minute : statistiques, santé des applis, disque, mémoire, PostgreSQL, tunnel ;
+- chaque minute : statistiques, santé des applis, disque, mémoire, PostgreSQL, tunnel, et pour chaque nœud : disque,
+  mémoire, Docker, PostgreSQL, Caddy (s'il reçoit le web en direct), pare-feu ;
 - toutes les 6 h : nouvelles versions des images ;
 - chaque jour : mises à jour système disponibles, fraîcheur des sauvegardes.
 """
@@ -90,6 +91,66 @@ def check_system():
               "Tunnel Cloudflare rétabli", priority=5)
 
 
+def node_checks(n, info=None):
+    """État des services d'un nœud distant, d'après son dernier relevé : [{key, name, ok, state}].
+    ok None : sans objet ou pas encore relevé."""
+    info = info if info is not None else (n["info"] if isinstance(n["info"], dict) else {})
+    svc = info.get("svc") or {}
+    web = security.web_needed(n["id"])
+    has_apps = bool(db.one("SELECT 1 FROM apps WHERE node = ?", (n["id"],)))
+    out = []
+    if "docker" in svc:
+        out.append({"key": "docker", "name": "Docker", "ok": svc["docker"] == "active",
+                    "state": "en ligne" if svc["docker"] == "active" else (svc["docker"] or "?")})
+    pg = info.get("pg")
+    if pg is not None:
+        out.append({"key": "pg", "name": "PostgreSQL", "ok": pg == "healthy",
+                    "state": {"healthy": "en ligne", "": "absent"}.get(pg, pg), "apps": has_apps})
+    if "caddy" in svc:
+        out.append({"key": "caddy", "name": "Caddy", "ok": (svc["caddy"] == "active") if web else None,
+                    "state": ("en ligne" if svc["caddy"] == "active" else svc["caddy"] or "?") if web
+                    else "inutile (pas d'entrée web directe)"})
+    if "fw" in svc:
+        out.append({"key": "fw", "name": "Pare-feu", "ok": svc["fw"] == "ok", "state": "actif" if svc["fw"] == "ok" else "règles absentes"})
+    return out
+
+
+def check_nodes():
+    """Chaque minute, après le relevé des nœuds : disque, mémoire, Docker, PostgreSQL, Caddy, pare-feu de chaque nœud.
+    (Injoignable : déjà signalé par nodes.check_all.)"""
+    for n in nodes.all_nodes():
+        if n["id"] == P.LOCAL or n["state"] != "ok" or not n["last_seen"] or time.time() - n["last_seen"] > 180:
+            continue
+        i, k, nm = n["info"] or {}, n["id"], n["name"]
+        if i.get("disk_total"):
+            pct = i["disk"] / i["disk_total"] * 100
+            _flag(f"disk:{k}", pct > 85, f"Nœud {nm} : disque presque plein",
+                  f"{pct:.0f} % utilisés, {i['disk_total'] - i['disk']:.1f} Go libres", f"Nœud {nm} : espace disque revenu à la normale")
+        if i.get("mem_total"):
+            avail = (i["mem_total"] - i["mem"]) / i["mem_total"] * 100
+            _flag(f"mem:{k}", avail < 8, f"Nœud {nm} : mémoire presque saturée",
+                  f"{i['mem_total'] - i['mem']:.0f} Mo disponibles sur {i['mem_total']:.0f} Mo",
+                  f"Nœud {nm} : mémoire revenue à la normale")
+        for c in node_checks(n, i):
+            if c["ok"] is None:
+                continue
+            if c["key"] == "pg":
+                _flag(f"pg:{k}", not c["ok"], f"Nœud {nm} : PostgreSQL arrêté",
+                      f"État : {c['state']}." + (" Les applis du nœud avec base sont en panne." if c.get("apps") else ""),
+                      f"Nœud {nm} : PostgreSQL à nouveau en ligne", priority=5 if c.get("apps") else 4)
+            elif c["key"] == "docker":
+                _flag(f"docker:{k}", not c["ok"], f"Nœud {nm} : Docker arrêté", f"État : {c['state']}. Ses applis sont en panne.",
+                      f"Nœud {nm} : Docker à nouveau en ligne", priority=5)
+            elif c["key"] == "caddy":
+                _flag(f"caddy:{k}", not c["ok"], f"Nœud {nm} : Caddy arrêté",
+                      f"État : {c['state']}. Les domaines en mode direct qui entrent par ce nœud ne répondent plus.",
+                      f"Nœud {nm} : Caddy à nouveau en ligne", priority=5)
+            elif c["key"] == "fw":
+                _flag(f"fw:{k}", not c["ok"], f"Nœud {nm} : pare-feu absent",
+                      "La table nftables hangarnode n'est plus chargée : le nœud est exposé. Clique sur Appliquer (page Sécurité).",
+                      f"Nœud {nm} : pare-feu de nouveau en place", priority=5)
+
+
 def check_versions(slug=None):
     """Cherche une version plus récente pour les applis en image. Retourne le nombre de nouveautés."""
     found = 0
@@ -173,7 +234,7 @@ def _loop():
         t0 = time.time()
         for name, fn in (("stats", stats.collect_requests), ("res", stats.collect_resources), ("host", stats.collect_host),
                          ("apps", check_apps), ("sys", check_system),
-                         ("nodes", nodes.check_all), ("ha", ha.tick)):
+                         ("nodes", nodes.check_all), ("nodes_health", check_nodes), ("ha", ha.tick)):
             try:
                 fn()
             except Exception as e:

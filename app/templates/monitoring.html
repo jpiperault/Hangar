@@ -16,6 +16,35 @@
   {% endfor %}
 </section>
 
+<section class="panel" style="margin:20px 0" id="machines">
+  <h2>Machines</h2>
+  <div class="tablebox"><table class="mon">
+    <thead><tr><th>Machine</th><th>État</th><th>Processeur</th><th>Mémoire</th><th>Disque</th><th>Services</th><th>Applis</th></tr></thead>
+    <tbody>
+    {% for m in machines %}{% set i = m.info %}
+      <tr>
+        <td><div class="nm">{% if m.id != 'local' %}<a href="/nodes/{{ m.id }}">{{ m.name }}</a>{% else %}{{ m.name }}{% endif %}</div>
+          <div class="pk">{{ m.id if m.id != 'local' else 'cette machine' }}{% if m.latency is not none %} · ping {{ m.latency }} ms{% endif %}</div></td>
+        <td>{% if m.state == 'ok' %}<span class="pill s-running">en ligne</span>
+          {% elif m.state == 'stale' %}<span class="pill s-deploying">relevé ancien</span><div class="pk">{{ m.seen | ago if m.seen else 'jamais relevé' }}</div>
+          {% elif m.state == 'offline' %}<span class="pill s-error">injoignable</span><div class="pk">{{ ('vu ' ~ (m.seen | ago)) if m.seen else '' }}</div>
+          {% else %}<span class="pill s-stopped">{{ {'installing': 'installation', 'error': 'erreur'}.get(m.state, m.state) }}</span>{% endif %}</td>
+        {% if i.mem_total %}
+        <td><span class="ram">{{ '%.0f' % i.cpu if i.cpu is not none else '—' }} %</span>{% if i.cpu is not none %}{{ meter(i.cpu, 100) }}{% endif %}
+          <div class="pk">charge {{ (i.load or [0])[0] | round(2) }} · {{ i.cores }} cœur{{ 's' if (i.cores or 1) > 1 }}</div></td>
+        <td><span class="ram">{{ '%.0f' % i.mem }} / {{ '%.0f' % i.mem_total }} Mo</span>{{ meter(i.mem, i.mem_total) }}</td>
+        <td><span class="ram">{{ '%.1f' % i.disk }} / {{ '%.0f' % i.disk_total }} Go</span>{{ meter(i.disk, i.disk_total) }}</td>
+        {% else %}<td colspan="3" class="hint">pas de mesure</td>{% endif %}
+        <td>{% for c in m.checks %}<span class="{{ 'lv-ok' if c.ok else ('hint' if c.ok is none else 'lv-error') }}" title="{{ c.state }}" style="white-space:nowrap;margin-right:8px">{{ '✓' if c.ok else ('–' if c.ok is none else '✕') }} {{ c.name }}</span>{% if c.ok == false %}<div class="pk lv-error">{{ c.name }} : {{ c.state }}</div>{% endif %}{% else %}<span class="hint">—</span>{% endfor %}</td>
+        <td class="ram">{{ m.apps }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <span class="hint">Console mesurée à l'instant, nœuds relevés chaque minute par le réseau privé. Alerte si un disque dépasse 85 %, si la mémoire est presque saturée, si Docker, PostgreSQL, le pare-feu ou Caddy (nœud d'entrée web) s'arrêtent, ou si un nœud ne répond plus. Courbes de chaque nœud : sa fiche.</span>
+</section>
+
+<h2 style="margin:0 0 10px">Console</h2>
 <section class="tiles" aria-label="Serveur maintenant">
   <div class="tile"><span class="tl">Processeur</span><span class="tv">{{ '%.0f' % host.cpu if host.cpu is not none else '—' }} %</span>
     <span class="hint">charge {{ host.load | map('round', 2) | join(' · ') }} ({{ host.cores }} cœur{{ 's' if host.cores > 1 }})</span>{% if host.cpu is not none %}{{ meter(host.cpu, 100) }}{% endif %}</div>
@@ -30,7 +59,7 @@
 </section>
 
 <section class="panel" style="margin-top:20px">
-  <h2>Serveur</h2>
+  <h2>Console : historique</h2>
   <div class="charts" id="charts"></div>
   <details><summary class="hint">Voir les données en tableau</summary><div class="tablebox" id="stattable"></div></details>
 </section>
@@ -40,11 +69,12 @@
 <section class="panel" style="margin-top:20px">
   <h2>Applications</h2>
   <div class="tablebox"><table class="mon">
-    <thead><tr><th>Application</th><th>État</th><th>Healthcheck</th><th>Requêtes 24 h</th><th>Erreurs 5xx</th><th>p95 24 h</th><th>Mémoire</th><th>CPU 24 h</th><th>Conteneur</th></tr></thead>
+    <thead><tr><th>Application</th><th>Machine</th><th>État</th><th>Healthcheck</th><th>Requêtes 24 h</th><th>Erreurs 5xx</th><th>p95 24 h</th><th>Mémoire</th><th>CPU 24 h</th><th>Conteneur</th></tr></thead>
     <tbody>
     {% for a in rows %}
       <tr>
         <td><div class="nm"><a href="/apps/{{ a.slug }}#stats">{{ a.name }}</a></div><div class="pk">{{ a.version }}</div></td>
+        <td class="ram">{% if (a.node or 'local') != 'local' %}<a href="/nodes/{{ a.node }}">{{ a.node }}</a>{% else %}console{% endif %}</td>
         <td><span class="pill s-{{ a.status }}">{{ LABELS[a.status] }}</span></td>
         <td>{% if a.h %}<span class="{{ 'lv-ok' if a.h.ok else 'lv-error' }}">{{ '✓' if a.h.ok else '✕' }} {{ '%.0f ms' % a.h.ms if a.h.ok else a.h.why }}</span><div class="pk">{{ a.h.ts | ago }}</div>{% else %}<span class="hint">—</span>{% endif %}</td>
         <td><div class="sparkcell"><span class="num">{{ '{:,}'.format(a.r.n).replace(',', ' ') if a.r else 0 }}</span>
@@ -58,7 +88,7 @@
           {% if a.c.oom %}<div class="lv-error pk">tué faute de mémoire</div>{% endif %}</td>
       </tr>
     {% else %}
-      <tr><td colspan="9" class="empty">Aucune application déployée.</td></tr>
+      <tr><td colspan="10" class="empty">Aucune application déployée.</td></tr>
     {% endfor %}
     </tbody>
   </table></div>

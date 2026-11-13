@@ -1597,7 +1597,28 @@ async def monitoring(request: Request):
                      (time.time() - 86400,))
     return render(request, "monitoring.html", title="Supervision", nav="monitoring", host=host, hs=hs, rng=rng,
                   ranges=list(stats.RANGES), rows=rows, svc=svc, pg=pg, incidents=incidents, auto_refresh=60,
-                  now=time.time())
+                  now=time.time(), machines=_machines(host, svc, rows))
+
+
+def _machines(host, svc, rows):
+    """Une ligne par machine pour la supervision : la console (mesures locales), puis chaque nœud (dernier relevé)."""
+    napps = {}
+    for a in rows:
+        napps[a["node"] or P.LOCAL] = napps.get(a["node"] or P.LOCAL, 0) + 1
+    keep = {"Serveur web (Caddy)": "Caddy", "Tunnel Cloudflare": "Tunnel", "Docker": "Docker", "PostgreSQL": "PostgreSQL",
+            "Pare-feu": "Pare-feu"}
+    out = [{"id": P.LOCAL, "name": "Console", "state": "ok", "info": host, "apps": napps.get(P.LOCAL, 0), "latency": None,
+            "checks": [{"name": keep[x["name"]], "ok": x["ok"], "state": x["state"]} for x in svc if x["name"] in keep]}]
+    for n in nodes.all_nodes():
+        if n["id"] == P.LOCAL:
+            continue
+        i = n["info"] or {}
+        stale = not n["last_seen"] or time.time() - n["last_seen"] > 180
+        state = n["state"] if n["state"] != "ok" else ("stale" if stale else "ok")
+        out.append({"id": n["id"], "name": n["name"], "state": state, "seen": n["last_seen"], "info": i,
+                    "apps": napps.get(n["id"], 0), "latency": i.get("latency_ms"),
+                    "checks": [] if state != "ok" else monitor.node_checks(n, i)})
+    return out
 
 
 # ---------------------------------------------------------------- nœuds

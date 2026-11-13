@@ -459,6 +459,9 @@ print(json.dumps({
   'docker': sh("docker version --format '{{.Server.Version}}'"),
   'containers': int(sh('docker ps -q | wc -l') or 0),
   'pg': sh("docker inspect -f '{{.State.Health.Status}}' platform-postgres-1"),
+  'svc': {'docker': sh('systemctl is-active docker'), 'caddy': sh('systemctl is-active caddy'),
+          'fw': 'ok' if subprocess.run('nft list table inet hangarnode', shell=True, capture_output=True).returncode == 0 else ''},
+  'swap': (m.get('SwapTotal', 0) - m.get('SwapFree', 0)) / 1024, 'swap_total': m.get('SwapTotal', 0) / 1024,
   'os': sh('. /etc/os-release; echo $PRETTY_NAME')}))
 EOF"""
 
