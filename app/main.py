@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import access, affinity, alerts, gameports, kinds, applogs, backup, cache, cloudflare, crashes, limits, remoteconfig, smoke, crypt, dataimport, db, dbadmin, ha, jobs, monitor, move, nodes, preprod, report, security, services, stats, statuspage, system
+from . import access, affinity, alerts, catalog, gameports, kinds, applogs, backup, cache, cloudflare, crashes, limits, remoteconfig, smoke, crypt, dataimport, db, dbadmin, ha, jobs, monitor, move, nodes, preprod, report, security, services, stats, statuspage, system
 from . import domains as D
 from . import platform as P
 
@@ -442,7 +442,59 @@ async def home(request: Request):
 
 @app.get("/catalogue")
 async def catalogue_page(request: Request):
-    return go("/apps/new")   # le catalogue d'applis prêtes arrive avec son lot
+    ch = node_choices()
+    if not ch:
+        flash(request, "Aucune machine ne peut héberger d'appli : ajoute un nœud.", "error")
+        return go("/nodes")
+    cur = catalog.get(request.query_params.get("app") or "") or catalog.CATALOG[0]
+    used = {a["image"] for a in db.apps()}
+    return render(request, "catalogue.html", title="Installer une appli prête", nav="apps", items=catalog.CATALOG,
+                  cats=catalog.CATS, cur=cur, used=used, domains=D.all_domains(), dft=D.default(), node_choices=ch,
+                  best=max(ch, key=lambda c: c["free"])["id"], form=request.session.pop("cform", None))
+
+
+@app.post("/catalogue/install")
+async def catalogue_install(request: Request):
+    f = await request.form()
+    c = catalog.get(f.get("app") or "")
+    if not c:
+        return go("/catalogue")
+    back = go(f"/catalogue?app={c['id']}")
+    slug = (f.get("slug") or "").strip().lower()
+    name = (f.get("name") or c["name"]).strip()[:80] or c["name"]
+    node = f.get("node") or "local"
+    err = None
+    if not SLUG.match(slug) or slug in RESERVED:
+        err = "Identifiant : lettres minuscules, chiffres et tirets, 32 caractères au plus."
+    elif db.app(slug):
+        err = "Cet identifiant est déjà utilisé."
+    elif node not in {x["id"] for x in node_choices()}:
+        err = "Machine indisponible."
+    rts = []
+    if not err:
+        rts, err = D._check_routes([{"kind": "sub", "domain": (f.get("domain") or "").strip().lower(),
+                                     "sub": (f.get("sub") or "").strip().lower()}], slug, D.by_name())
+    if err:
+        request.session["cform"] = {k: f.get(k) for k in ("slug", "name", "sub", "domain", "node")}
+        flash(request, err, "error")
+        return back
+    host = D.host_of(rts[0]) if rts else ""
+    pw = secrets.token_hex(16) if c["db"] else None
+    a = {"slug": slug, "node": node, "db_password": pw}
+    vals = {"url": f"https://{host}/", "host": host, "db_host": "postgres", "db_port": 5432, "db_name": P.db_name(slug),
+            "db_user": P.db_name(slug), "db_password": pw or ""}
+    if c["db"]:
+        vals["db_url"] = P.db_url({**a, "db": 1}, node)
+    d = {"name": name, "kind": "tool", "pkg": "", "source": "image", "image": c["image"], "version": c["version"],
+         "port": c["port"], "health_path": c["health"], "mem_mb": c["mem"], "env": catalog.render_env(c["env"], vals),
+         "db": 1 if c["db"] else 0, "db_password": pw, "data_user": c.get("data_user", ""), "node": node,
+         "host_port": P.next_host_port(), "state": "deploying", "desired": "running", "created_at": time.time()}
+    db.insert_app(slug, d)
+    D.set_routes(slug, rts)
+    P.log("info", slug, f"installée depuis le catalogue ({c['name']}, {c['image']}:{c['version']})")
+    P.spawn(P.deploy, slug, c["version"], "create")
+    flash(request, f"{c['name']} en cours d'installation sur https://{host}/. {c['after']}")
+    return go(f"/apps/{slug}")
 
 
 @app.get("/apps/new")

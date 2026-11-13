@@ -24,7 +24,7 @@
     <span class="lbl">Application</span>
     {% if new %}
     <div class="kindgrid" role="radiogroup" aria-label="Type d'application">
-      {% for k in kinds %}<label class="kindcard"><input type="radio" name="kind" value="{{ k.id }}" data-kind {{ 'checked' if k.id == a.kind }}
+      {% for k in kinds if not k.catalog %}<label class="kindcard"><input type="radio" name="kind" value="{{ k.id }}" data-kind {{ 'checked' if k.id == a.kind }}
         data-port="{{ k.defaults.port }}" data-health="{{ k.defaults.health_path }}" data-db="{{ k.defaults.db }}" data-client="{{ 1 if k.client else 0 }}" data-client-open="{{ 1 if k.client_open else 0 }}">
         <span><b>{{ k.name }}</b><small>{{ k.desc }}</small></span></label>{% endfor %}
       <a class="kindcard more" href="/catalogue"><span><b>Outil auto-hébergé</b><small>Une appli open source prête : statistiques, mots de passe, wiki, Git… depuis le catalogue.</small></span></a>
@@ -271,7 +271,7 @@
     <span class="lbl">Application</span>
     {% if new %}
     <div class="kindgrid" role="radiogroup" aria-label="Type d'application">
-      {% for k in kinds %}<label class="kindcard"><input type="radio" name="kind" value="{{ k.id }}" data-kind {{ 'checked' if k.id == a.kind }}
+      {% for k in kinds if not k.catalog %}<label class="kindcard"><input type="radio" name="kind" value="{{ k.id }}" data-kind {{ 'checked' if k.id == a.kind }}
         data-port="{{ k.defaults.port }}" data-health="{{ k.defaults.health_path }}" data-db="{{ k.defaults.db }}" data-client="{{ 1 if k.client else 0 }}" data-client-open="{{ 1 if k.client_open else 0 }}">
         <span><b>{{ k.name }}</b><small>{{ k.desc }}</small></span></label>{% endfor %}
       <a class="kindcard more" href="/catalogue"><span><b>Outil auto-hébergé</b><small>Une appli open source prête : statistiques, mots de passe, wiki, Git… depuis le catalogue.</small></span></a>

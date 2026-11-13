@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block main %}
+{% set fm = form or {} %}
+<div class="bar"><div><div class="crumb"><a href="/">Applications</a> /</div><h1>Installer une appli prête</h1>
+  <span class="hint">Des applis open source avec leurs réglages déjà faits. Tu choisis l'adresse et la machine, Hangar fait le reste : base, secrets, sauvegardes, supervision, mises à jour.</span></div></div>
+
+<div class="chips seg" role="radiogroup" aria-label="Catégories">
+  <label><input type="radio" name="cat" value="" checked><span>Tout <span class="hint">{{ items | length }}</span></span></label>
+  {% for k, v in cats.items() %}{% set nb = items | selectattr('cat', 'equalto', k) | list | length %}{% if nb %}<label><input type="radio" name="cat" value="{{ k }}"><span>{{ v }} <span class="hint">{{ nb }}</span></span></label>{% endif %}{% endfor %}
+</div>
+
+<div class="cols" style="align-items:start">
+  <div class="catgrid">
+    {% for c in items %}
+    <a class="catcard {{ 'on' if c.id == cur.id }}" href="/catalogue?app={{ c.id }}" data-cat="{{ c.cat }}">
+      <span style="display:flex;align-items:center;gap:10px"><span class="catlogo" style="background:{{ c.color }}">{{ c.name[0] }}</span><b>{{ c.name }}</b>
+        {% if c.image in used %}<span class="pill s-running" style="margin-left:auto">installée</span>{% endif %}</span>
+      <small>{{ c.desc }}</small>
+      <small class="hint">{{ 'PostgreSQL' if c.db else 'sans base' }} · {{ c.mem }} Mo</small>
+    </a>
+    {% endfor %}
+  </div>
+
+  <form class="panel" method="post" action="/catalogue/install" autocomplete="off" style="display:flex;flex-direction:column;gap:12px">
+    <input type="hidden" name="app" value="{{ cur.id }}">
+    <h2 style="margin:0">{{ cur.name }}</h2>
+    <p class="hint" style="margin:0">{{ cur.desc }} <a href="{{ cur.site }}" target="_blank" rel="noopener">Site du projet</a></p>
+    <div class="row2">
+      <div class="field"><label for="cname">Nom</label><input id="cname" name="name" value="{{ fm.name or cur.name }}"></div>
+      <div class="field"><label for="cslug">Identifiant</label><input id="cslug" name="slug" value="{{ fm.slug or cur.id }}" spellcheck="false"></div>
+    </div>
+    <div class="field"><label for="csub">Adresse</label>
+      <div class="inlinefield"><input id="csub" name="sub" value="{{ fm.sub or cur.id }}" spellcheck="false" aria-label="Sous-domaine" style="max-width:12em"><span>.</span>
+        <select name="domain" aria-label="Domaine">{% for d in domains %}<option value="{{ d.name }}" {{ 'selected' if (fm.domain or (dft.name if dft else '')) == d.name }}>{{ d.name }}</option>{% endfor %}</select></div></div>
+    <div class="field"><label for="cnode">Machine</label>
+      <select id="cnode" name="node">{% for n in node_choices %}<option value="{{ n.id }}" {{ 'selected' if (fm.node or best) == n.id }}>{{ n.name }} · {{ '%.0f' % n.free }} Mo libres{{ ' (conseillé)' if n.id == best and node_choices | length > 1 }}</option>{% endfor %}</select></div>
+    <dl class="facts">
+      <dt>Image</dt><dd class="mono" style="word-break:break-all">{{ cur.image }}:{{ cur.version }}</dd>
+      <dt>Base</dt><dd>{{ 'PostgreSQL dédiée' if cur.db else 'aucune (données dans /data)' }}</dd>
+      <dt>Mémoire</dt><dd>{{ cur.mem }} Mo</dd>
+      <dt>Secrets</dt><dd>générés à l'installation, rangés dans ses variables</dd>
+    </dl>
+    <p class="hint" style="margin:0"><strong>Ensuite :</strong> {{ cur.after }}</p>
+    <div><button class="btn primary">Installer {{ cur.name }}</button></div>
+    <span class="hint">L'appli devient une appli comme les autres (type « Outil ») : tout se règle ensuite dans sa fiche.</span>
+  </form>
+</div>
+<script nonce="{{ csp_nonce }}">
+document.querySelectorAll('input[name=cat]').forEach(function (r) { r.addEventListener('change', function () {
+  document.querySelectorAll('.catcard').forEach(function (c) { c.hidden = r.value && c.dataset.cat !== r.value; }); }); });
+(function () { var s = document.getElementById('cslug'), sub = document.getElementById('csub'), touched = false;
+  sub.addEventListener('input', function () { touched = true; });
+  s.addEventListener('input', function () { if (!touched) sub.value = s.value; }); })();
+</script>
+{% endblock %}

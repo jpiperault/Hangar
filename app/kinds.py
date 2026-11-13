@@ -14,6 +14,9 @@ KINDS = {
                "desc": "L'API d'une appli Android ou iOS, avec configuration à distance et rapports de plantage.",
                "http": True, "client": True, "client_open": True,
                "defaults": {"port": 8080, "health_path": "/health", "db": 1}},
+    "tool": {"name": "Outil auto-hébergé", "short": "Outil",
+             "desc": "Une appli open source prête, installée depuis le catalogue.",
+             "http": True, "client": False, "catalog": True, "defaults": {"port": 8080, "health_path": "/", "db": 0}},
     "worker": {"name": "Service sans page web", "short": "Service",
                "desc": "Bot, traitement de fond, file d'attente : jugé sain tant que son conteneur tourne.",
                "http": False, "client": False, "defaults": {"port": 8080, "health_path": "/", "db": 0}},
@@ -21,7 +24,7 @@ KINDS = {
              "desc": "Minecraft, serveur UDP, tout service qui n'est pas du web : ports publics sur sa machine.",
              "http": False, "ports": True, "client": False, "defaults": {"port": 25565, "health_path": "/", "db": 0}},
 }
-ORDER = ["web", "api", "mobile", "worker", "game"]
+ORDER = ["web", "api", "mobile", "worker", "game", "tool"]
 DEFAULT = "web"
 
 

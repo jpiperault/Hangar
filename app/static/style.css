@@ -256,3 +256,9 @@ html.navigating::before{content:"";position:fixed;top:0;left:0;height:3px;width:
 .clientcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px}
 .ccard{border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:3px;min-width:0;word-break:break-all}
 .codebox{white-space:pre;overflow:auto;margin:10px 0 0;font-size:.78rem;background:var(--sunken);padding:12px;border-radius:8px}
+/* catalogue d'applis prêtes */
+.catgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;min-width:0}
+.catcard{display:flex;flex-direction:column;gap:6px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--fg);text-decoration:none;min-height:44px}
+.catcard.on{border:2px solid var(--accent);background:var(--accent-soft);padding:11px 13px}
+.catcard small{color:var(--muted);font-size:.8rem;line-height:1.35}
+.catlogo{width:28px;height:28px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:.85rem;flex:none}
