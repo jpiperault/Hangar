@@ -2,8 +2,23 @@
 {% block main %}
 <div class="bar">
   <div><div class="crumb"><a href="/">Applications</a> / <a href="/apps/{{ a.slug }}">{{ a.name }}</a> /</div><h1>Logs</h1></div>
-  <a class="btn sm" href="/apps/{{ a.slug }}/logs">Rafraîchir</a>
 </div>
-<p class="hint">300 dernières lignes du conteneur <code>app-{{ a.slug }}-app-1</code>.</p>
-<pre class="log">{{ logs }}</pre>
+<form class="panel" method="get" action="/apps/{{ a.slug }}/logs" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+  <div class="field"><label for="p">Période</label><select id="p" name="p">{% for k, v in periods.items() %}<option value="{{ k }}" {{ 'selected' if k == period }}>{{ v }}</option>{% endfor %}</select></div>
+  <div class="field" style="flex:1;min-width:200px"><label for="q">Chercher</label><input id="q" name="q" value="{{ q }}" spellcheck="false" placeholder="texte, ou re:expression régulière"></div>
+  <label class="check" style="margin-bottom:8px"><input type="checkbox" name="e" value="1" {{ 'checked' if err }}><span>Erreurs seulement</span></label>
+  <button class="btn sm primary" style="margin-bottom:4px">Afficher</button>
+</form>
+<p class="hint">Conteneur <code>app-{{ a.slug }}-app-1</code> · {{ lines | length }} ligne{{ 's' if lines | length > 1 }} affichée{{ 's' if lines | length > 1 }}{% if q or err %} sur {{ total }} lue{{ 's' if total > 1 }}{% endif %}{% if cut %} (les 2000 dernières){% endif %}. Docker garde jusqu'à 30 Mo de logs par conteneur : la période réellement disponible dépend du volume écrit.</p>
+<pre class="log">{% for l in lines %}{{ l }}
+{% else %}Aucune ligne.{% endfor %}</pre>
+
+<form class="panel" id="alertes" method="post" action="/apps/{{ a.slug }}/logs/alerts" style="margin-top:20px;display:flex;flex-direction:column;gap:10px">
+  <h2 style="margin:0">Alertes sur les logs</h2>
+  <label class="check"><input type="checkbox" name="on" {{ 'checked' if la.on }}><span>M'alerter quand une ligne contient un de ces motifs</span></label>
+  <div class="field"><label for="pat">Motifs (un par ligne)</label>
+    <textarea id="pat" name="patterns" spellcheck="false" style="min-height:70px" placeholder="Exception&#10;OutOfMemoryError&#10;re:HTTP 5\d\d">{{ la.patterns }}</textarea>
+    <span class="hint">Texte cherché sans tenir compte des majuscules ; <code>re:</code> devant pour une expression régulière. Vérifié chaque minute ; au plus une alerte par motif toutes les 30 minutes, avec les dernières lignes trouvées.</span></div>
+  <div><button class="btn sm primary">Enregistrer</button></div>
+</form>
 {% endblock %}
