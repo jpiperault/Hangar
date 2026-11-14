@@ -21,7 +21,7 @@ _dicts = {}
 JINJA = re.compile(r"\{\{.*?\}\}|\{%.*?%\}|\{#.*?#\}", re.S)
 SKIP = re.compile(r"(<script\b.*?</script>|<style\b.*?</style>)", re.S | re.I)
 TAG = re.compile(r"<[^>]*>")
-ATTR = re.compile(r'(\b(?:placeholder|title|aria-label|alt|data-confirm)=")([^"]*)(")')
+ATTR = re.compile(r'(\b(?:placeholder|title|aria-label|alt|data-confirm|data-connecting|data-connected|data-closed|data-refused)=")([^"]*)(")')
 STR = re.compile(r"'(?:[^'\\]|\\.)*'" + r'|"(?:[^"\\]|\\.)*"')
 LOGIC_BEFORE = re.compile(r"(==|!=|\bin|\bnot in|\[|\.get\(|\bis|startswith\(|endswith\()\s*$")
 WORDY = re.compile(r"[A-Za-zÀ-ÿ]{2}")

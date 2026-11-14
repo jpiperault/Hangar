@@ -1,41 +1,17 @@
 {% extends "base.html" %}
 {% block main %}
+<link rel="stylesheet" href="/static/vendor/xterm.css">
 <div class="bar"><div><div class="crumb"><a href="/">Applications</a> / <a href="/apps/{{ a.slug }}">{{ a.name }}</a> /</div><h1>Terminal</h1>
-  <span class="hint">Une commande à la fois dans le conteneur (sh), 60 s au plus ; le dossier courant est gardé (« cd » marche). Pas de programme plein écran (vim, top). Chaque commande est notée au journal de l'appli.</span></div></div>
+  <span class="hint">Terminal interactif dans le conteneur (bash ou sh) : vim, top, complétion. Coupé après 30 min sans activité, 4 h au plus. Ouverture et fermeture notées au journal de l'appli.</span></div></div>
 <section class="panel" style="display:flex;flex-direction:column;gap:10px">
   <div class="inlinefield" style="flex-wrap:wrap"><label for="which">Conteneur</label>
     <select id="which">{% for k, c, label in containers %}<option value="{{ k }}">{{ label }} ({{ c }})</option>{% endfor %}</select>
     <label class="check"><input type="checkbox" id="asroot"><span>en root</span></label>
-    <button class="btn sm link" type="button" id="clear">Effacer</button></div>
-  <pre class="log" id="out" style="min-height:300px;max-height:60vh;overflow:auto" aria-live="polite"></pre>
-  <form id="cmdform" class="inlinefield" autocomplete="off"><span class="mono" id="cwd">$</span>
-    <input id="cmd" class="mono" spellcheck="false" autocapitalize="off" aria-label="Commande" style="flex:1" placeholder="ls -la /data" autofocus>
-    <button class="btn sm primary">Lancer</button></form>
+    <button class="btn sm" type="button" id="xconnect">Reconnecter</button>
+    <span class="hint" id="xstatus" aria-live="polite"></span></div>
+  <div id="xterm" data-slug="{{ a.slug }}" data-connecting="connexion…" data-connected="connecté" data-closed="session terminée : « Reconnecter » pour en ouvrir une autre" data-refused="refusé (compte administrateur, réseau local)" style="height:65vh;min-height:320px;background:#111418;border-radius:8px;padding:6px"></div>
 </section>
-<script nonce="{{ csp_nonce }}">
-(function () {
-  var out = document.getElementById('out'), cmd = document.getElementById('cmd'), cwdEl = document.getElementById('cwd');
-  var which = document.getElementById('which'), root = document.getElementById('asroot'), cwd = '', hist = [], hi = 0;
-  function add(text, cls) { var s = document.createElement('span'); if (cls) s.className = cls; s.textContent = text; out.appendChild(s); out.scrollTop = out.scrollHeight; }
-  which.addEventListener('change', function () { cwd = ''; cwdEl.textContent = '$'; });
-  document.getElementById('clear').addEventListener('click', function () { out.textContent = ''; });
-  cmd.addEventListener('keydown', function (e) {
-    if (e.key === 'ArrowUp' && hi > 0) { hi--; cmd.value = hist[hi]; e.preventDefault(); }
-    if (e.key === 'ArrowDown') { hi = Math.min(hist.length, hi + 1); cmd.value = hist[hi] || ''; e.preventDefault(); }
-  });
-  document.getElementById('cmdform').addEventListener('submit', function (e) {
-    e.preventDefault();
-    var c = cmd.value.trim(); if (!c) return;
-    hist.push(c); hi = hist.length; cmd.value = ''; cmd.disabled = true;
-    add((cwd || '') + '$ ' + c + '\n', 'lv-ok');
-    var body = new URLSearchParams({which: which.value, cmd: c, cwd: cwd, root: root.checked ? '1' : ''});
-    fetch('/apps/{{ a.slug }}/terminal/run', {method: 'POST', body: body, credentials: 'same-origin'})
-      .then(function (r) { return r.headers.get('content-type').indexOf('json') >= 0 ? r.json() : {out: 'Refusé (droits insuffisants ?)', rc: -1, cwd: cwd}; })
-      .then(function (j) { add(j.out + (j.out.endsWith('\n') || !j.out ? '' : '\n'), j.rc ? 'lv-error' : ''); if (j.rc) add('[code ' + j.rc + ']\n', 'hint');
-        cwd = j.cwd || cwd; cwdEl.textContent = (cwd || '') + ' $'; })
-      .catch(function () { add('Console injoignable.\n', 'lv-error'); })
-      .finally(function () { cmd.disabled = false; cmd.focus(); });
-  });
-})();
-</script>
+<script src="/static/vendor/xterm.js"></script>
+<script src="/static/vendor/addon-fit.js"></script>
+<script src="/static/terminal.js"></script>
 {% endblock %}

@@ -153,8 +153,8 @@ app.add_middleware(_Gzip)
 
 # routes, dans l'ordre (les plus précises avant /apps/{slug}/{action})
 from .routes import (appdata, apps, auth, backups, domains, features, ha, monitoring, nodes,  # noqa: E402
-                     pages, settings, sitepub, system)
+                     pages, settings, sitepub, system, wsterm)
 from .routes.auth import LOGIN_MAX_IP, _fails  # noqa: E402,F401  (pour les essais)
 
-for _r in (auth, ha, features, sitepub, apps, domains, settings, pages, backups, system, appdata, monitoring, nodes):
+for _r in (auth, ha, features, sitepub, wsterm, apps, domains, settings, pages, backups, system, appdata, monitoring, nodes):
     app.include_router(_r.router)
