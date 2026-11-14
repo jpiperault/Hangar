@@ -354,6 +354,8 @@ def _loop():
         _every("purge_uptime", 86400, report.purge)
         from . import images
         _every("image_cleanup", 3600, images.tick)   # sans effet si l'option est coupée ou hors du jour choisi
+        from . import external
+        _every("external", 60, external.tick)        # à son propre rythme, si une sonde est choisie
         time.sleep(max(5, 60 - (time.time() - t0)))
 
 

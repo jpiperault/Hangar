@@ -111,6 +111,30 @@
     {% for d in pg.dbs %}<div class="cert"><span class="mono">{{ d.name }}</span><span class="hint">{{ d.size | size }}</span></div>{% endfor %}
   </section>
 </div>
+<form class="panel" id="exterieur" method="post" action="/monitoring/external" style="margin-top:20px;display:flex;flex-direction:column;gap:10px">
+  <h2 style="margin:0">Vu de l'extérieur</h2>
+  <p class="hint" style="margin:0">Une machine ouvre l'adresse publique de chaque appli par Internet, comme un visiteur : DNS, Cloudflare, tunnel et Caddy d'entrée compris, ce que le contrôle interne ne voit pas. Choisis de préférence un VPS loin de la console. Alerte après plusieurs échecs d'affilée, puis au retour.</p>
+  <div class="inlinefield" style="flex-wrap:wrap">
+    <label class="check"><input type="checkbox" name="on" {{ 'checked' if ext.on }}><span>Surveiller depuis</span></label>
+    <select name="node" aria-label="Machine sonde"><option value="">choisir une machine</option>{% for n in probe_nodes %}<option value="{{ n.id }}" {{ 'selected' if ext.node == n.id }} {{ 'disabled' if n.state != 'ok' and n.id != 'local' }}>{{ n.id }}{{ ' (console)' if n.id == 'local' }}</option>{% endfor %}</select>
+    <span>toutes les</span><input name="every" type="number" min="1" max="60" value="{{ ext.every }}" style="max-width:5em" aria-label="Minutes"><span>min, alerte après</span>
+    <input name="fails" type="number" min="1" max="10" value="{{ ext.fails }}" style="max-width:4em" aria-label="Échecs"><span>échec(s)</span>
+  </div>
+  {% if ext_err %}<p class="lv-warn" style="margin:0">Sonde injoignable : {{ ext_err }}</p>{% endif %}
+  {% if ext_res %}
+  <div class="tablebox"><table>
+    <thead><tr><th>Appli</th><th>Adresse</th><th>État</th><th>Temps</th><th>Depuis</th></tr></thead>
+    <tbody>{% for u, r in ext_res.items() | sort(attribute='1.ok') %}<tr>
+      <td>{{ app_names.get(r.slug, r.slug) }}</td><td class="mono"><a href="{{ u }}" target="_blank" rel="noopener">{{ u }}</a></td>
+      <td>{% if r.ok %}<span class="pill s-running">HTTP {{ r.code }}</span>{% else %}<span class="pill s-error">{{ r.why }}</span>{% if r.fails > 1 %} <span class="hint">× {{ r.fails }}</span>{% endif %}{% endif %}</td>
+      <td class="mono">{{ r.ms }} ms</td><td class="hint">{{ r.since | ago }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <p class="hint" style="margin:0">Dernier passage {{ (ext_res.values() | map(attribute='ts') | max) | ago }} depuis {{ ext.node }}.</p>
+  {% endif %}
+  <div class="acts" style="justify-content:flex-start;gap:8px"><button class="btn sm primary">Enregistrer</button>
+    <button class="btn sm" formaction="/monitoring/external?now=1">Enregistrer et vérifier maintenant</button></div>
+</form>
+
 <form class="panel" id="statut" method="post" action="/monitoring/status" style="margin-top:20px;display:flex;flex-direction:column;gap:10px">
   <h2 style="margin:0">Page de statut publique {% if sp_host %}<a class="hint" href="https://{{ sp_host }}/" target="_blank" rel="noopener">https://{{ sp_host }}/</a>{% if sp_dns is false %} <span class="pill s-deploying">nom à déclarer</span>{% endif %}{% endif %}</h2>
   <p class="hint" style="margin:0">Pour tes utilisateurs : l'état de chaque appli choisie et sa disponibilité sur 30 jours, mis à jour chaque minute. Rien d'autre n'y apparaît (ni machines, ni versions, ni erreurs). Une maintenance y est affichée comme telle.</p>

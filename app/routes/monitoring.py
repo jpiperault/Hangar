@@ -4,10 +4,10 @@ import time
 
 from fastapi import APIRouter, Request
 
-from .. import backup, cache, db, monitor, nodes, stats, statuspage
+from .. import backup, cache, db, external, monitor, nodes, stats, statuspage
 from .. import domains as D
 from .. import platform as P
-from .common import _ago, flash, go, render
+from .common import _ago, _int, flash, go, render
 
 router = APIRouter()
 
@@ -56,6 +56,27 @@ cache.keep_warm("mon_containers", 30, P.container_details)
 cache.keep_warm("mon_pg", 60, _postgres)
 
 
+@router.post("/monitoring/external")
+async def external_save(request: Request):
+
+    f = await request.form()
+    node = f.get("node") or ""
+    if node and not db.one("SELECT 1 FROM nodes WHERE id = ?", (node,)):
+        node = ""
+    external.save(f.get("on") == "on" and bool(node), node, _int(f.get("every"), 1, 60, 5), _int(f.get("fails"), 1, 10, 2))
+    s = external.settings()
+    P.log("info", "supervision", "surveillance de l'extérieur " + (f"depuis {node}, toutes les {s['every']} min" if s["on"] else "coupée"))
+    if s["on"] and (request.query_params.get("now") == "1" or not external.results()):
+        try:
+            await asyncio.to_thread(external.run)
+            flash(request, "Enregistré, et premier passage fait.")
+        except Exception as e:
+            flash(request, f"Enregistré, mais la sonde ne répond pas : {str(e)[:200]}", "error")
+    else:
+        flash(request, "Surveillance de l'extérieur enregistrée.")
+    return go("/monitoring#exterieur")
+
+
 @router.get("/monitoring")
 async def monitoring(request: Request):
     rng = request.query_params.get("r") if request.query_params.get("r") in stats.RANGES else "24h"
@@ -79,7 +100,10 @@ async def monitoring(request: Request):
                   ranges=list(stats.RANGES), rows=rows, svc=svc, pg=pg, incidents=incidents, auto_refresh=60,
                   now=time.time(), machines=_machines(host, svc, rows), sp=statuspage.settings(),
                   sp_host=statuspage.host(), sp_dns=(await asyncio.to_thread(P.resolves, [statuspage.host()]))
-                  .get(statuspage.host()) if statuspage.host() else None, doms=D.all_domains())
+                  .get(statuspage.host()) if statuspage.host() else None, doms=D.all_domains(),
+                  ext=external.settings(), ext_res=external.results(),
+                  ext_err=db.kv_get("external_error"), probe_nodes=db.q("SELECT id, state FROM nodes ORDER BY id"),
+                  app_names={a["slug"]: a["name"] for a in rows})
 
 
 @router.post("/monitoring/status")
