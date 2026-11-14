@@ -96,3 +96,20 @@ def test_caddy(env, tmp_path):
         conf.write_text("http://x.test:8080 {\n" + "\n".join(lines) + '\n\trespond "ok"\n}\n')
         r = subprocess.run(["caddy", "validate", "--config", str(conf), "--adapter", "caddyfile"], capture_output=True, text=True)
         assert r.returncode == 0, r.stderr[-300:]
+
+
+def test_appli_git(env, app_row, monkeypatch):
+    db.x("DELETE FROM apps WHERE slug = 'depot'")
+    db.insert_app("depot", {**app_row, "pkg": "", "kind": "web", "state": "ok", "created_at": 0, "source": "git",
+                            "image": "https://github.com/moi/depot.git", "version": "main", "host_port": 18777})
+    rebuilt = []
+    monkeypatch.setattr(P, "request_rebuild", lambda slug: rebuilt.append(slug))
+    hooks.enable("depot")
+    assert _send("depot", {"ref": "refs/heads/dev"}, "push")[0] == 200 and not env
+    assert _send("depot", {"ref": "refs/heads/main", "after": "abc1234567"}, "push")[0] == 202
+    assert rebuilt == ["depot"] and env[-1] == ("deploy", ("depot", "main", "update"))
+    assert _send("depot", {"ref": "refs/tags/1.2.0"}, "push")[0] == 200          # tags : désactivés par défaut
+    hooks.set_options("depot", False, True)
+    assert _send("depot", {"ref": "refs/heads/main"}, "push")[0] == 200 and rebuilt == ["depot"]
+    assert _send("depot", {"ref": "refs/tags/1.2.0"}, "push")[0] == 202 and env[-1][1][1] == "1.2.0"
+    db.x("DELETE FROM apps WHERE slug = 'depot'")

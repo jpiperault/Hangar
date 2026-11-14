@@ -1,11 +1,11 @@
 {# Publication automatique par webhook (hooks.py) : sites statiques depuis Git, applis en image. #}
-{% set st = kind.static %}
+{% set st = kind.static %}{% set gitapp = a.source == 'git' and not st %}
 <section class="panel" id="webhook" style="display:flex;flex-direction:column;gap:10px">
   <h2 style="margin:0">Publication automatique</h2>
   {% if st and not site_meta.git %}
   <p class="hint" style="margin:0">Règle d'abord un dépôt Git (« Construire et publier ») : chaque push sur sa branche pourra ensuite republier le site.</p>
   {% elif not hook %}
-  <p class="hint" style="margin:0">{% if st %}À chaque push sur la branche <code>{{ site_meta.git.branch }}</code>, Hangar reconstruit et publie le site.{% else %}Quand une nouvelle image est publiée (fin du workflow GitHub Actions, ou paquet publié), Hangar la déploie tout seul, avec le retour arrière habituel si elle ne démarre pas.{% endif %}</p>
+  <p class="hint" style="margin:0">{% if st %}À chaque push sur la branche <code>{{ site_meta.git.branch }}</code>, Hangar reconstruit et publie le site.{% elif gitapp %}À chaque push sur la branche en ligne (<code>{{ a.version }}</code>), Hangar reconstruit l'appli et la redéploie ; il peut aussi déployer chaque nouveau tag x.y.z. Retour arrière habituel si la nouvelle version ne démarre pas.{% else %}Quand une nouvelle image est publiée (fin du workflow GitHub Actions, ou paquet publié), Hangar la déploie tout seul, avec le retour arrière habituel si elle ne démarre pas.{% endif %}</p>
   <form method="post" action="/apps/{{ a.slug }}/hook/enable"><button class="btn sm primary" {{ 'disabled' if not hook_url }}>Activer le webhook</button>
     {% if not hook_url %}<span class="hint">Il faut une adresse publique à l'appli (ou un hub sur un domaine).</span>{% endif %}</form>
   {% else %}
@@ -18,14 +18,21 @@
     <ol class="hint" style="margin:6px 0 0;padding-left:18px">
       <li>Dépôt → Settings → Webhooks → Add webhook.</li>
       <li>Payload URL : l'adresse ci-dessus ; Content type : <code>application/json</code> ; Secret : le secret ci-dessus.</li>
-      {% if st %}<li>Événements : « Just the push event ».</li>
+      {% if st or gitapp %}<li>Événements : « Just the push event ».</li>
       {% else %}<li>Événements : « Let me select… » puis <strong>Workflow runs</strong> (déploie la version la plus récente du registre quand le workflow réussit) ou <strong>Packages</strong> (déploie le tag publié).</li>{% endif %}
       <li>GitHub envoie un « ping » : il doit apparaître ici en vert.</li>
     </ol>
-    {% if not st %}<p class="hint" style="margin:8px 0 0">Depuis un autre outil de CI, après l'envoi de l'image :<br>
+    {% if not st and not gitapp %}<p class="hint" style="margin:8px 0 0">Depuis un autre outil de CI, après l'envoi de l'image :<br>
     <code style="word-break:break-all">B='{"version":"1.4.0"}'; curl -fsS -X POST -H "Content-Type: application/json" -H "X-Hub-Signature-256: sha256=$(printf %s "$B" | openssl dgst -sha256 -hmac "$SECRET" -r | cut -d' ' -f1)" -d "$B" {{ hook_url }}</code></p>{% endif %}
     <p class="hint" style="margin:8px 0 0">Gitea et Forgejo signent de la même façon ; GitLab : mets le secret dans « Secret token ».</p>
   </details>
+  {% if gitapp %}
+  <form method="post" action="/apps/{{ a.slug }}/hook/options" style="display:flex;flex-direction:column;gap:6px">
+    <label class="check"><input type="checkbox" name="rebuild" {{ 'checked' if hook_opts.rebuild }}><span>Reconstruire à chaque push sur <code>{{ a.version }}</code></span></label>
+    <label class="check"><input type="checkbox" name="tags" {{ 'checked' if hook_opts.tags }}><span>Déployer chaque nouveau tag x.y.z (plus récent que celui en ligne)</span></label>
+    <div><button class="btn sm">Enregistrer</button></div>
+  </form>
+  {% endif %}
   <div class="acts" style="justify-content:flex-start;gap:8px">
     <form class="inline" method="post" action="/apps/{{ a.slug }}/hook/renew" data-confirm="Changer le secret ? L'ancien sera refusé tout de suite."><button class="btn sm">Nouveau secret</button></form>
     <form class="inline" method="post" action="/apps/{{ a.slug }}/hook/disable" data-confirm="Retirer le webhook ?"><button class="btn sm danger">Retirer</button></form>

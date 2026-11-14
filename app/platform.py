@@ -1455,6 +1455,13 @@ def prepare_data(a, version):
     db.update_app(a["slug"], data_owner=f"{uid}:{gid}")
 
 
+_rebuild = set()   # applis Git à reconstruire au prochain déploiement, même si l'image existe
+
+
+def request_rebuild(slug):
+    _rebuild.add(slug)
+
+
 def up_timeout(slug):
     """Délai d'un « compose up » : long avec une base MySQL/MariaDB, que l'appli attend (rechargement d'un export)."""
     from . import services
@@ -1466,7 +1473,8 @@ def _up(a, version):
     write_compose(a, version)
     if a["source"] == "git":
         rc, _ = dk(node, "image", "inspect", image_ref(a, version), timeout=30)
-        if rc:
+        if rc or a["slug"] in _rebuild:   # absente, ou reconstruction demandée (webhook : nouveaux commits)
+            _rebuild.discard(a["slug"])
             log("info", a["slug"], f"build de {a['image']}#{version}")
             rc, out = dk(node, "compose", "build", "--pull", cwd=d, timeout=1800)
             if rc:

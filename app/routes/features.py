@@ -177,13 +177,18 @@ async def app_hook(request: Request, slug: str, op: str):
     a = get_app_or_404(slug)
     back = f"/apps/{slug}#{'site' if a['kind'] == 'static' else 'reglages'}"
     if op in ("enable", "renew"):
-        if a["kind"] != "static" and a["source"] != "image":
-            flash(request, "Publication par webhook : applis en image et sites statiques seulement.", "error")
+        if a["kind"] != "static" and a["source"] not in ("image", "git"):
+            flash(request, "Publication par webhook : applis en image, construites depuis Git, et sites statiques.", "error")
             return go(back)
         hooks.enable(slug)
         P.log("info", slug, "webhook de publication " + ("activé" if op == "enable" else "renouvelé (nouveau secret)"))
         flash(request, "Webhook activé : copie l'adresse et le secret dans GitHub." if op == "enable" else
               "Nouveau secret : remplace-le dans GitHub (l'ancien est refusé dès maintenant).")
+    elif op == "options":
+        f = await request.form()
+        hooks.set_options(slug, f.get("rebuild") == "on", f.get("tags") == "on")
+        flash(request, "Réglages du webhook enregistrés.")
+        return go(back)
     elif op == "disable":
         hooks.disable(slug)
         P.log("info", slug, "webhook de publication retiré")

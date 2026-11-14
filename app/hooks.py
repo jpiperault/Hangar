@@ -191,8 +191,10 @@ def _dispatch(a, ev, data):
         P.spawn(sites.build_git, slug)
         sha = (data.get("after") or "")[:7]
         return 202, f"construction de {g['branch']}{'@' + sha if sha else ''} lancée"
+    if a["source"] == "git":
+        return _git_app(a, ev, data)
     if a["source"] != "image":
-        return 409, "seules les applis en image et les sites statiques se publient par webhook"
+        return 409, "seules les applis en image, construites depuis Git et les sites statiques se publient par webhook"
     if ev == "deploy":
         return _deploy_image(a, str(data.get("version") or ""), "script")
     if ev in ("package", "registry_package"):
@@ -217,6 +219,54 @@ def _dispatch(a, ev, data):
     if ev == "push":
         return 200, "push ignoré pour une appli en image : abonne le webhook à « Workflow runs » ou « Packages »"
     return 200, f"événement {ev} ignoré"
+
+
+def options(slug):
+    """Réglages d'une appli construite depuis Git : reconstruire au push de la branche en ligne, déployer les tags."""
+    c = of(slug) or {}
+    return {"rebuild": c.get("rebuild", True), "tags": c.get("tags", False)}
+
+
+def set_options(slug, rebuild, tags):
+    with _lock:
+        h = _all()
+        if slug in h:
+            h[slug].update(rebuild=bool(rebuild), tags=bool(tags))
+            db.kv_set("hooks", h)
+
+
+def _git_app(a, ev, data):
+    from . import registry
+    if ev not in ("push", "deploy"):
+        return 200, f"événement {ev} ignoré (un push suffit)"
+    if ev == "deploy":
+        v = str(data.get("version") or "")
+        if not TAG_RE.match(v):
+            return 400, "version invalide"
+        P.spawn(P.deploy, a["slug"], v, "update")
+        return 202, f"construction et déploiement de {v} lancés"
+    o, ref = options(a["slug"]), data.get("ref") or ""
+    if data.get("deleted"):
+        return 200, "référence supprimée : rien à faire"
+    if ref == f"refs/heads/{a['version']}":
+        if not o["rebuild"]:
+            return 200, "reconstruction au push désactivée pour cette appli"
+        P.request_rebuild(a["slug"])
+        P.spawn(P.deploy, a["slug"], a["version"], "update")
+        sha = (data.get("after") or "")[:7]
+        return 202, f"reconstruction de {a['version']}{'@' + sha if sha else ''} lancée"
+    if ref.startswith("refs/tags/"):
+        tag = ref[len("refs/tags/"):]
+        if not o["tags"]:
+            return 200, f"tag {tag} ignoré (déploiement des tags désactivé)"
+        cur = a["version"]
+        if not registry.semver(tag):
+            return 200, f"tag {tag} ignoré (pas une version x.y.z)"
+        if registry.semver(cur) and registry.newest([tag], cur) is None:
+            return 200, f"{tag} n'est pas plus récent que {cur}"
+        P.spawn(P.deploy, a["slug"], tag, "update")
+        return 202, f"construction et déploiement de {tag} lancés"
+    return 200, f"{ref or 'référence inconnue'} ignoré (en ligne : {a['version']})"
 
 
 def caddy_hub_lines(coll):
