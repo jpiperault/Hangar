@@ -1,0 +1,189 @@
+"""Fonctions d'une appli : tâches planifiées, Redis, préprod, configuration à distance, plantages, limites, essais."""
+import asyncio
+import time
+import urllib.parse
+
+from fastapi import APIRouter, Request
+
+from .. import crashes, db, jobs, limits, preprod, remoteconfig, services, smoke
+from .. import domains as D
+from .. import platform as P
+from .common import flash, get_app_or_404, go, render
+
+router = APIRouter()
+
+
+@router.post("/apps/{slug}/jobs")
+async def app_job_add(request: Request, slug: str):
+    if not db.app(slug):
+        return go("/")
+    f = await request.form()
+    try:
+        jobs.add(slug, jobs.validate(f))
+        P.log("info", slug, f"tâche planifiée « {(f.get('name') or '').strip()[:80]} » ajoutée")
+        flash(request, "Tâche ajoutée.")
+    except ValueError as e:
+        flash(request, f"Tâche refusée : {e}", "error")
+    return go(f"/apps/{slug}#taches")
+
+
+@router.post("/apps/{slug}/jobs/{jid}/{op}")
+async def app_job_op(request: Request, slug: str, jid: str, op: str):
+    a = db.app(slug)
+    j = next((x for x in jobs.of(slug) if x["id"] == jid), None) if a else None
+    if not j:
+        return go(f"/apps/{slug}#taches" if a else "/")
+    if op == "run":
+        P.spawn(jobs.run, slug, jid, True)
+        flash(request, f"Tâche « {j['name']} » lancée : son résultat s'affiche ici à la fin.")
+    elif op == "toggle":
+        jobs.toggle(slug, jid)
+        flash(request, f"Tâche « {j['name']} » {'désactivée' if j.get('on', True) else 'réactivée'}.")
+    elif op == "delete":
+        jobs.remove(slug, jid)
+        P.log("info", slug, f"tâche planifiée « {j['name']} » supprimée")
+        flash(request, f"Tâche « {j['name']} » supprimée.")
+    return go(f"/apps/{slug}#taches")
+
+
+@router.post("/apps/{slug}/services/redis")
+async def app_redis(request: Request, slug: str):
+    a = db.app(slug)
+    if not a:
+        return go("/")
+    f = await request.form()
+    if a["state"] == "deploying":
+        flash(request, "Une opération est en cours sur cette appli : réessaie dans un instant.", "error")
+        return go(f"/apps/{slug}#redis")
+    try:
+        if f.get("on") == "1" and request.query_params.get("off") != "1":
+            services.enable_redis(slug, f.get("mem") or 128)
+            msg = "Redis activé : l'appli est redéployée avec REDIS_URL."
+        else:
+            services.disable_redis(slug)
+            msg = "Redis retiré : l'appli est redéployée sans lui. Ses données restent dans data/.hangar-redis."
+    except ValueError as e:
+        flash(request, str(e), "error")
+        return go(f"/apps/{slug}#redis")
+    P.log("info", slug, msg.split(" :")[0])
+    P.spawn(P.deploy, slug, a["version"], "config", dict(a))
+    flash(request, msg)
+    return go(f"/apps/{slug}#redis")
+
+
+@router.post("/apps/{slug}/preprod")
+async def app_preprod(request: Request, slug: str):
+    a = db.app(slug)
+    if not a:
+        return go("/")
+    f = await request.form()
+    op = request.query_params.get("op") or "create"
+    try:
+        if op == "create":
+            pre = preprod.check(slug)
+            version = (f.get("version") or "").strip() or a["version"]
+            if not P.VERSION.match(version):
+                raise ValueError("version invalide")
+            P.spawn(preprod.create, slug, version)
+            flash(request, f"Préproduction « {pre} » en cours de création : déploiement de {version}, puis copie de la base "
+                  "et de data/ de la production.")
+            return go(f"/apps/{slug}#preprod")
+        pre = slug if preprod.prod_of(slug) else preprod.of(slug)
+        if not pre:
+            raise ValueError("pas de préproduction")
+        if op == "refresh":
+            if db.app(pre)["state"] == "deploying":
+                raise ValueError("la préproduction est occupée")
+            P.spawn(preprod.refresh, pre)
+            flash(request, "Copie des données de la production lancée : la préproduction est arrêtée quelques instants. "
+                  "Son état d'avant est mis de côté.")
+        elif op == "promote":
+            prod = db.app(preprod.prod_of(pre))
+            if prod["state"] == "deploying":
+                raise ValueError("la production est occupée")
+            P.spawn(preprod.promote, pre)
+            flash(request, f"Déploiement de {db.app(pre)['version']} en production lancé ({prod['name']}). "
+                  "En cas d'échec du healthcheck, la version actuelle reste en ligne.")
+            return go(f"/apps/{prod['slug']}")
+    except ValueError as e:
+        flash(request, f"Préproduction : {e}", "error")
+    return go(f"/apps/{slug}#preprod")
+
+
+@router.post("/apps/{slug}/remote-config")
+async def app_remote_config(request: Request, slug: str):
+    get_app_or_404(slug)
+    f = await request.form()
+    try:
+        remoteconfig.save(slug, f)
+        await asyncio.to_thread(P.apply_routing)   # fichiers publics réécrits et envoyés aux nœuds
+        P.log("info", slug, "configuration à distance de l'appli Android mise à jour")
+        flash(request, "Configuration publiée : les applis la lisent à leur prochain démarrage (cache d'une minute).")
+    except (ValueError, RuntimeError) as e:
+        flash(request, f"Configuration refusée : {e}", "error")
+    return go(f"/apps/{slug}#mobile")
+
+
+@router.get("/apps/{slug}/crashes/{fp}")
+async def app_crash(request: Request, slug: str, fp: str):
+    a = get_app_or_404(slug)
+    g = db.one("SELECT * FROM crash_groups WHERE slug = ? AND fp = ?", (slug, fp))
+    if not g:
+        return go(f"/apps/{slug}#mobile")
+    return render(request, "crash.html", title=f"Plantage · {a['name']}", nav="apps", a=a, g=g,
+                  items=crashes.latest(slug, fp, 20), versions=crashes.versions(slug, fp))
+
+
+@router.post("/apps/{slug}/crashes/{fp}/{op}")
+async def app_crash_op(request: Request, slug: str, fp: str, op: str):
+    get_app_or_404(slug)
+    if op in ("resolved", "open", "delete"):
+        crashes.set_status(slug, fp, op)
+        flash(request, {"resolved": "Marqué corrigé : une alerte partira s'il revient dans une version plus récente.",
+                        "open": "Rouvert.", "delete": "Groupe supprimé."}[op])
+    return go(f"/apps/{slug}#mobile")
+
+
+@router.post("/apps/{slug}/limits")
+async def app_limits(request: Request, slug: str):
+    a = db.app(slug)
+    if not a:
+        return go("/")
+    f = await request.form()
+    before = limits.cpus(slug)
+    try:
+        limits.save(slug, f.get("cpus"))
+    except ValueError as e:
+        flash(request, str(e), "error")
+        return go(f"/apps/{slug}#limites")
+    after = limits.cpus(slug)
+    if after != before:
+        P.log("info", slug, f"processeur max : {after} cœur(s)" if after else "processeur : sans limite")
+        if a["state"] != "deploying":
+            P.spawn(P.deploy, slug, a["version"], "config", dict(a))
+        flash(request, ("Limite de processeur enregistrée" if after else "Limite de processeur retirée") + " : l'appli est redéployée.")
+    return go(f"/apps/{slug}#limites")
+
+
+@router.post("/apps/{slug}/smoke")
+async def app_smoke(request: Request, slug: str):
+    a = db.app(slug)
+    if not a:
+        return go("/")
+    f = await request.form()
+    try:
+        smoke.save(slug, f.get("checks") or "")
+    except ValueError as e:
+        flash(request, f"Vérifications refusées : {e}", "error")
+        return go(f"/apps/{slug}#verifs")
+    if request.query_params.get("test") == "1" and smoke.text_of(slug):
+        u = urllib.parse.urlsplit(D.primary_url(slug) or "")
+        ok, res = await asyncio.to_thread(smoke.run, a, a["version"], u.hostname, 1)
+        db.kv_set(f"smoke_last:{slug}", {"ts": time.time(), "version": a["version"], "results": res, "manual": True})
+        flash(request, ("Toutes les vérifications passent : " if ok else "Des vérifications échouent : ") + smoke.summary(res),
+              "ok" if ok else "error")
+    else:
+        P.log("info", slug, "vérifications après déploiement : " + (f"{len(smoke.parse(smoke.text_of(slug)))} adresse(s)"
+                                                                   if smoke.text_of(slug) else "aucune"))
+        flash(request, "Vérifications enregistrées : elles s'appliquent au prochain déploiement.")
+    return go(f"/apps/{slug}#verifs")

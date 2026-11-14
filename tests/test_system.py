@@ -52,6 +52,7 @@ def test_page_par_machine(monkeypatch):
     from argon2 import PasswordHasher
     from fastapi.testclient import TestClient
     from app import main
+    from app.routes import system as routes_system
     same = {"sec-fetch-site": "same-origin"}
     db.x("INSERT OR REPLACE INTO users(username, hash) VALUES(?, ?)", ("sys", PasswordHasher().hash("mot-de-passe-sys")))
     comp = lambda cur, av=None: {"current": cur, "available": av, "packages": []}   # noqa: E731
@@ -65,7 +66,7 @@ def test_page_par_machine(monkeypatch):
     monkeypatch.setattr(system, "machines", lambda: [("local", "Console"), ("vps", "Mon VPS"), ("hs", "En panne")])
     monkeypatch.setattr(system, "running", lambda *a, **k: None)
     monkeypatch.setattr(P, "system_info", lambda: {})
-    monkeypatch.setattr(main, "_tz_now", lambda: [("Console", "Etc/UTC"), ("Mon VPS", "Europe/Paris")])
+    monkeypatch.setattr(routes_system, "_tz_now", lambda: [("Console", "Etc/UTC"), ("Mon VPS", "Europe/Paris")])
     c = TestClient(main.app, base_url="https://hangar.test", client=("127.0.0.1", 50003))
     main._fails.clear()
     c.post("/login", data={"username": "sys", "password": "mot-de-passe-sys"}, headers=same)

@@ -33,10 +33,11 @@ def test_installation(cid, monkeypatch):
     from argon2 import PasswordHasher
     from fastapi.testclient import TestClient
     from app import main
+    from app.routes import apps as routes_apps
     db.x("INSERT OR IGNORE INTO domains(name, mode, hub, created_at) VALUES('exemple.fr', 'tunnel', 'apps', 0)")
     db.x("DELETE FROM apps WHERE slug = ?", (cid,))
     db.x("DELETE FROM routes WHERE slug = ?", (cid,))
-    monkeypatch.setattr(main, "node_choices", lambda purpose="app": [{"id": "local", "name": "Console", "free": 2000}])
+    monkeypatch.setattr(routes_apps, "node_choices", lambda purpose="app": [{"id": "local", "name": "Console", "free": 2000}])
     spawned = []
     monkeypatch.setattr(main.P, "spawn", lambda fn, *a: spawned.append(a))
     db.x("INSERT OR REPLACE INTO users(username, hash) VALUES(?, ?)", ("cat", PasswordHasher().hash("mot-de-passe-cat")))
