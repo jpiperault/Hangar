@@ -1,0 +1,29 @@
+  <section class="panel" id="2fa" style="display:flex;flex-direction:column;gap:10px">
+    {% set me2fa = (users | selectattr('username', 'equalto', user) | first or {}).totp %}
+    <h2 style="margin:0">Ma double authentification {% if me2fa %}<span class="pill s-running">activée</span>{% else %}<span class="pill s-stopped">désactivée</span>{% endif %}</h2>
+    {% if totp_codes %}
+    <div class="flash ok" role="status"><strong>Codes de secours</strong> (un seul usage chacun, à garder hors du téléphone : gestionnaire de mots de passe, papier) :
+      <pre class="mono" style="margin:6px 0 0">{% for c in totp_codes %}{{ c }}{{ '   ' if loop.index is odd else '
+' }}{% endfor %}</pre></div>
+    {% endif %}
+    {% if totp_setup %}
+    <form class="ro-ok" method="post" action="/users/{{ user }}/2fa/confirm" autocomplete="off" style="display:flex;flex-direction:column;gap:10px">
+      <p class="hint" style="margin:0">1. Scanne ce QR code avec ton appli d'authentification (Aegis, Google Authenticator, 1Password, Bitwarden…).</p>
+      {% if totp_setup.qr %}<div style="background:#fff;padding:6px;border-radius:8px;width:max-content">{{ totp_setup.qr | safe }}</div>{% endif %}
+      <p class="hint" style="margin:0">Ou saisis la clé à la main : <code class="mono">{{ totp_setup.secret }}</code></p>
+      <div class="field"><label for="tcode">2. Tape le code à 6 chiffres affiché</label><input id="tcode" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required style="max-width:9em"></div>
+      <div class="acts" style="justify-content:flex-start;gap:8px"><button class="btn sm primary">Activer</button><button class="btn sm" formaction="/users/{{ user }}/2fa/cancel" formnovalidate>Annuler</button></div>
+    </form>
+    {% elif me2fa %}
+    <p class="hint" style="margin:0">À chaque connexion, le code de ton appli d'authentification est demandé après le mot de passe. Codes de secours restants : <strong>{{ totp_left }}</strong>.</p>
+    <form class="ro-ok" method="post" action="/users/{{ user }}/2fa/recovery" autocomplete="off">
+      <div class="inlinefield"><input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="12" placeholder="code actuel" aria-label="Code actuel" required style="max-width:10em">
+        <button class="btn sm">Nouveaux codes de secours</button>
+        <button class="btn sm danger" formaction="/users/{{ user }}/2fa/disable" data-confirm="Retirer la double authentification de ton compte ?">Désactiver</button></div>
+    </form>
+    {% else %}
+    <p class="hint" style="margin:0">Un code à usage unique, donné par une appli sur ton téléphone, en plus du mot de passe : un mot de passe volé ne suffit plus. Chaque compte choisit pour lui-même.</p>
+    <form class="ro-ok" method="post" action="/users/{{ user }}/2fa/start"><button class="btn sm primary">Mettre en place</button></form>
+    {% endif %}
+  </section>
+

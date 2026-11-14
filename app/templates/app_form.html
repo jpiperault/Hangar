@@ -167,10 +167,10 @@
     {% if a.status != 'deploying' %}
     <div class="acts" style="justify-content:flex-start;flex-wrap:wrap">
       {% if a.status == 'running' %}
-        <form class="inline" method="post" action="/apps/{{ a.slug }}/restart"><button class="btn sm">Redémarrer</button></form>
-        <form class="inline" method="post" action="/apps/{{ a.slug }}/stop"><button class="btn sm">Arrêter</button></form>
+        <form class="inline{{ ' ro-ok' if can_deploy }}" method="post" action="/apps/{{ a.slug }}/restart"><button class="btn sm">Redémarrer</button></form>
+        <form class="inline{{ ' ro-ok' if can_deploy }}" method="post" action="/apps/{{ a.slug }}/stop"><button class="btn sm">Arrêter</button></form>
       {% else %}
-        <form class="inline" method="post" action="/apps/{{ a.slug }}/start"><button class="btn sm">Démarrer</button></form>
+        <form class="inline{{ ' ro-ok' if can_deploy }}" method="post" action="/apps/{{ a.slug }}/start"><button class="btn sm">Démarrer</button></form>
       {% endif %}
       <a class="btn sm" href="/apps/{{ a.slug }}/logs">Logs</a>
     </div>
@@ -186,20 +186,20 @@
       {% if a.source == 'image' %}<dt>Registre</dt><dd>{% if a.latest_version %}<span class="pill s-deploying">{{ a.latest_version }} disponible</span>{% elif img_update %}<span class="pill s-deploying">nouvelle image {{ a.version }} ({{ img_update.ts | ago }})</span>{% elif a.latest_error %}<span class="lv-warn">{{ a.latest_error }}</span>{% elif a.latest_checked %}à jour{% else %}pas encore vérifié{% endif %}</dd>{% endif %}
     </dl>
     {% if img_update and not a.latest_version and a.status != 'deploying' %}
-    <form method="post" action="/apps/{{ a.slug }}/version"><input type="hidden" name="version" value="{{ a.version }}">
+    <form {% if can_deploy %}class="ro-ok" {% endif %}method="post" action="/apps/{{ a.slug }}/version"><input type="hidden" name="version" value="{{ a.version }}">
       <button class="btn primary sm">Mettre à jour ({{ a.version }})</button></form>
     {% endif %}
     {% if a.latest_version and a.status != 'deploying' %}
-    <form method="post" action="/apps/{{ a.slug }}/version"><input type="hidden" name="version" value="{{ a.latest_version }}">
+    <form {% if can_deploy %}class="ro-ok" {% endif %}method="post" action="/apps/{{ a.slug }}/version"><input type="hidden" name="version" value="{{ a.latest_version }}">
       <button class="btn primary sm">Déployer {{ a.latest_version }}</button></form>
     {% endif %}
-    <form method="post" action="/apps/{{ a.slug }}/version" style="display:flex;gap:8px">
+    <form {% if can_deploy %}class="ro-ok" {% endif %}method="post" action="/apps/{{ a.slug }}/version" style="display:flex;gap:8px">
       <label class="sr" for="newversion" hidden>Nouvelle version</label>
       <input id="newversion" name="version" placeholder="{{ 'tag, ex. 1.5.0' if a.source == 'image' else 'branche ou commit' }}" spellcheck="false" required aria-label="Nouvelle version">
       <button class="btn primary sm" {{ 'disabled' if a.status == 'deploying' }}>Déployer</button>
     </form>
     {% if a.prev_version %}
-    <form method="post" action="/apps/{{ a.slug }}/rollback"><button class="btn warn sm" {{ 'disabled' if a.status == 'deploying' }}>Revenir à {{ a.prev_version }}</button></form>
+    <form {% if can_deploy %}class="ro-ok" {% endif %}method="post" action="/apps/{{ a.slug }}/rollback"><button class="btn warn sm" {{ 'disabled' if a.status == 'deploying' }}>Revenir à {{ a.prev_version }}</button></form>
     {% endif %}
     <span class="hint">Avant de basculer, la console attend que {{ a.health_path }} réponde. En cas d'échec, la version actuelle est remise en ligne.{% if a.source == 'image' %} Les nouvelles versions (tags x.y.z) sont recherchées toutes les 6 h{% if a.latest_checked %}, dernière fois {{ a.latest_checked | ago }}{% endif %}.{% endif %}</span>
     {% if a.source == 'image' %}<form method="post" action="/apps/{{ a.slug }}/versions/check"><button class="btn sm primary">Vérifier maintenant</button></form>{% endif %}

@@ -9,11 +9,12 @@
 <script src="/static/app.js?v={{ asset_v }}" defer></script>
 {% if user %}<script type="speculationrules" nonce="{{ csp_nonce }}">{"prerender": [{"where": {"selector_matches": "a.nav"}, "eagerness": "moderate"}]}</script>{% endif %}
 </head>
-<body{% if role == 'lecture' %} class="ro"{% endif %}>
+<body{% if role in ('lecture', 'appli') %} class="ro"{% endif %}>
 <div class="app">
   <nav class="side" aria-label="Console">
     <div class="brand"><b></b>Hangar</div>
     <a class="nav {{ 'on' if nav == 'apps' }}" href="/">Applications <span class="count">{{ app_count }}</span></a>
+    {% if role == 'appli' %}<a class="nav {{ 'on' if nav == 'compte' }}" href="/compte">Mon compte</a>{% else %}
     <a class="nav {{ 'on' if nav == 'monitoring' }}" href="/monitoring">Supervision</a>
     <a class="nav {{ 'on' if nav == 'nodes' }}" href="/nodes">Nœuds</a>
     <a class="nav {{ 'on' if nav == 'security' }}" href="/security">Sécurité{% if sec_alerts %} <span class="count">{{ sec_alerts }}</span>{% endif %}</a>
@@ -22,11 +23,11 @@
     <a class="nav {{ 'on' if nav == 'domains' }}" href="/domains">Domaines</a>
     <a class="nav {{ 'on' if nav == 'settings' }}" href="/settings">Accès et comptes</a>
     <a class="nav {{ 'on' if nav == 'prompt' }}" href="/prompt">Préparer un projet</a>
-    <a class="nav {{ 'on' if nav == 'journal' }}" href="/journal">Journal</a>
+    <a class="nav {{ 'on' if nav == 'journal' }}" href="/journal">Journal</a>{% endif %}
     <div class="foot">
       <span class="lanpill">LAN uniquement</span>
       <span class="mono">{{ s.home }}</span>
-      {% if role == 'lecture' %}<span class="pill s-stopped" title="Ce compte voit tout mais ne peut rien changer">lecture seule</span>{% endif %}
+      {% if role == 'lecture' %}<span class="pill s-stopped" title="Ce compte voit tout mais ne peut rien changer">lecture seule</span>{% elif role == 'appli' %}<span class="pill s-stopped" title="Ce compte ne voit que les applis qu'on lui a données">applis choisies</span>{% endif %}
       <form class="ro-ok" method="post" action="/logout"><button class="btn sm link" type="submit">Se déconnecter ({{ user }})</button></form>
     </div>
   </nav>

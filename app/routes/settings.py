@@ -6,7 +6,7 @@ from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from fastapi import APIRouter, Request
 from fastapi.responses import PlainTextResponse
 
-from .. import access, db, totp
+from .. import access, db, perms, totp
 from .. import platform as P
 from .common import flash, go, ph, render
 
@@ -21,7 +21,8 @@ async def settings_page(request: Request):
                   ips=access.local_ips(), pending=access.pending(), client=request.client.host,
                   users=db.q("SELECT username, role, totp_secret IS NOT NULL AS totp FROM users ORDER BY username"),
                   registries=P.registry_logins(), totp_setup=_setup_ctx(request), totp_codes=request.session.pop("totp_codes", None),
-                  totp_left=totp.recovery_left(request.session.get("user") or ""),
+                  totp_left=totp.recovery_left(request.session.get("user") or ""), roles=perms.ROLES, levels=perms.LEVELS,
+                  scopes=db.kv_get("user_apps") or {}, all_apps=db.q("SELECT slug, name FROM apps ORDER BY name"),
                   audit=db.q("SELECT * FROM audit ORDER BY id DESC LIMIT 15"),
                   aform=request.session.pop("aform", None), aerr=request.session.pop("aerr", None))
 
@@ -93,9 +94,9 @@ async def users_add(request: Request):
     if err:
         flash(request, err, "error")
         return go("/settings#comptes")
-    role = "lecture" if f.get("role") == "lecture" else "admin"
+    role = f.get("role") if f.get("role") in perms.ROLES else "admin"
     db.x("INSERT INTO users(username, hash, role) VALUES(?, ?, ?)", (name, ph.hash(pw), role))
-    P.log("ok", "console", f"compte {name} ({'lecture seule' if role == 'lecture' else 'administrateur'}) créé par "
+    P.log("ok", "console", f"compte {name} ({perms.ROLES[role]}) créé par "
           f"{request.session.get('user')}")
     flash(request, f"Compte {name} créé.")
     return go("/settings#comptes")
@@ -107,7 +108,7 @@ async def users_password(request: Request, name: str):
     me = request.session.get("user")
     u = db.one("SELECT * FROM users WHERE username = ?", (name,))
     if not u:
-        return go("/settings#comptes")
+        return go(_mine(request) + "#comptes")
     if name == me:
         try:
             ok = ph.verify(u["hash"], f.get("current") or "")
@@ -116,16 +117,16 @@ async def users_password(request: Request, name: str):
         if not ok:
             await asyncio.sleep(1)
             flash(request, "Mot de passe actuel incorrect.", "error")
-            return go("/settings#comptes")
+            return go(_mine(request) + "#comptes")
     pw, err = _check_pw(f)
     if err:
         flash(request, err, "error")
-        return go("/settings#comptes")
+        return go(_mine(request) + "#comptes")
     db.x("UPDATE users SET hash = ? WHERE username = ?", (ph.hash(pw), name))
     db.x("DELETE FROM sessions WHERE username = ? AND id != ?", (name, request.session.get("sid") or ""))
     P.log("ok", "console", f"mot de passe de {name} changé par {me} (ses autres sessions sont fermées)")
     flash(request, f"Mot de passe de {name} changé.")
-    return go("/settings#comptes")
+    return go(_mine(request) + "#comptes")
 
 
 @router.post("/users/{name}/remove")
@@ -139,10 +140,28 @@ async def users_remove(request: Request, name: str):
         flash(request, "Il faut garder au moins un compte administrateur.", "error")
     else:
         db.x("DELETE FROM users WHERE username = ?", (name,))
+        perms.forget_user(name)
         db.x("DELETE FROM sessions WHERE username = ?", (name,))
         P.log("info", "console", f"compte {name} supprimé par {me}")
         flash(request, f"Compte {name} supprimé, ses sessions sont fermées.")
     return go("/settings#comptes")
+
+
+def _mine(request):
+    """Page où un compte gère son mot de passe et sa double authentification."""
+    return "/compte" if getattr(request.state, "role", "admin") == perms.ROLE else "/settings"
+
+
+@router.get("/compte")
+async def my_account(request: Request):
+    if getattr(request.state, "role", "admin") != perms.ROLE:
+        return go("/settings#2fa")
+    me = request.session.get("user")
+    return render(request, "compte.html", title="Mon compte", nav="compte", my_scopes=perms.scopes(me),
+                  names={a["slug"]: a["name"] for a in db.apps()}, levels=perms.LEVELS,
+                  users=db.q("SELECT username, role, totp_secret IS NOT NULL AS totp FROM users WHERE username = ?", (me,)),
+                  totp_setup=_setup_ctx(request), totp_codes=request.session.pop("totp_codes", None),
+                  totp_left=totp.recovery_left(me))
 
 
 def _setup_ctx(request):
@@ -158,7 +177,7 @@ def _setup_ctx(request):
 @router.post("/users/{name}/2fa/{op}")
 async def users_2fa(request: Request, name: str, op: str):
     me = request.session.get("user")
-    back = go("/settings#2fa")
+    back = go(_mine(request) + "#2fa")
     if not db.one("SELECT 1 FROM users WHERE username = ?", (name,)):
         return go("/settings")
     f = await request.form()
@@ -216,16 +235,19 @@ def _last_admin(name):
 @router.post("/users/{name}/role")
 async def users_role(request: Request, name: str):
     f = await request.form()
-    role = "lecture" if f.get("role") == "lecture" else "admin"
+    role = f.get("role") if f.get("role") in perms.ROLES else "admin"
     if not db.one("SELECT 1 FROM users WHERE username = ?", (name,)):
         return go("/settings#comptes")
-    if role == "lecture" and _last_admin(name):
+    if role != "admin" and _last_admin(name):
         flash(request, "Il faut garder au moins un compte administrateur.", "error")
         return go("/settings#comptes")
     db.x("UPDATE users SET role = ? WHERE username = ?", (role, name))
-    P.log("info", "console", f"compte {name} : {'lecture seule' if role == 'lecture' else 'administrateur'} "
-          f"(par {request.session.get('user')})")
-    flash(request, f"Compte {name} : {'lecture seule' if role == 'lecture' else 'administrateur'}.")
+    sc = {k[4:]: v for k, v in f.items() if k.startswith("app_") and v in perms.LEVELS and db.app(k[4:])}
+    perms.set_scopes(name, sc if role == perms.ROLE else {})
+    db.x("DELETE FROM sessions WHERE username = ? AND id != ?", (name, request.session.get("sid") or ""))
+    detail = f" : {', '.join(f'{k} ({perms.LEVELS[v]})' for k, v in sc.items()) or 'aucune appli'}" if role == perms.ROLE else ""
+    P.log("info", "console", f"compte {name} : {perms.ROLES[role]}{detail} (par {request.session.get('user')})")
+    flash(request, f"Compte {name} : {perms.ROLES[role]}{detail}.")
     return go("/settings#comptes")
 
 

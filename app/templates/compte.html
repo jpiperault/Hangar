@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block main %}
+<h1>Mon compte</h1>
+<div class="cols" style="align-items:start">
+<div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+  <section class="panel">
+    <h2>{{ user }}</h2>
+    <p class="hint">Applis auxquelles ce compte a accès :</p>
+    <ul>{% for slug, lv in my_scopes.items() %}<li><a href="/apps/{{ slug }}">{{ names.get(slug, slug) }}</a> <span class="hint">· {{ levels[lv] }}</span></li>{% else %}<li class="hint">aucune pour l'instant : demande-les à un administrateur.</li>{% endfor %}</ul>
+  </section>
+  <form class="panel ro-ok" method="post" action="/users/{{ user }}/password" autocomplete="off" style="display:flex;flex-direction:column;gap:10px">
+    <h2 style="margin:0">Mot de passe</h2>
+    <div class="field"><label for="cur">Mot de passe actuel</label><input id="cur" name="current" type="password" autocomplete="current-password" required></div>
+    <div class="row2">
+      <div class="field"><label for="pw">Nouveau mot de passe</label><input id="pw" name="password" type="password" minlength="10" autocomplete="new-password" required></div>
+      <div class="field"><label for="pw2">Confirmation</label><input id="pw2" name="password2" type="password" minlength="10" autocomplete="new-password" required></div>
+    </div>
+    <div><button class="btn sm primary">Changer le mot de passe</button></div>
+  </form>
+</div>
+<div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+  {% include "_2fa_panel.html" %}
+</div>
+</div>
+{% endblock %}

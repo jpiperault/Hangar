@@ -65,10 +65,17 @@ def _sec_alerts():
         return 0
 
 
+def _app_count(request):
+    from .. import perms
+    if getattr(request.state, "role", "admin") == perms.ROLE:
+        return len(perms.scopes(request.session.get("user")))
+    return len(db.apps())
+
+
 def render(request, name, status_code=200, **ctx):
     ctx.setdefault("title", "Hangar")
     ctx.update(flash=request.session.pop("flash", None), s=db.settings(), csp_nonce=getattr(request.state, "nonce", ""),
-               user=request.session.get("user"), role=getattr(request.state, "role", "admin"), app_count=len(db.apps()), sec_alerts=_sec_alerts())
+               user=request.session.get("user"), role=getattr(request.state, "role", "admin"), app_count=_app_count(request), sec_alerts=_sec_alerts())
     return tpl.TemplateResponse(request, name, ctx, status_code=status_code)
 
 

@@ -1646,8 +1646,9 @@ def delete(slug):
                 shutil.move(f"{d}/site", f"{keep}/site")
             shutil.rmtree(d, ignore_errors=True)
             sites.remove(slug)
-            from . import hooks
+            from . import hooks, perms
             hooks.forget(slug)
+            perms.forget_app(slug)
             db.x("DELETE FROM apps WHERE slug = ?", (slug,))
             D.set_routes(slug, [])
             preprod.forget(slug)
@@ -1664,8 +1665,9 @@ def delete(slug):
         limits.drop(slug)
         from . import runopts
         runopts.drop(slug)
-        from . import hooks
+        from . import hooks, perms
         hooks.forget(slug)
+        perms.forget_app(slug)
         preprod.forget(slug)
         if ha.get(slug):   # haute dispo : base dédiée rapatriée dans le PostgreSQL partagé, secours et instances retirés
             ha.disable(slug, "suppression", locked=True)

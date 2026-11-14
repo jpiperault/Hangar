@@ -11,7 +11,7 @@
   {% else %}
   <dl class="facts">
     <dt>Adresse</dt><dd><input class="mono" readonly value="{{ hook_url }}" aria-label="Adresse du webhook" style="width:100%"></dd>
-    <dt>Secret</dt><dd>{% if role == 'lecture' %}<span class="hint">réservé aux administrateurs</span>{% else %}<input class="mono" readonly value="{{ hook.secret }}" aria-label="Secret du webhook" style="width:100%">{% endif %}</dd>
+    <dt>Secret</dt><dd>{% if role != 'admin' %}<span class="hint">réservé aux administrateurs</span>{% else %}<input class="mono" readonly value="{{ hook.secret }}" aria-label="Secret du webhook" style="width:100%">{% endif %}</dd>
     <dt>Dernier envoi</dt><dd>{% if hook.last %}<span class="{{ 'lv-ok' if hook.last.ok else 'lv-error' }}">{{ hook.last.event }}</span> · {{ hook.last.ts | ago }} · {{ hook.last.result }}{% else %}aucun pour l'instant{% endif %}</dd>
   </dl>
   <details><summary class="hint">Réglage dans GitHub</summary>

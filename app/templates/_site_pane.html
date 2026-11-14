@@ -30,8 +30,8 @@
           <dt>Servi par</dt><dd>Caddy, sur la console et les nœuds qui reçoivent le trafic</dd>
         </dl>
         <div class="acts" style="justify-content:flex-start;flex-wrap:wrap">
-          {% if a.desired == 'running' %}<form class="inline" method="post" action="/apps/{{ a.slug }}/stop"><button class="btn sm">Mettre hors ligne</button></form>
-          {% else %}<form class="inline" method="post" action="/apps/{{ a.slug }}/start"><button class="btn sm primary">Remettre en ligne</button></form>{% endif %}
+          {% if a.desired == 'running' %}<form class="inline{{ ' ro-ok' if can_deploy }}" method="post" action="/apps/{{ a.slug }}/stop"><button class="btn sm">Mettre hors ligne</button></form>
+          {% else %}<form class="inline{{ ' ro-ok' if can_deploy }}" method="post" action="/apps/{{ a.slug }}/start"><button class="btn sm primary">Remettre en ligne</button></form>{% endif %}
         </div>
       </section>
       <form class="panel" method="post" action="/apps/{{ a.slug }}/site/settings" style="display:flex;flex-direction:column;gap:8px">

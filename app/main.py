@@ -11,7 +11,7 @@ from fastapi.responses import PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import access, cache, crashes, db, monitor
+from . import access, cache, crashes, db, monitor, perms
 from . import platform as P
 from .routes.common import HERE, SESSION_IDLE
 
@@ -43,8 +43,12 @@ READONLY_OK = ("/logout",)
 
 
 def _readonly_refused(request, user):
-    """Message de refus si un compte en lecture seule tente une action (ou une lecture de secrets), sinon None."""
-    if getattr(request.state, "role", "admin") != "lecture":
+    """Message de refus si un compte en lecture seule tente une action (ou une lecture de secrets), ou si un compte
+    « applis choisies » sort de ses applis ; sinon None."""
+    role = getattr(request.state, "role", "admin")
+    if role == perms.ROLE:
+        return perms.refused(request.method, request.url.path, user)
+    if role != "lecture":
         return None
     p = request.url.path
     if request.method in ("GET", "HEAD", "OPTIONS"):
@@ -98,7 +102,7 @@ async def guard(request: Request, call_next):
         if refused:
             _audit(request, u, ip, 403, "refusé : compte en lecture seule")
             request.session["flash"] = {"msg": refused, "kind": "error"}
-            back = request.headers.get("referer") or "/"
+            back = "/" if request.method == "GET" else (request.headers.get("referer") or "/")
             path = urllib.parse.urlsplit(back).path if back.startswith(("http", "/")) else "/"
             return RedirectResponse(path if path.startswith("/") and not path.startswith("//") else "/", status_code=303)
     response = await call_next(request)
