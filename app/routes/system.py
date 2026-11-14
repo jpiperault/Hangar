@@ -26,7 +26,7 @@ async def system_page(request: Request):
                   since=db.kv_get("sys_pending_since") or {}, auto=system.auto_settings(),
                   tzs=system.tz_settings(), tz_common=system.TZ_COMMON, tz_all=system.timezones(),
                   tz_now=await asyncio.to_thread(cache.get, "tz_now", 600, _tz_now), chans=alerts.channels(),
-                  img=images.settings(), img_last=db.kv_get("image_cleanup_last"),
+                  img=images.settings(), img_last=db.kv_get("image_cleanup_last"), rep=report.options(),
                   health_modes=runopts.HEALTH_MODES, health_default=db.kv_get("health_mode") or "lenient",
                   levels=[(1, "toutes, même discrètes"), (3, "normales et plus"), (4, "importantes et urgentes"), (5, "urgentes seulement")])
 
@@ -150,6 +150,7 @@ async def alerts_save(request: Request):
             db.set_setting("ntfy_token", token)
         db.set_setting("ntfy_min", str(_int(f.get("ntfy_min"), 1, 5, 1)))
         db.set_setting("alerts_on", "1" if f.get("alerts_on") == "on" else "0")
+        db.kv_set("report_options", {"on": f.get("report_on") == "on", "all_channels": f.get("report_all") == "on"})
         flash(request, "Alertes enregistrées.")
     return go("/system#alertes")
 

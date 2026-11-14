@@ -116,9 +116,10 @@ def _post(s, title, msg, priority, tags):
         return r.status
 
 
-def send(title, msg, priority=3, tags=None, key=None, cooldown=0, force=False, only=None):
+def send(title, msg, priority=3, tags=None, key=None, cooldown=0, force=False, only=None, all_channels=False):
     """Envoie une alerte sur chaque canal prêt dont le seuil est atteint. `key` + `cooldown` évitent de répéter la même
-    alerte trop souvent ; `only` : un seul canal (essai). Retourne (envoyée quelque part, erreurs)."""
+    alerte trop souvent ; `only` : un seul canal (essai) ; `all_channels` : sur chaque canal, sans regarder les seuils
+    (rapport de la semaine). Retourne (envoyée quelque part, erreurs)."""
     s = db.settings()
     if not force and s.get("alerts_on") != "1":
         return False, "alertes désactivées"
@@ -134,7 +135,7 @@ def send(title, msg, priority=3, tags=None, key=None, cooldown=0, force=False, o
             _last[key] = time.time()
     sent, errs = False, []
     for name, c in chans:
-        if not force and priority < int(c.get("min") or DEFAULT_MIN[name]):
+        if not force and not all_channels and priority < int(c.get("min") or DEFAULT_MIN[name]):
             continue
         try:
             if name == "ntfy":

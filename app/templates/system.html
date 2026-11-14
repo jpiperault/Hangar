@@ -144,6 +144,8 @@
       </ul>
       Chaque lundi à 9 h, un rapport résume la semaine : disponibilité et trafic de chaque appli, sauvegardes, mises à jour en attente, disque et mémoire des machines, incidents.
       Une alerte plus discrète signale aussi une nouvelle version d'appli ou de composant (console ou nœud), et rappelle une mise à jour qui attend depuis plus de 14 jours.</span>
+    <label class="check"><input type="checkbox" name="report_on" {{ 'checked' if rep.on }}><span>Rapport de la semaine, le lundi à 9 h</span></label>
+    <label class="check" style="margin-left:24px"><input type="checkbox" name="report_all" {{ 'checked' if rep.all_channels }}><span>sur chaque canal, même ceux réglés sur « importantes » (sinon : selon le seuil de chaque canal)</span></label>
     <div class="bar" style="justify-content:flex-start">
       <button class="btn primary sm">Enregistrer</button>
       <button class="btn sm" formaction="/system/alerts/test">Tester tous les canaux</button>

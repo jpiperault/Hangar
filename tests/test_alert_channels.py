@@ -56,3 +56,18 @@ def test_formulaires():
             _channel_form(ch, f)
     e = _channel_form("email", {"host": "smtp.x.fr", "to": "a@b.fr; c@d.fr", "user": "moi@x.fr", "password": "p"})
     assert e["to"] == ["a@b.fr", "c@d.fr"] and e["security"] == "starttls" and e["port"] == 587
+
+
+def test_rapport_sur_tous_les_canaux(canaux, monkeypatch):
+    from app import report
+    monkeypatch.setattr(report, "build", lambda now=None: ("Rapport", "texte"))
+    db.kv_set("report_options", None)
+    report.send()
+    assert canaux == ["ntfy", "email"]                       # par défaut : malgré le seuil 4 de l'e-mail
+    canaux.clear()
+    db.kv_set("report_options", {"on": True, "all_channels": False})
+    report.send()
+    assert canaux == ["ntfy"]
+    db.kv_set("report_options", {"on": False, "all_channels": True})
+    assert report.maybe_send(1794819600) is False and db.kv_get("weekly_report") != "2026-W47"   # lundi 10 h, coupé
+    db.kv_set("report_options", None)

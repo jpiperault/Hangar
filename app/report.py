@@ -87,9 +87,15 @@ def build(now=None):
     return title, "\n".join(L)
 
 
+def options():
+    """Rapport du lundi : envoyé ou non, et sur chaque canal quel que soit son seuil (par défaut) ou selon les seuils."""
+    return {"on": True, "all_channels": True, **(db.kv_get("report_options") or {})}
+
+
 def send(now=None, force=False):
     title, text = build(now)
-    sent, err = alerts.send(title, text, priority=2, tags=["bar_chart"], force=force)
+    sent, err = alerts.send(title, text, priority=2, tags=["bar_chart"], force=force,
+                            all_channels=options()["all_channels"])
     if sent:
         P.log("info", "alertes", "rapport hebdomadaire envoyé")
     return sent, err
@@ -100,7 +106,7 @@ def maybe_send(now=None):
     now = now or time.time()
     t = time.localtime(now)
     week = time.strftime("%G-W%V", t)
-    if t.tm_wday != 0 or t.tm_hour < SEND_HOUR or db.kv_get("weekly_report") == week:
+    if t.tm_wday != 0 or t.tm_hour < SEND_HOUR or db.kv_get("weekly_report") == week or not options()["on"]:
         return False
     db.kv_set("weekly_report", week)
     send(now)
