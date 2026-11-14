@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block main %}
-<h1>Accès et comptes</h1>
+<div class="bar"><h1>Accès et comptes</h1><a class="btn sm" href="/bienvenue">Bien démarrer : réglages essentiels</a></div>
 <div class="cols">
 <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
   {% set f = aform or {'ip': acc.ip, 'port': acc.port, 'nets': acc.nets | join('\n')} %}

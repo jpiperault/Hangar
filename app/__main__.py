@@ -33,7 +33,7 @@ def passwd(args):
 
 def serve():
     import uvicorn
-    host, port = os.environ.get("ADMIN_BIND", "192.168.91.93:8443").rsplit(":", 1)
+    host, port = os.environ.get("ADMIN_BIND", "127.0.0.1:8443").rsplit(":", 1)   # réglé par install.sh
     uvicorn.run("app.main:app", host=host, port=int(port), workers=1, log_level="warning",
                 ssl_certfile="/srv/platform/tls/hangar.crt", ssl_keyfile="/srv/platform/tls/hangar.key",
                 proxy_headers=False, server_header=False)

@@ -5,7 +5,7 @@ import time
 
 from fastapi import APIRouter, Request
 
-from .. import affinity, hooks, monitor, runopts, segment, applogs, backup, cache, catalog, cloudflare, crashes, db, dbadmin, gameports, ha, jobs, kinds, limits, nodes, preprod, remoteconfig, services, sites, smoke, stats
+from .. import affinity, hooks, monitor, onboarding, runopts, segment, applogs, backup, cache, catalog, cloudflare, crashes, db, dbadmin, gameports, ha, jobs, kinds, limits, nodes, preprod, remoteconfig, services, sites, smoke, stats
 from .. import domains as D
 from .. import platform as P
 from .common import RESERVED, SLUG, VERSION, _client_names, _public_addr, _rc_url, _redis_state, apply_registry, flash, get_app_or_404, go, node_choices, render, tpl, validate
@@ -18,7 +18,8 @@ router = APIRouter()
 @router.get("/")
 async def home(request: Request):
     rows = await asyncio.to_thread(P.apps_with_status)
-    return render(request, "apps.html", title="Applications", nav="apps", apps=rows, req24=stats.requests_24h(),
+    todo = [] if onboarding.hidden() else await asyncio.to_thread(onboarding.pending)
+    return render(request, "apps.html", title="Applications", nav="apps", apps=rows, req24=stats.requests_24h(), todo=todo,
                   kind_list=kinds.choices(), kind_names={k: v["short"] for k, v in kinds.KINDS.items()},
                   ports={a["slug"]: gameports.text(a["slug"]) for a in rows},
                   refresh=any(r["status"] == "deploying" for r in rows), img_updates=db.kv_get("image_updates") or {},

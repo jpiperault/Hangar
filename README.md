@@ -83,10 +83,12 @@ tests/               tests automatiques (pytest), lancés à chaque push par Git
 
 ```bash
 ./install.sh                     # questions : IP, réseau local, domaine, mode
-./install.sh --domain piperault.fr --mode tunnel --tunnel-token <jeton> --restore archive.tar.gz --yes
+./install.sh --domain exemple.fr --mode tunnel --tunnel-token <jeton> --restore archive.tar.gz --yes
 ```
 
 Le script installe Docker, Caddy, cloudflared, restic et rclone, puis PostgreSQL, la console, le pare-feu et les services. Il génère les secrets et le compte administrateur, et peut restaurer une archive dans la foulée. Il est idempotent : le relancer ne remplace aucun secret ni réglage existant.
+
+À la première connexion, l'accueil liste les réglages essentiels qui manquent (domaine, tunnel, sauvegarde, alertes), chacun avec son lien ; la liste complète est sur `/bienvenue`.
 
 Dans un conteneur LXC Proxmox, active d'abord l'imbrication sur l'hôte : `pct set <id> --features nesting=1,keyctl=1`.
 

@@ -270,7 +270,9 @@ def migrate_from_settings():
         return False
     s = {r["key"]: r["value"] for r in db.q("SELECT key, value FROM settings")}
     import json
-    base = s.get("base_domain") or "piperault.fr"
+    base = s.get("base_domain")
+    if not base:   # aucun domaine donné à l'installation : l'accueil guidé propose d'en ajouter un
+        return False
     aliases = [a for a in json.loads(s.get("aliases") or "[]") if a and a != base]
     mode = s.get("mode") or "tunnel"
     hub = s.get("hub") or "apps"

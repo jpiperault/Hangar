@@ -3,7 +3,7 @@
 # Idempotent : peut être relancé ; les secrets et réglages existants ne sont jamais remplacés.
 #
 #   ./install.sh                                  installation interactive
-#   ./install.sh --domain piperault.fr --mode tunnel --tunnel-token <jeton> --restore hangar-….tar.gz --yes
+#   ./install.sh --domain exemple.fr --mode tunnel --tunnel-token <jeton> --restore hangar-….tar.gz --yes
 #
 # À lancer en root depuis une copie du dépôt (git clone ou archive du dépôt).
 set -euo pipefail
@@ -15,7 +15,7 @@ DEST=/opt/hangar
 usage() {
   cat <<EOF
 Usage : $0 [options]
-  --domain DOMAINE      domaine de base (ex. piperault.fr)
+  --domain DOMAINE      domaine de base (ex. exemple.fr)
   --hub NOM             hôte des routes par chemin (défaut : apps → apps.DOMAINE)
   --mode tunnel|direct  tunnel Cloudflare (défaut) ou direct (ports 80/443, Let's Encrypt)
   --ip IP               IP locale de la console (défaut : IP de l'interface principale)
@@ -81,7 +81,9 @@ if [ -f /srv/platform/.env ]; then
   . /srv/platform/.env
   DOMAIN="${DOMAIN:-$BASE_DOMAIN}"; MODE="${MODE:-$EXPOSURE_MODE}"
 fi
-ask DOMAIN "Domaine de base" "piperault.fr"
+ask DOMAIN "Domaine de base (ex. exemple.fr)" ""
+printf %s "$DOMAIN" | grep -Eq '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$' \
+  || die "domaine invalide ou manquant : --domain exemple.fr (un domaine que tu gères chez Cloudflare ou ailleurs)"
 ask MODE "Mode d'exposition (tunnel ou direct)" "tunnel"
 case "$MODE" in tunnel|direct) ;; *) die "mode invalide : $MODE";; esac
 python3 -c "import ipaddress,sys;ipaddress.ip_address(sys.argv[1]);ipaddress.ip_network(sys.argv[2])" "$IP" "$LAN" \

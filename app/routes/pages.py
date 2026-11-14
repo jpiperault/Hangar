@@ -1,12 +1,13 @@
-"""Prompts de déploiement et de migration, journal des événements."""
+"""Prompts de déploiement et de migration, journal des événements, premier démarrage."""
+import asyncio
 import os
 import re
 
 from fastapi import APIRouter, Request
 
-from .. import db
+from .. import db, onboarding
 from .. import domains as D
-from .common import HERE, render
+from .common import HERE, flash, go, render
 
 router = APIRouter()
 
@@ -58,3 +59,20 @@ async def journal(request: Request):
         events = db.q("SELECT * FROM events ORDER BY id DESC LIMIT 300")
     names = [r["app"] for r in db.q("SELECT DISTINCT app FROM events ORDER BY app")]
     return render(request, "journal.html", title="Journal", nav="journal", events=events, names=names, app_filter=app_filter)
+
+
+# ---------------------------------------------------------------- premier démarrage
+
+@router.get("/bienvenue")
+async def welcome(request: Request):
+    st = await asyncio.to_thread(onboarding.steps)
+    return render(request, "welcome.html", title="Bien démarrer", nav="apps", steps=st,
+                  left=[x for x in st if x["essential"] and not x["done"]], hidden=onboarding.hidden())
+
+
+@router.post("/bienvenue/{op}")
+async def welcome_toggle(request: Request, op: str):
+    onboarding.set_hidden(op == "masquer")
+    flash(request, "Liste de démarrage masquée : elle reste dans Accès et comptes → Bien démarrer." if op == "masquer" else
+          "Liste de démarrage affichée sur l'accueil.")
+    return go("/" if op == "masquer" else "/bienvenue")

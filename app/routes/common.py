@@ -169,9 +169,9 @@ def validate(f, cur=None):
             d["image"], tag = d["image"].rsplit(":", 1)
             version = version or tag
         if not IMAGE.match(d["image"]):
-            e["image"] = "Image Docker sans tag, par exemple ghcr.io/piperault/courses-api"
+            e["image"] = "Image Docker sans tag, par exemple ghcr.io/moi/courses-api"
     elif not GIT.match(d["image"]):
-        e["image"] = "URL du dépôt sans branche, par exemple https://github.com/piperault/meteo-backend.git"
+        e["image"] = "URL du dépôt sans branche, par exemple https://github.com/moi/meteo-backend.git"
     if not cur:
         d["version"] = version or ("latest" if d["source"] == "image" else "main")
         if not VERSION.match(d["version"]):

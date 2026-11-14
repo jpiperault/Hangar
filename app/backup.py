@@ -321,7 +321,7 @@ def nas_connect(kind, host, port, user, password, share, path):
     if kind not in ("smb", "sftp"):
         raise ValueError("Type de NAS inconnu.")
     if not re.fullmatch(r"[A-Za-z0-9.-]{1,253}", host or ""):
-        raise ValueError("Adresse du NAS invalide (nom ou IP, par exemple 192.168.91.20).")
+        raise ValueError("Adresse du NAS invalide (nom ou IP, par exemple 192.168.1.20).")
     port = int(port or (445 if kind == "smb" else 22))
     if not 1 <= port <= 65535:
         raise ValueError("Port invalide.")

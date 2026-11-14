@@ -15,7 +15,8 @@ from . import access, cache, crashes, db, monitor
 from . import platform as P
 from .routes.common import HERE, SESSION_IDLE
 
-LAN = access.parse_nets(os.environ.get("LAN_CIDR", "192.168.91.0/24"))
+# sans réglage : adresses privées seulement (réseaux locaux), jamais Internet
+LAN = access.parse_nets(os.environ.get("LAN_CIDR", "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"))
 
 db.init()
 P.recover()

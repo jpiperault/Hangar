@@ -924,7 +924,7 @@ DOCKER_HUB = "https://index.docker.io/v1/"
 
 
 def registry_of(image):
-    """ghcr.io/jpiperault/x -> ghcr.io ; nginx ou user/x -> docker.io."""
+    """ghcr.io/moi/x -> ghcr.io ; nginx ou user/x -> docker.io."""
     first = image.split("/", 1)[0]
     if "/" in image and ("." in first or ":" in first or first == "localhost"):
         return first

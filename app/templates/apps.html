@@ -2,6 +2,13 @@
 {% block main %}
 <div class="bar"><div><h1>Applications</h1><span class="hint">Sites, API, applis web, jeux, outils et services.</span></div>
   <div class="acts admin-only"><a class="btn" href="/catalogue">Installer une appli prête</a><a class="btn primary" href="/apps/new">Nouvelle application</a></div></div>
+{% if todo %}
+<section class="panel admin-only" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
+  <div class="bar" style="margin:0"><h2 style="margin:0">Bien démarrer : {{ todo | length }} étape{{ 's' if todo | length > 1 }} essentielle{{ 's' if todo | length > 1 }}</h2>
+    <a class="btn sm link" href="/bienvenue">Toute la liste</a></div>
+  {% for x in todo %}<a class="cert" href="{{ x.href }}" style="text-decoration:none;color:inherit"><span><strong>{{ x.title }}</strong> <span class="hint">· {{ x.text }}</span></span><span class="btn sm primary">Régler</span></a>{% endfor %}
+</section>
+{% endif %}
 <div class="kpis">
   <span class="kpi"><strong>{{ apps | selectattr('status', 'equalto', 'running') | list | length }}</strong> en ligne</span>
   <span class="kpi"><strong>{{ apps | selectattr('status', 'equalto', 'error') | list | length }}</strong> en erreur</span>

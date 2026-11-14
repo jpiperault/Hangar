@@ -3,7 +3,7 @@
 table inet platform
 delete table inet platform
 table inet platform {
-	set lan { type ipv4_addr; flags interval; elements = { 192.168.91.0/24 } }
+	set lan { type ipv4_addr; flags interval; elements = { 192.168.1.0/24 } }
 	# destinations interdites aux applis : réseau local, réseau privé des nœuds, adresses internes
 	set private4 { type ipv4_addr; flags interval; elements = { 10.0.0.0/8, 100.64.0.0/10, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16 } }
 

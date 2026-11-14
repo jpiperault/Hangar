@@ -35,13 +35,13 @@ Le dépôt est privé. Deux façons de le copier sur la nouvelle machine :
   ```
 - **Avec Git** : crée une clé de déploiement en lecture sur la machine (comme pour ce serveur), puis clone le dépôt :
   ```bash
-  git clone git@github.com:jpiperault/Hangar.git && cd Hangar
+  git clone <adresse de ton dépôt Hangar> hangar && cd hangar
   ```
 
 ## 3. Installer (et restaurer en même temps si tu as une archive)
 
 ```bash
-./install.sh --domain piperault.fr --mode tunnel --tunnel-token <jeton> --restore hangar-AAAAMMJJ-HHMMSS.tar.gz
+./install.sh --domain exemple.fr --mode tunnel --tunnel-token <jeton> --restore hangar-AAAAMMJJ-HHMMSS.tar.gz
 ```
 
 - Sans options, le script pose les questions : IP, réseau local, domaine, mode.

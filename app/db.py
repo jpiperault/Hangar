@@ -176,7 +176,7 @@ def init():
             _c.execute("ALTER TABLE apps ADD COLUMN latest_checked REAL")
             _c.execute("ALTER TABLE apps ADD COLUMN latest_error TEXT")
     defaults = {
-        "base_domain": os.environ.get("BASE_DOMAIN", "piperault.fr"),
+        "base_domain": os.environ.get("BASE_DOMAIN", ""),
         "hub": os.environ.get("HUB", "apps"),
         "aliases": "[]",
         "mode": os.environ.get("EXPOSURE_MODE", "tunnel"),   # tunnel | direct
@@ -195,8 +195,8 @@ def init():
 def settings():
     s = {r["key"]: r["value"] for r in q("SELECT key, value FROM settings")}
     s["aliases"] = json.loads(s.get("aliases") or "[]")
-    s["lan_cidr"] = os.environ.get("LAN_CIDR", "192.168.91.0/24")
-    s["admin_bind"] = os.environ.get("ADMIN_BIND", "192.168.91.93:8443")
+    s["lan_cidr"] = os.environ.get("LAN_CIDR", "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16")
+    s["admin_bind"] = os.environ.get("ADMIN_BIND", "127.0.0.1:8443")
     s["tunnel_bind"] = os.environ.get("TUNNEL_BIND", "127.0.0.1:8080")
     d = one("SELECT name, hub FROM domains ORDER BY is_default DESC, created_at LIMIT 1")
     s["domain"] = d["name"] if d else ""

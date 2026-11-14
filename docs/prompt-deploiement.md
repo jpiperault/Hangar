@@ -17,8 +17,8 @@ Rends ce projet déployable sur mon serveur d'applications « Hangar ». Commenc
 ## Mon application
 
 - Nom : `<Cuisine>`
-- Package Android : `<fr.piperault.cuisine>`
-- Identifiant / sous-domaine souhaité : `<cuisine>`  → https://`<cuisine>`.piperault.fr/
+- Package Android : `<fr.exemple.cuisine>`
+- Identifiant / sous-domaine souhaité : `<cuisine>`  → https://`<cuisine>`.exemple.fr/
 - Image Docker : `ghcr.io/<compte-github>/<cuisine>`
 - Version web : `<oui / non>`
 - Base de données : `<PostgreSQL / aucune>`
@@ -28,7 +28,7 @@ Rends ce projet déployable sur mon serveur d'applications « Hangar ». Commenc
 - Chaque backend tourne dans **un conteneur Docker** créé par la console Hangar à partir d'une **image publiée sur ghcr.io** et d'un **tag de version précis**.
 - Le serveur est en **linux/amd64** (x86_64). L'image doit être construite pour cette architecture, même si le poste de développement est un Mac ARM.
 - Le trafic arrive ainsi : Internet → Cloudflare (HTTPS) → tunnel cloudflared → Caddy → conteneur, **en HTTP simple**. Le conteneur ne gère jamais le TLS.
-- L'appli est exposée en **sous-domaine** : `https://<sous-domaine>.piperault.fr/` arrive tel quel à la racine `/` du conteneur.
+- L'appli est exposée en **sous-domaine** : `https://<sous-domaine>.exemple.fr/` arrive tel quel à la racine `/` du conteneur.
 - En-têtes transmis au conteneur : `Host`, `X-Forwarded-Proto: https`, `X-Forwarded-For`, `X-Real-IP` (IP réelle du visiteur). En mode chemin seulement, le préfixe est retiré et transmis dans `X-Forwarded-Prefix`.
 - Variables d'environnement fournies par la console :
   - `DATABASE_URL=postgresql://<user>:<mdp>@postgres:5432/<base>` si la base est activée. Le format est celui d'une URI libpq. **Pour la JVM, il faut le convertir** en `jdbc:postgresql://postgres:5432/<base>`, avec l'utilisateur et le mot de passe passés séparément.
@@ -42,7 +42,7 @@ Rends ce projet déployable sur mon serveur d'applications « Hangar ». Commenc
 - Les logs sont lus depuis la **sortie standard**.
 - Les anciennes versions de l'appli Android restent installées chez les utilisateurs : **l'API doit rester compatible** avec elles.
 - Limites Cloudflare : 100 Mo maximum par requête (envoi de fichiers) et réponse en moins de 100 s.
-- Manifeste public : `https://apps.piperault.fr/.well-known/apps.json` retourne `{ "<package android>": "https://<sous-domaine>.piperault.fr/" }`. L'appli Android l'utilise pour trouver son serveur.
+- Manifeste public : `https://apps.exemple.fr/.well-known/apps.json` retourne `{ "<package android>": "https://<sous-domaine>.exemple.fr/" }`. L'appli Android l'utilise pour trouver son serveur.
 
 ## Ce que tu dois produire
 
@@ -100,9 +100,9 @@ Rends ce projet déployable sur mon serveur d'applications « Hangar ». Commenc
 
 ### 5. Appli Android
 
-- Plus aucune URL de serveur en dur dans le code. `BuildConfig.DEFAULT_BASE_URL = "https://<sous-domaine>.piperault.fr/"` sert uniquement de valeur de secours.
+- Plus aucune URL de serveur en dur dans le code. `BuildConfig.DEFAULT_BASE_URL = "https://<sous-domaine>.exemple.fr/"` sert uniquement de valeur de secours.
 - Au démarrage :
-  1. lire `https://apps.piperault.fr/.well-known/apps.json` avec un timeout court ;
+  1. lire `https://apps.exemple.fr/.well-known/apps.json` avec un timeout court ;
   2. y prendre l'entrée `BuildConfig.APPLICATION_ID` ;
   3. la mémoriser (DataStore).
   

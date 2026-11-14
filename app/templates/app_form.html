@@ -66,7 +66,7 @@
       <label><input type="radio" name="source" value="git" {{ 'checked' if a.source == 'git' }}><span>Dépôt Git (build ici)</span></label>
     </div>
     <div class="{{ 'row2' if new else '' }}">
-      <div class="field {{ 'bad' if errors.image }}"><label for="image" id="imagelbl">Image</label><input id="image" name="image" value="{{ a.image }}" spellcheck="false" placeholder="ghcr.io/piperault/courses-api">{{ err('image') }}</div>
+      <div class="field {{ 'bad' if errors.image }}"><label for="image" id="imagelbl">Image</label><input id="image" name="image" value="{{ a.image }}" spellcheck="false" placeholder="ghcr.io/moi/courses-api">{{ err('image') }}</div>
       {% if new %}
       <div class="field {{ 'bad' if errors.version }}"><label for="version" id="versionlbl">Version (tag)</label><input id="version" name="version" value="{{ a.version }}" spellcheck="false" placeholder="latest">{{ err('version') }}</div>
       {% endif %}
@@ -327,7 +327,7 @@
       <label><input type="radio" name="source" value="git" {{ 'checked' if a.source == 'git' }}><span>Dépôt Git (build ici)</span></label>
     </div>
     <div class="{{ 'row2' if new else '' }}">
-      <div class="field {{ 'bad' if errors.image }}"><label for="image" id="imagelbl">Image</label><input id="image" name="image" value="{{ a.image }}" spellcheck="false" placeholder="ghcr.io/piperault/courses-api">{{ err('image') }}</div>
+      <div class="field {{ 'bad' if errors.image }}"><label for="image" id="imagelbl">Image</label><input id="image" name="image" value="{{ a.image }}" spellcheck="false" placeholder="ghcr.io/moi/courses-api">{{ err('image') }}</div>
       {% if new %}
       <div class="field {{ 'bad' if errors.version }}"><label for="version" id="versionlbl">Version (tag)</label><input id="version" name="version" value="{{ a.version }}" spellcheck="false" placeholder="latest">{{ err('version') }}</div>
       {% endif %}
@@ -783,7 +783,7 @@ try { /* … */ } catch (e) { hangar.report(e); }</pre>{% endif %}
     u.forEach(function (x, i) { var s = document.createElement('span'); s.textContent = x + (i === 0 && u.length > 1 ? '  (principale)' : ''); p.appendChild(s); });
     var git = val('source') === 'git';
     document.getElementById('imagelbl').textContent = git ? 'URL du dépôt' : 'Image (sans tag)';
-    f.elements.image.placeholder = git ? 'https://github.com/piperault/meteo-backend.git' : 'ghcr.io/piperault/courses-api';
+    f.elements.image.placeholder = git ? 'https://github.com/moi/meteo-backend.git' : 'ghcr.io/moi/courses-api';
     var vl = document.getElementById('versionlbl');
     if (vl) { vl.textContent = git ? 'Branche ou commit' : 'Version (tag)'; f.elements.version.placeholder = git ? 'main' : 'latest'; }
     // Registre de l'image : même règle que Docker (premier segment avec un point = registre)
