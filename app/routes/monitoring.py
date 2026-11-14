@@ -4,7 +4,7 @@ import time
 
 from fastapi import APIRouter, Request
 
-from .. import backup, cache, db, external, monitor, nodes, stats, statuspage
+from .. import backup, cache, capacity, db, external, monitor, nodes, stats, statuspage
 from .. import domains as D
 from .. import platform as P
 from .common import _ago, _int, flash, go, render
@@ -77,6 +77,20 @@ async def external_save(request: Request):
     return go("/monitoring#exterieur")
 
 
+def _best_node():
+    from .common import node_choices
+    ch = node_choices()
+    return max(ch, key=lambda n: n["free"])["id"] if ch else None
+
+
+@router.post("/monitoring/capacity")
+async def capacity_save(request: Request):
+    f = await request.form()
+    capacity.save(f.get("on") == "on", _int(f.get("days"), 1, 90, 14))
+    flash(request, "Alertes de capacité enregistrées.")
+    return go("/monitoring#capacite")
+
+
 @router.get("/monitoring")
 async def monitoring(request: Request):
     rng = request.query_params.get("r") if request.query_params.get("r") in stats.RANGES else "24h"
@@ -103,7 +117,8 @@ async def monitoring(request: Request):
                   .get(statuspage.host()) if statuspage.host() else None, doms=D.all_domains(),
                   ext=external.settings(), ext_res=external.results(),
                   ext_err=db.kv_get("external_error"), probe_nodes=db.q("SELECT id, state FROM nodes ORDER BY id"),
-                  app_names={a["slug"]: a["name"] for a in rows})
+                  app_names={a["slug"]: a["name"] for a in rows},
+                  cap=await asyncio.to_thread(capacity.machines), cap_s=capacity.settings(), best_node=_best_node())
 
 
 @router.post("/monitoring/status")

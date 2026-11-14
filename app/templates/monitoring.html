@@ -111,6 +111,24 @@
     {% for d in pg.dbs %}<div class="cert"><span class="mono">{{ d.name }}</span><span class="hint">{{ d.size | size }}</span></div>{% endfor %}
   </section>
 </div>
+<form class="panel" id="capacite" method="post" action="/monitoring/capacity" style="margin-top:20px;display:flex;flex-direction:column;gap:10px">
+  <h2 style="margin:0">Capacité</h2>
+  <p class="hint" style="margin:0">À ce rythme (tendance des 7 derniers jours), quand chaque disque sera plein, et si la mémoire réservée aux applis (leurs limites, bases et Redis compris) tient dans chaque machine.{% if best_node %} Pour la prochaine appli, la machine la plus libre est <strong>{{ best_node }}</strong>.{% endif %}</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>Machine</th><th>Disque</th><th>Rythme</th><th>Plein dans</th><th>Mémoire utilisée</th><th>Réservée aux applis</th></tr></thead>
+    <tbody>{% for m in cap %}<tr><td>{{ 'console' if m.id == 'local' else m.id }}</td>
+      {% if not m.data %}<td colspan="5" class="hint">pas encore de mesures</td>{% else %}
+      <td class="mono">{{ '%.1f' % m.disk }} / {{ '%.0f' % m.disk_total }} Go ({{ '%.0f' % m.disk_pct }} %)</td>
+      <td class="mono">{% if m.per_day is none %}<span class="hint">moins de 24 h de recul</span>{% else %}{{ '%+.2f' % m.per_day }} Go/jour{% endif %}</td>
+      <td>{% if m.days_left is none %}<span class="lv-ok">pas de croissance</span>{% elif m.days_left < 3 %}<span class="lv-error">{{ '%.0f' % m.days_left }} jour(s)</span>{% elif m.days_left < cap_s.days %}<span class="lv-warn">{{ '%.0f' % m.days_left }} jours</span>{% elif m.days_left > 3650 %}<span class="lv-ok">plus de 10 ans</span>{% else %}<span class="lv-ok">{{ '%.0f' % m.days_left }} jours</span>{% endif %}</td>
+      <td class="mono">{{ '%.0f' % m.mem_used_mb }} / {{ '%.0f' % m.mem_total_mb }} Mo</td>
+      <td class="mono {{ 'lv-error' if m.mem_total_mb and m.allocated_mb > m.mem_total_mb }}">{{ m.allocated_mb }} Mo{% if m.mem_total_mb %} ({{ '%.0f' % (m.allocated_mb / m.mem_total_mb * 100) }} %){% endif %}</td>{% endif %}</tr>{% endfor %}</tbody>
+  </table></div>
+  <div class="inlinefield" style="flex-wrap:wrap"><label class="check"><input type="checkbox" name="on" {{ 'checked' if cap_s.on }}><span>M'alerter si un disque sera plein dans moins de</span></label>
+    <input name="days" type="number" min="1" max="90" value="{{ cap_s.days }}" style="max-width:5em" aria-label="Jours"><span>jours, ou si la mémoire est surréservée</span>
+    <button class="btn sm primary">Enregistrer</button></div>
+</form>
+
 <form class="panel" id="exterieur" method="post" action="/monitoring/external" style="margin-top:20px;display:flex;flex-direction:column;gap:10px">
   <h2 style="margin:0">Vu de l'extérieur</h2>
   <p class="hint" style="margin:0">Une machine ouvre l'adresse publique de chaque appli par Internet, comme un visiteur : DNS, Cloudflare, tunnel et Caddy d'entrée compris, ce que le contrôle interne ne voit pas. Choisis de préférence un VPS loin de la console. Alerte après plusieurs échecs d'affilée, puis au retour.</p>
