@@ -1703,6 +1703,8 @@ def delete(slug):
             services.fresh_dump(a, quiet=True)
         except RuntimeError as e:
             log("warn", slug, str(e))
+        from . import mysqlrepl
+        mysqlrepl.remove(slug)   # avant d'oublier les services : la réplique dit encore sur quel nœud elle est
         services.drop(slug)
         gameports.save(slug, [])
         restricted = gameports.save_sources(slug, [])
