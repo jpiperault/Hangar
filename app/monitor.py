@@ -34,8 +34,10 @@ def _probe(a):
         return True, ""
     url = f"http://{P.app_host(a)}:{a['host_port']}{a['health_path']}"
     try:
+        from . import runopts
         code = P.http_probe(url, timeout=5)
-        return code < 500, ("" if code < 500 else f"HTTP {code}")
+        ok = runopts.health_ok(a["slug"], code)
+        return ok, ("" if ok else f"HTTP {code}")
     except Exception as e:
         return False, str(getattr(e, "reason", e))
 

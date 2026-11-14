@@ -4,7 +4,7 @@ import re
 
 from fastapi import APIRouter, Request
 
-from .. import alerts, cache, db, report, system
+from .. import alerts, cache, db, report, runopts, system
 from .. import platform as P
 from .common import _int, flash, go, render
 
@@ -26,6 +26,7 @@ async def system_page(request: Request):
                   since=db.kv_get("sys_pending_since") or {}, auto=system.auto_settings(),
                   tzs=system.tz_settings(), tz_common=system.TZ_COMMON, tz_all=system.timezones(),
                   tz_now=await asyncio.to_thread(cache.get, "tz_now", 600, _tz_now), chans=alerts.channels(),
+                  health_modes=runopts.HEALTH_MODES, health_default=db.kv_get("health_mode") or "lenient",
                   levels=[(1, "toutes, même discrètes"), (3, "normales et plus"), (4, "importantes et urgentes"), (5, "urgentes seulement")])
 
 
@@ -96,6 +97,16 @@ async def system_report(request: Request):
     sent, err = await asyncio.to_thread(report.send, None, True)
     flash(request, "Rapport envoyé sur ntfy." if sent else f"Rapport non envoyé : {err}", "ok" if sent else "error")
     return go("/system#alertes")
+
+
+@router.post("/system/health")
+async def system_health(request: Request):
+    m = (await request.form()).get("mode")
+    if m in runopts.HEALTH_MODES:
+        db.kv_set("health_mode", m)
+        P.log("info", "console", f"contrôle de santé par défaut : {runopts.HEALTH_MODES[m][0]}")
+        flash(request, f"Contrôle de santé par défaut : {runopts.HEALTH_MODES[m][0]}.")
+    return go("/system#sante")
 
 
 @router.post("/system/alerts")

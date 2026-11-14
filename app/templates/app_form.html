@@ -390,12 +390,16 @@
 <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
   {% if a.source in ('image', 'git') and not kind.static %}{% include "_hook_panel.html" %}{% endif %}
   {% if not kind.static %}<form class="panel" id="demarrage" method="post" action="/apps/{{ a.slug }}/run" autocomplete="off" style="display:flex;flex-direction:column;gap:10px">
-    <h2 style="margin:0">Démarrage du conteneur</h2>
+    <h2 style="margin:0">Démarrage et santé</h2>
     <p class="hint" style="margin:0">Vide : ce que prévoit l'image. Une seule ligne, découpée comme dans un terminal (les guillemets regroupent) ; aucun shell n'interprète la commande : pour enchaîner, écris <code>sh -c "…"</code>.</p>
     <div class="field"><label for="rentry">Point d'entrée</label><input id="rentry" name="entrypoint" value="{{ run.entrypoint or '' }}" spellcheck="false" placeholder="celui de l'image"></div>
     <div class="field"><label for="rcmd">Commande</label><input id="rcmd" name="command" value="{{ run.command or '' }}" spellcheck="false" placeholder="celle de l'image, par exemple : python worker.py --queue emails"></div>
     <div class="field"><label for="rhealth">Commande de santé</label><input id="rhealth" name="health_cmd" value="{{ run.health_cmd or '' }}" spellcheck="false" placeholder="par exemple : redis-cli ping, pg_isready, test -f /tmp/vivant">
       <span class="hint">Lancée dans le conteneur toutes les 15 s ; code de sortie 0 = en bonne santé, 3 échecs de suite = malade.{% if not kind.http %} Le déploiement attend qu'elle réussisse (sinon la version précédente revient) et la supervision t'alerte si elle échoue.{% else %} La santé de l'appli reste vérifiée par <code>{{ a.health_path }}</code> ; celle-ci s'ajoute dans l'état Docker.{% endif %}</span></div>
+    {% if kind.http %}<div class="field"><label for="rhmode">Réponses acceptées par le contrôle de santé (<code>{{ a.health_path }}</code>)</label>
+      <select id="rhmode" name="health_mode"><option value="">comme le réglage général ({{ health_modes[health_default][0] }})</option>
+        {% for k, v in health_modes.items() %}<option value="{{ k }}" {{ 'selected' if run.health_mode == k }}>{{ v[0] }}</option>{% endfor %}</select>
+      <span class="hint">« Tout code sous 500 » : une appli qui répond 401 ou 404 est considérée en marche. Plus strict : une page d'erreur fait échouer le déploiement et déclenche l'alerte.</span></div>{% endif %}
     <div class="field"><label for="rmounts">Dossiers persistants ailleurs que /data</label><input id="rmounts" name="mounts" value="{{ run.mounts or '' }}" spellcheck="false" placeholder="par exemple : www:/var/www/html">
       <span class="hint">« www:/var/www/html » garde /var/www/html dans data/www : sauvegardé, restauré et déplacé avec data/. Pour les images qui ne rangent pas leurs données dans /data.</span></div>
     <div><button class="btn sm primary" {{ 'disabled' if a.status == 'deploying' }}>Enregistrer et redéployer</button></div>

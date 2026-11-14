@@ -166,7 +166,7 @@ async def _app_ctx(request, slug):
                 ranges=list(stats.RANGES), others=others, dsize=dsize, domains=D.all_domains(), cf=cloudflare.status(),
                 safety=backup.safety_copies(slug), maint=P.maintenance(slug),
                 jobs=[{**j, "desc": jobs.describe(j), "busy": jobs.is_running(slug, j["id"])} for j in jobs.of(slug)],
-                job_days=jobs.DAYS, cpus=limits.cpus(slug), run=runopts.of(slug), hook=hooks.of(slug), hook_opts=hooks.options(slug), hook_url=hooks.url(slug), rc=remoteconfig.of(slug),
+                job_days=jobs.DAYS, cpus=limits.cpus(slug), run=runopts.of(slug), health_modes=runopts.HEALTH_MODES, health_default=runopts.default_health_mode(), hook=hooks.of(slug), hook_opts=hooks.options(slug), hook_url=hooks.url(slug), rc=remoteconfig.of(slug),
                 rc_urls={"android": _rc_url(a, a["pkg"]), "ios": _rc_url(a, a["ios_bundle"])},
                 has_clients=bool(a["pkg"] or a["ios_bundle"] or a["web_client"]), client_names=_client_names(a),
                 crash_groups=crashes.groups(slug) if (a["pkg"] or a["ios_bundle"] or a["web_client"]) else [], aff=affinity.of(slug), aff_modes=affinity.MODES,

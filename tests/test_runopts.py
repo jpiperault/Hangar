@@ -57,3 +57,15 @@ def test_attente_sante(monkeypatch):
     monkeypatch.setattr(P, "container_report", lambda name, node=None: "")
     ok, why = P.wait_health(a)
     assert not ok and "pas prêt" in why
+
+
+def test_modes_de_sante():
+    db.kv_set("health_mode", None)
+    assert runopts.health_ok("mon-jeu", 404) and not runopts.health_ok("mon-jeu", 502)     # défaut : < 500
+    db.kv_set("health_mode", "strict")
+    assert runopts.health_ok("mon-jeu", 204) and not runopts.health_ok("mon-jeu", 301)
+    runopts.save("mon-jeu", {"health_mode": "redirect"})                                   # l'appli choisit
+    assert runopts.health_ok("mon-jeu", 302) and not runopts.health_ok("mon-jeu", 401)
+    runopts.save("mon-jeu", {"health_mode": ""})                                           # retour au général
+    assert not runopts.health_ok("mon-jeu", 302)
+    db.kv_set("health_mode", None)

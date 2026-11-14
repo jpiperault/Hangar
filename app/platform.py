@@ -1399,9 +1399,9 @@ def wait_health(a, timeout=90):
             return False, f"le conteneur {why}.\n{container_report(name, node=node)}"
         try:
             code = http_probe(url, timeout=3)
-            if code < 500:
+            if runopts.health_ok(a["slug"], code):
                 return True, f"HTTP {code}"
-            last = f"HTTP {code}"
+            last = f"HTTP {code} (attendu : {runopts.HEALTH_MODES[runopts.health_mode(a['slug'])][0]})"
         except Exception as e:
             last = str(getattr(e, "reason", e))
         time.sleep(2)

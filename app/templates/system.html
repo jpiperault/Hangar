@@ -63,6 +63,11 @@
     {% else %}<p class="hint">Pas encore vérifié : clique sur « Rechercher les mises à jour ».</p>{% endif %}
   </section>
 
+  <form class="panel" id="sante" method="post" action="/system/health" style="display:flex;flex-direction:column;gap:10px">
+    <h2 style="margin:0">Contrôle de santé des applis</h2>
+    <p class="hint" style="margin:0">Réponses de l'adresse de santé qui valident un déploiement et que la supervision accepte. Chaque appli peut choisir autrement (fiche → Réglages → Démarrage et santé).</p>
+    <div class="inlinefield"><select name="mode" aria-label="Réponses acceptées">{% for k, v in health_modes.items() %}<option value="{{ k }}" {{ 'selected' if health_default == k }}>{{ v[0] }}</option>{% endfor %}</select><button class="btn sm primary">Enregistrer</button></div>
+  </form>
   <form class="panel" id="fuseau" method="post" action="/system/timezone" style="display:flex;flex-direction:column;gap:10px">
     <h2 style="margin:0">Fuseau horaire</h2>
     <p class="hint" style="margin:0">Heures des sauvegardes, des mises à jour de nuit, des tâches planifiées, du rapport, des redémarrages automatiques et du journal. Appliqué à la console et à chaque nœud (et aux suivants dès leur installation) ; heure d'été comprise.</p>

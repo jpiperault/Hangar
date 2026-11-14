@@ -17,6 +17,23 @@ from . import db
 KEY = "app_run"
 MAX = 1000
 FIELDS = ("entrypoint", "command", "health_cmd", "mounts")
+# codes HTTP qui valident le contrôle de santé : « lenient » < 500 (une appli qui répond, même 401 ou 404, tourne),
+# « redirect » 2xx-3xx, « strict » 2xx seulement. Réglage général (kv « health_mode »), remplaçable par appli.
+HEALTH_MODES = {"lenient": ("tout code sous 500", 500), "redirect": ("2xx ou 3xx", 400), "strict": ("2xx seulement", 300)}
+
+
+def default_health_mode():
+    m = db.kv_get("health_mode")
+    return m if m in HEALTH_MODES else "lenient"
+
+
+def health_mode(slug):
+    m = of(slug).get("health_mode")
+    return m if m in HEALTH_MODES else default_health_mode()
+
+
+def health_ok(slug, code):
+    return 200 <= code < HEALTH_MODES[health_mode(slug)][1] if health_mode(slug) != "lenient" else code < 500
 SUB_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,30}$")
 PATH_RE = re.compile(r"^/[A-Za-z0-9._/-]{1,200}$")
 FORBIDDEN = ("/", "/data", "/proc", "/sys", "/dev", "/etc", "/bin", "/sbin", "/usr", "/lib", "/run", "/tmp")
@@ -65,6 +82,9 @@ def save(slug, f):
     new = {}
     labels = {"entrypoint": "point d'entrée", "command": "commande", "health_cmd": "commande de santé",
               "mounts": "dossiers"}
+    hm = (f.get("health_mode") or "").strip()
+    if hm in HEALTH_MODES:
+        new["health_mode"] = hm
     for k in FIELDS:
         v = _check(labels[k], (f.get(k) or "").strip())
         if v:
