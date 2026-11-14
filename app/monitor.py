@@ -356,7 +356,9 @@ def _loop():
         _every("image_cleanup", 3600, images.tick)   # sans effet si l'option est coupée ou hors du jour choisi
         from . import capacity, external
         _every("external", 60, external.tick)
-        _every("capacity", 3600, capacity.check)      # disque plein à ce rythme, mémoire surréservée        # à son propre rythme, si une sonde est choisie
+        _every("capacity", 3600, capacity.check)      # disque plein à ce rythme, mémoire surréservée
+        from . import vulns
+        _every("vuln_scan", 3600, vulns.tick)         # une fois par semaine, la nuit du jour choisi        # à son propre rythme, si une sonde est choisie
         time.sleep(max(5, 60 - (time.time() - t0)))
 
 

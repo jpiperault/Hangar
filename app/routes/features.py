@@ -195,6 +195,18 @@ async def app_crash_op(request: Request, slug: str, fp: str, op: str):
     return go(f"/apps/{slug}#mobile")
 
 
+@router.post("/apps/{slug}/vulns/scan")
+async def app_vuln_scan(request: Request, slug: str):
+    from .. import vulns
+    get_app_or_404(slug)
+    if vulns.busy(slug):
+        flash(request, "Analyse déjà en cours.", "error")
+    else:
+        P.spawn(vulns.scan, slug)
+        flash(request, "Analyse lancée : une à quelques minutes (la première fois, Trivy télécharge sa base de failles).")
+    return go(f"/apps/{slug}#vulns")
+
+
 @router.post("/apps/{slug}/history/{hid}/restore")
 async def app_history_restore(request: Request, slug: str, hid: int):
     from .. import history

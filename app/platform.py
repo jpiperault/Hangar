@@ -1588,8 +1588,9 @@ def deploy(slug, version, kind, previous=None):
         from . import history
         history.record(slug, "Hangar (déploiement)")   # réglage remis par un retour automatique, ou première prise
         if ok:
-            from . import ha
+            from . import ha, vulns
             ha.after_deploy(slug)
+            vulns.after_deploy(slug)   # analyse de l'image en arrière-plan (si l'option est active)
         try:
             apply_routing()
         except RuntimeError:
@@ -1690,8 +1691,9 @@ def delete(slug):
         hooks.forget(slug)
         perms.forget_app(slug)
         protect.drop(slug)
-        from . import history
+        from . import history, vulns
         history.drop(slug)
+        vulns.drop(slug)
         preprod.forget(slug)
         if ha.get(slug):   # haute dispo : base dédiée rapatriée dans le PostgreSQL partagé, secours et instances retirés
             ha.disable(slug, "suppression", locked=True)

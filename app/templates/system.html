@@ -92,6 +92,18 @@
       {% if relay.host %}<button class="btn sm link" formaction="/system/mail-relay?off=1" formnovalidate data-confirm="Retirer le relais e-mail ?">Retirer</button>{% endif %}</div>
     <span class="hint">L'expéditeur doit être autorisé chez le fournisseur (domaine vérifié, SPF et DKIM), sinon les messages partent en indésirables.</span>
   </form>
+  <form class="panel" id="vulns" method="post" action="/system/vulns" style="display:flex;flex-direction:column;gap:10px">
+    <h2 style="margin:0">Vulnérabilités des images</h2>
+    <p class="hint" style="margin:0">Trivy analyse l'image de chaque appli sur sa machine (failles élevées et critiques). Alerte quand une image en ligne a une nouvelle faille critique.</p>
+    <label class="check"><input type="checkbox" name="on" {{ 'checked' if vs.on }}><span>Analyser chaque semaine, la nuit du</span>
+      <select name="day" aria-label="Jour">{% for d in ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"] %}<option value="{{ loop.index0 }}" {{ 'selected' if vs.day == loop.index0 }}>{{ d }}</option>{% endfor %}</select></label>
+    <label class="check"><input type="checkbox" name="after_deploy" {{ 'checked' if vs.after_deploy }}><span>et après chaque déploiement</span></label>
+    {% if vres %}<div class="tablebox"><table><thead><tr><th>Appli</th><th>Critiques</th><th>Élevées</th><th>Analysée</th></tr></thead><tbody>
+      {% for s_, r in vres.items() | sort(attribute='1.ts', reverse=True) %}<tr><td><a href="/apps/{{ s_ }}#vulns">{{ app_names.get(s_, s_) }}</a></td>
+        {% if r.error %}<td colspan="2" class="lv-warn">{{ r.error[:80] }}</td>{% else %}<td class="{{ 'lv-error' if r.counts.CRITICAL }}">{{ r.counts.CRITICAL }}</td><td>{{ r.counts.HIGH }}</td>{% endif %}
+        <td class="hint">{{ r.ts | ago }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+    <div><button class="btn sm primary">Enregistrer</button></div>
+  </form>
   <form class="panel" id="sante" method="post" action="/system/health" style="display:flex;flex-direction:column;gap:10px">
     <h2 style="margin:0">Contrôle de santé des applis</h2>
     <p class="hint" style="margin:0">Réponses de l'adresse de santé qui valident un déploiement et que la supervision accepte. Chaque appli peut choisir autrement (fiche → Réglages → Démarrage et santé).</p>

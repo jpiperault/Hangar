@@ -5,7 +5,7 @@ import time
 
 from fastapi import APIRouter, Request
 
-from .. import affinity, history, hooks, monitor, onboarding, perms, protect, runopts, segment, applogs, backup, cache, catalog, cloudflare, crashes, db, dbadmin, gameports, ha, jobs, kinds, limits, nodes, preprod, remoteconfig, services, sites, smoke, stats
+from .. import affinity, history, vulns, hooks, monitor, onboarding, perms, protect, runopts, segment, applogs, backup, cache, catalog, cloudflare, crashes, db, dbadmin, gameports, ha, jobs, kinds, limits, nodes, preprod, remoteconfig, services, sites, smoke, stats
 from .. import domains as D
 from .. import platform as P
 from .common import RESERVED, SLUG, VERSION, _client_names, _public_addr, _rc_url, _redis_state, apply_registry, flash, get_app_or_404, go, node_choices, render, tpl_for, validate
@@ -190,7 +190,7 @@ async def _app_ctx(request, slug):
                 ranges=list(stats.RANGES), others=others, dsize=dsize, domains=D.all_domains(), cf=cloudflare.status(),
                 safety=backup.safety_copies(slug), maint=P.maintenance(slug),
                 jobs=[{**j, "desc": jobs.describe(j), "busy": jobs.is_running(slug, j["id"])} for j in jobs.of(slug)],
-                job_days=jobs.DAYS, cpus=limits.cpus(slug), run=runopts.of(slug), can_deploy=perms.can_deploy(getattr(request.state, 'role', 'admin'), request.session.get('user'), slug), health_modes=runopts.HEALTH_MODES, health_default=runopts.default_health_mode(), hook=hooks.of(slug), prot=protect.of(slug), hist=history.entries(slug), hook_opts=hooks.options(slug), hook_url=hooks.url(slug), rc=remoteconfig.of(slug),
+                job_days=jobs.DAYS, cpus=limits.cpus(slug), run=runopts.of(slug), can_deploy=perms.can_deploy(getattr(request.state, 'role', 'admin'), request.session.get('user'), slug), health_modes=runopts.HEALTH_MODES, health_default=runopts.default_health_mode(), hook=hooks.of(slug), prot=protect.of(slug), hist=history.entries(slug), vul=vulns.of(slug), vul_busy=vulns.busy(slug), hook_opts=hooks.options(slug), hook_url=hooks.url(slug), rc=remoteconfig.of(slug),
                 rc_urls={"android": _rc_url(a, a["pkg"]), "ios": _rc_url(a, a["ios_bundle"])},
                 has_clients=bool(a["pkg"] or a["ios_bundle"] or a["web_client"]), client_names=_client_names(a),
                 crash_groups=crashes.groups(slug) if (a["pkg"] or a["ios_bundle"] or a["web_client"]) else [], aff=affinity.of(slug), aff_modes=affinity.MODES,
