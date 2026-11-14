@@ -71,3 +71,19 @@ def test_redemarrage(appli):
     cache._data["mon_containers"] = (time.time(), {"mon-jeu": {"restarts": 3, "started": 0, "oom": True}})
     monitor.check_usage()
     assert appli == ["Mon jeu a redémarré toute seule"]
+
+
+def test_graphiques_services(appli):
+    from app import services, stats
+    now = int(time.time() // 60 * 60)
+    db.x("DELETE FROM stats_res WHERE app LIKE 'mon-jeu%'")
+    db.x("INSERT INTO stats_res(app, t, cpu, mem) VALUES('mon-jeu', ?, 50, 120), ('mon-jeu:mysql', ?, 3, 180)", (now, now))
+    services.enable_mysql("mon-jeu", "mariadb", 256)
+    st = stats.app_charts(stats.series("mon-jeu", "1h"), 200, 1.5)
+    titles = [c["title"] for c in st["charts"]]
+    assert "Mémoire : base MySQL/MariaDB" in titles
+    mysql_chart = st["charts"][titles.index("Mémoire : base MySQL/MariaDB")]
+    assert 180 in mysql_chart["values"] and mysql_chart["limit"] == 256
+    assert st["charts"][titles.index("Processeur")]["limit"] == 150
+    services.disable_mysql("mon-jeu")
+    db.x("DELETE FROM stats_res WHERE app LIKE 'mon-jeu%'")

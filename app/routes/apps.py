@@ -149,7 +149,7 @@ async def _app_ctx(request, slug):
     events = db.q("SELECT * FROM events WHERE app = ? ORDER BY id DESC LIMIT 8", (slug,))
     names = await asyncio.to_thread(P.app_public_names, a, db.settings())
     rng = request.query_params.get("r") if request.query_params.get("r") in stats.RANGES else "24h"
-    st = stats.app_charts(stats.series(slug, rng), a["mem_mb"])
+    st = stats.app_charts(stats.series(slug, rng), a["mem_mb"], limits.cpus(slug))
     dbi = dbadmin.cached_info(slug) if a["db"] and a["status"] != "deploying" else None   # sinon chargée après
     others = [c for c in node_choices() if c["id"] != a["node"]]
     dsize = await asyncio.to_thread(cache.get, f"dsize:{slug}", 300, P.dir_size, a["node"], f"{P.app_dir(slug)}/data") \

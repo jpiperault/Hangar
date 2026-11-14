@@ -106,9 +106,13 @@ def collect_resources():
     t = int(time.time() // 60 * 60)
     for line in out.splitlines():
         parts = line.split("\t")
-        if len(parts) != 3 or not parts[0].startswith("app-") or not parts[0].endswith("-app-1"):
+        name = parts[0] if len(parts) == 3 else ""
+        svc = next((x for x in ("app", "redis", "mysql") if name.startswith("app-") and name.endswith(f"-{x}-1")), None)
+        if not svc:
             continue
-        slug = parts[0][4:-6]
+        slug = name[4:-len(svc) - 3]
+        if svc != "app":   # services de l'appli (Redis, MySQL/MariaDB) : rangés sous « appli:service »
+            slug = f"{slug}:{svc}"
         try:
             cpu = float(parts[1].rstrip("%"))
         except ValueError:
@@ -269,10 +273,20 @@ def series(slug, rng="24h"):
         i = idx.get(r["s"])
         if i is not None:
             cpu[i], mem[i] = round(r["c"], 1), round(r["m"], 1)
+    svc = {}
+    for name in ("mysql", "redis"):   # services de l'appli, s'il y en a eu sur la période
+        sm, sc = [None] * n, [None] * n
+        for r in db.q(f"SELECT (t / {step}) * {step} AS s, avg(cpu) c, max(mem) m FROM stats_res "
+                      "WHERE app = ? AND t >= ? GROUP BY s", (f"{slug}:{name}", start)):
+            i = idx.get(r["s"])
+            if i is not None:
+                sc[i], sm[i] = round(r["c"], 1), round(r["m"], 1)
+        if any(x is not None for x in sm):
+            svc[name] = {"mem": sm, "cpu": sc}
     total = sum(req)
     return {
-        "range": rng, "step": step, "t": slots, "mem_limit": (db.app(slug) or {}).get("mem_mb"),
-        "req": req, "e5": e5, "e4": e4, "avg": avg, "p95": p95, "mem": mem, "cpu": cpu,
+        "range": rng, "step": step, "t": slots, "slug": slug, "mem_limit": (db.app(slug) or {}).get("mem_mb"),
+        "req": req, "e5": e5, "e4": e4, "avg": avg, "p95": p95, "mem": mem, "cpu": cpu, "svc": svc,
         "summary": {
             "requests": total,
             "errors5": sum(e5),
@@ -295,7 +309,11 @@ def _per(step):
     return f"par {step // 3600} h" if step >= 3600 else f"par {step // 60} min"
 
 
-def app_charts(st, mem_mb):
+SVC_NAMES = {"mysql": "base MySQL/MariaDB", "redis": "Redis"}
+
+
+def app_charts(st, mem_mb, cpus=None):
+    svc = st.get("svc") or {}
     st["charts"] = [
         {"title": "Requêtes", "sub": _per(st["step"]), "unit": "", "kind": "bar", "values": st["req"],
          "marks": {"values": st["e5"], "label": "erreur(s) 5xx"}},
@@ -303,8 +321,16 @@ def app_charts(st, mem_mb):
          "values": st["p95"], "extra": [{"label": "moyenne", "values": st["avg"], "unit": "ms"}]},
         {"title": "Mémoire", "sub": "max sur l'intervalle (Mo)", "unit": "Mo", "kind": "line", "values": st["mem"],
          "limit": mem_mb, "limitLabel": f"limite {mem_mb} Mo"},
-        {"title": "Processeur", "sub": "moyenne (% d'un cœur)", "unit": "%", "kind": "line", "values": st["cpu"]},
+        {"title": "Processeur", "sub": "moyenne (% d'un cœur)", "unit": "%", "kind": "line", "values": st["cpu"],
+         **({"limit": round(cpus * 100), "limitLabel": f"limite {cpus:g} cœur(s)"} if cpus else {}),
+         "extra": [{"label": SVC_NAMES[k], "values": v["cpu"], "unit": "%"} for k, v in svc.items()]},
     ]
+    from . import services
+    for k, v in svc.items():   # Redis, MySQL/MariaDB de l'appli : leur mémoire, face à leur propre limite
+        conf = (services.mysql(st["slug"]) if k == "mysql" else services.redis(st["slug"])) or {}
+        st["charts"].append({"title": f"Mémoire : {SVC_NAMES[k]}", "sub": "max sur l'intervalle (Mo)", "unit": "Mo",
+                             "kind": "line", "values": v["mem"],
+                             **({"limit": conf["mem"], "limitLabel": f"limite {conf['mem']} Mo"} if conf.get("mem") else {})})
     return st
 
 
