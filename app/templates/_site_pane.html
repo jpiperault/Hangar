@@ -56,7 +56,7 @@
   {% if events %}
   <section class="panel">
     <div class="bar"><h2>Derniers événements</h2><a class="btn sm link" href="/journal?app={{ a.slug }}">Tout voir</a></div>
-    <ul class="events">{% for e in events %}<li><time>{{ e.ts | when }}</time><span class="lv-{{ e.level }}">{{ e.msg }}</span></li>{% endfor %}</ul>
+    <ul class="events">{% for e in events %}<li><time>{{ e.ts | when }}</time><span class="lv-{{ e.level }}">{{ e.msg | trmsg }}</span></li>{% endfor %}</ul>
   </section>
   {% endif %}
 </div>

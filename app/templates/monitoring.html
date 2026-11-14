@@ -99,7 +99,7 @@
   <section class="panel">
     <div class="bar"><h2>Incidents des dernières 24 h</h2><a class="btn sm link" href="/journal">Journal complet</a></div>
     {% if incidents %}
-    <ul class="events">{% for e in incidents %}<li><time>{{ e.ts | when }}</time><span class="lv-{{ e.level }}"><b>{{ e.app }}</b> · {{ e.msg }}</span></li>{% endfor %}</ul>
+    <ul class="events">{% for e in incidents %}<li><time>{{ e.ts | when }}</time><span class="lv-{{ e.level }}"><b>{{ e.app }}</b> · {{ e.msg | trmsg }}</span></li>{% endfor %}</ul>
     {% else %}<p class="hint">Aucun avertissement ni erreur.</p>{% endif %}
   </section>
   <section class="panel">

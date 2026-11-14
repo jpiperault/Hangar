@@ -16,7 +16,7 @@
     <thead><tr><th>Date</th><th>Source</th><th>Événement</th></tr></thead>
     <tbody>
     {% for e in events %}
-      <tr><td class="mono" style="white-space:nowrap">{{ e.ts | clock }}</td><td class="mono">{{ e.app }}</td><td class="lv-{{ e.level }} jmsg">{{ e.msg }}</td></tr>
+      <tr><td class="mono" style="white-space:nowrap">{{ e.ts | clock }}</td><td class="mono">{{ e.app }}</td><td class="lv-{{ e.level }} jmsg">{{ e.msg | trmsg }}</td></tr>
     {% else %}
       <tr><td colspan="3" class="empty">Aucun événement pour l'instant.</td></tr>
     {% endfor %}

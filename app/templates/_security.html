@@ -7,7 +7,7 @@
 {% macro statetable(cs, n, banned) %}
 <div class="sectable">
 {% for c in cs %}
-  <div class="secrow">{{ badge(c.level) }}<span class="sl">{{ c.label | tr }}</span><span class="hint">{{ c.msg }}</span>
+  <div class="secrow">{{ badge(c.level) }}<span class="sl">{{ c.label | tr }}</span><span class="hint">{{ c.msg | trmsg }}</span>
     <span class="sa">
     {%- if c.key == 'f2b' and banned -%}
       <details class="bans"><summary class="btn sm">Bannies ({{ banned | length }})</summary>

@@ -3,7 +3,7 @@
 <div class="bar"><div><div class="crumb"><a href="/">Applications</a> / <a href="/apps/{{ a.slug }}">{{ a.name }}</a> /</div>
   <h1 class="mono" style="font-size:1.2rem"><a href="/apps/{{ a.slug }}/files">data</a>{% for name, path in crumbs %} / <a href="/apps/{{ a.slug }}/files?p={{ path | urlencode }}">{{ name }}</a>{% endfor %}</h1>
   <span class="hint">Dossier persistant de l'appli, sur {{ 'la console' if a.node == 'local' else 'le nœud ' ~ a.node }}. Un fichier remplacé est d'abord copié sur la console.{% if internal %} <strong>Dossier interne de Hangar : en lecture seulement.</strong>{% endif %}</span></div></div>
-{% if err %}<div class="flash error" role="status">{{ err }}</div>{% endif %}
+{% if err %}<div class="flash error" role="status">{{ err | trmsg }}</div>{% endif %}
 <section class="panel">
   <div class="tablebox"><table>
     <thead><tr><th>Nom</th><th>Taille</th><th>Modifié</th><th></th></tr></thead>

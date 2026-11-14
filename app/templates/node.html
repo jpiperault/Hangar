@@ -97,7 +97,7 @@
     <div class="chips seg" role="radiogroup" aria-label="Filtrer le journal">
       {% for k, label in cats %}{% set nb = events | length if k == 'all' else events | selectattr('cat', 'equalto', k) | list | length %}{% if nb %}<label><input type="radio" name="jf" value="{{ k }}" {{ 'checked' if k == 'all' }}><span>{{ label }} <span class="hint">{{ nb }}</span></span></label>{% endif %}{% endfor %}
     </div>
-    <ul class="events" id="jlist">{% for e in events %}<li data-cat="{{ e.cat }}"><time>{{ e.ts | when }}</time><span class="lv-{{ e.level }}">{{ e.msg }}</span></li>{% endfor %}</ul>
+    <ul class="events" id="jlist">{% for e in events %}<li data-cat="{{ e.cat }}"><time>{{ e.ts | when }}</time><span class="lv-{{ e.level }}">{{ e.msg | trmsg }}</span></li>{% endfor %}</ul>
     <p class="hint" id="jempty" hidden>Aucun événement de ce type.</p>
     {% else %}<p class="hint">Aucun événement.</p>{% endif %}
   </section>

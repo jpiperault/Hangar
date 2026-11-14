@@ -108,7 +108,7 @@
     <h2>Noms publics</h2>
     {% for n in names %}
     <div class="cert"><span><span class="mono">{{ n.name }}</span> <span class="hint">{{ n.what }} · {{ 'tunnel' if n.mode == 'tunnel' else 'direct' }}</span>
-      {% if n.cf and n.cf.ok is false %}<br><span class="hint lv-error">{{ n.cf.msg }}</span>{% elif n.cf and n.cf.msg and 'certificat' in n.cf.msg %}<br><span class="hint lv-warn">{{ n.cf.msg }}</span>{% endif %}</span>{{ dnspill(n) }}</div>
+      {% if n.cf and n.cf.ok is false %}<br><span class="hint lv-error">{{ n.cf.msg | trmsg }}</span>{% elif n.cf and n.cf.msg and 'certificat' in n.cf.msg %}<br><span class="hint lv-warn">{{ n.cf.msg | trmsg }}</span>{% endif %}</span>{{ dnspill(n) }}</div>
     {% else %}
     <p class="hint">Aucun nom pour l'instant.</p>
     {% endfor %}

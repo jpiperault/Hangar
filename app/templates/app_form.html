@@ -163,7 +163,7 @@
     {% endfor %}
     {% if kind.ports %}{% for p in gports.split(', ') if gports %}<div class="cert"><span class="mono">{{ public_addr }}:{{ p.split(' ')[1].split(':')[0] }}</span><span class="pill s-stopped">{{ p.split(' ')[0] | upper }} public{{ ' → conteneur ' ~ p.split(':')[1] if ':' in p }}</span></div>{% endfor %}{% if gfrom %}<p class="hint">Ports publics ouverts seulement à : <span class="mono">{{ gfrom }}</span></p>{% endif %}
     {% elif not kind.http %}<p class="hint" style="margin:0">Pas d'adresse publique : ce service n'est pas publié sur Internet. Sa santé, c'est son conteneur qui tourne.</p>{% endif %}
-    {% for n in names if n.cf and n.cf.ok is false %}<span class="hint lv-error">{{ n.name }} : {{ n.cf.msg }}</span>{% endfor %}
+    {% for n in names if n.cf and n.cf.ok is false %}<span class="hint lv-error">{{ n.name }} : {{ n.cf.msg | trmsg }}</span>{% endfor %}
     {% if names | selectattr('ok', 'false') | list %}
     <span class="hint">{% if cf and cf.token %}Hangar déclare ces noms chez Cloudflare tout seul ; la résolution DNS publique peut prendre quelques minutes.{% else %}Noms à déclarer à la main : voir <a href="/domains">Domaines</a>, ou donne un jeton d'API Cloudflare pour que Hangar le fasse.{% endif %}</span>
     {% endif %}
@@ -255,7 +255,7 @@
   <section class="panel">
     <div class="bar"><h2>Derniers événements</h2><a class="btn sm link" href="/journal?app={{ a.slug }}">Tout voir</a></div>
     <ul class="events">
-      {% for e in events %}<li><time>{{ e.ts | when }}</time><span class="lv-{{ e.level }}">{{ e.msg }}</span></li>{% endfor %}
+      {% for e in events %}<li><time>{{ e.ts | when }}</time><span class="lv-{{ e.level }}">{{ e.msg | trmsg }}</span></li>{% endfor %}
     </ul>
   </section>
   {% endif %}

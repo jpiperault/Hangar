@@ -207,7 +207,7 @@
   <section class="panel">
     <h2>Dernières exécutions</h2>
     {% for r in runs %}
-      <div class="cert"><span><span class="mono">{{ r.ts | when }}</span> <span class="hint">{{ r.trigger }} · {{ '%.0f' % (r.duration or 0) }} s</span><br><span class="{{ '' if r.ok else 'lv-error' }}">{{ r.msg }}</span></span>
+      <div class="cert"><span><span class="mono">{{ r.ts | when }}</span> <span class="hint">{{ r.trigger }} · {{ '%.0f' % (r.duration or 0) }} s</span><br><span class="{{ '' if r.ok else 'lv-error' }}">{{ r.msg | trmsg }}</span></span>
         <span class="pill {{ 's-running' if r.ok and (r.remote or r.dest == 'archive') else ('s-stopped' if r.ok else 's-error') }}">{{ {'gdrive': 'Drive', 'nas': 'NAS', 'archive': 'Archive'}.get(r.dest, 'Locale') }}{{ '' if r.ok else ' · échec' }}</span></div>
     {% else %}<p class="hint">Aucune exécution pour l'instant.</p>{% endfor %}
   </section>

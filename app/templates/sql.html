@@ -9,7 +9,7 @@
   <textarea name="q" spellcheck="false" class="mono" style="min-height:120px" placeholder="SELECT * FROM users ORDER BY created_at DESC LIMIT 20" aria-label="Requête">{{ q }}</textarea>
   <div><button class="btn sm primary">Exécuter</button></div>
 </form>
-{% if err %}<div class="flash error" role="status" style="margin-top:12px;white-space:pre-wrap">{{ err }}</div>{% endif %}
+{% if err %}<div class="flash error" role="status" style="margin-top:12px;white-space:pre-wrap">{{ err | trmsg }}</div>{% endif %}
 {% if res %}
 <section class="panel" style="margin-top:16px">
   <p class="hint" style="margin-top:0">{{ res.rows | length }} ligne{{ 's' if res.rows | length > 1 }}{% if res.cut %} (les 500 premières){% endif %}.</p>

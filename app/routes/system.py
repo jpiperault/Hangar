@@ -206,6 +206,8 @@ async def alerts_save(request: Request):
         db.set_setting("ntfy_min", str(_int(f.get("ntfy_min"), 1, 5, 1)))
         db.set_setting("alerts_on", "1" if f.get("alerts_on") == "on" else "0")
         db.kv_set("report_options", {"on": f.get("report_on") == "on", "all_channels": f.get("report_all") == "on"})
+        if f.get("alerts_lang") in ("fr", "en"):
+            db.set_setting("alerts_lang", f.get("alerts_lang"))
         flash(request, "Alertes enregistrées.")
     return go("/system#alertes")
 

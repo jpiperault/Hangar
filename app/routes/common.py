@@ -47,6 +47,8 @@ def _make(lang):
     t.env.filters["ago"] = lambda ts: _ago(ts, lang)
     t.env.filters["dur"] = lambda sec: _dur(sec, lang)
     t.env.filters["tr"] = lambda v: i18n.tr(v, lang)
+    from .. import msgs
+    t.env.filters["trmsg"] = lambda v: msgs.tr(v, lang)   # journal, erreurs : messages composés par le code
     return t
 
 
@@ -113,6 +115,9 @@ def render(request, name, status_code=200, **ctx):
                user=request.session.get("user"), role=getattr(request.state, "role", "admin"), app_count=_app_count(request), sec_alerts=_sec_alerts())
     lang = getattr(request.state, "lang", "fr")
     ctx["title"] = i18n.tr(ctx["title"], lang)
+    if ctx.get("flash") and lang != "fr":   # message après une action, écrit en français par le code
+        from .. import msgs
+        ctx["flash"] = {**ctx["flash"], "msg": msgs.tr(ctx["flash"]["msg"], lang)}
     return tpl_for(request).TemplateResponse(request, name, ctx, status_code=status_code)
 
 

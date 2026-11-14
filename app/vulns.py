@@ -164,24 +164,43 @@ def groups(items):
     return out
 
 
-def prompt(a, res):
+PROMPT = {
+    "fr": {"title": "# Corriger les dépendances vulnérables de {name}",
+           "intro": "L'image en ligne ({image}) contient des dépendances avec des failles connues, déjà corrigées dans des "
+                    "versions plus récentes. Mets-les à jour dans le projet (fichier de dépendances, verrou), reconstruis, "
+                    "et vérifie que tout marche encore.",
+           "head": "| Paquet | Installé | Corrigé en | Gravité | Failles |", "crit": "critique", "high": "élevée",
+           "todo": "À faire :",
+           "steps": ["Monte chaque paquet au moins à la version « Corrigé en » (la plus basse qui corrige, si plusieurs : "
+                     "reste dans la même version majeure quand c'est possible).",
+                     "Si un paquet n'est qu'une dépendance indirecte, monte le paquet qui l'amène, ou fixe sa version.",
+                     "Lis les notes de version des montées de version majeures et adapte le code si besoin.",
+                     "Lance les tests, puis construis l'image et vérifie qu'elle démarre et que /health répond.",
+                     "Publie une nouvelle version (tag) : Hangar la déploie et la réanalyse."]},
+    "en": {"title": "# Fix the vulnerable dependencies of {name}",
+           "intro": "The online image ({image}) contains dependencies with known vulnerabilities, already fixed in newer "
+                    "versions. Update them in the project (dependency file, lock file), rebuild, and check that everything "
+                    "still works.",
+           "head": "| Package | Installed | Fixed in | Severity | Vulnerabilities |", "crit": "critical", "high": "high",
+           "todo": "To do:",
+           "steps": ["Upgrade each package to at least the “Fixed in” version (the lowest one that fixes it; if there are "
+                     "several, stay within the same major version when possible).",
+                     "If a package is only an indirect dependency, upgrade the package that brings it in, or pin its version.",
+                     "Read the release notes of major upgrades and adapt the code if needed.",
+                     "Run the tests, then build the image and check that it starts and that /health responds.",
+                     "Publish a new version (tag): Hangar deploys it and scans it again."]},
+}
+
+
+def prompt(a, res, lang="fr"):
     """Prompt à donner à l'assistant de code du projet pour corriger les dépendances vulnérables de l'appli."""
     g = groups(res.get("items") or [])["lang"]
     if not g:
         return ""
-    lines = [f"# Corriger les dépendances vulnérables de {a['name']}", "",
-             f"L'image en ligne ({res.get('image')}) contient des dépendances avec des failles connues, déjà corrigées "
-             "dans des versions plus récentes. Mets-les à jour dans le projet (fichier de dépendances, verrou), "
-             "reconstruis, et vérifie que tout marche encore.", "",
-             "| Paquet | Installé | Corrigé en | Gravité | Failles |", "|---|---|---|---|---|"]
+    t = PROMPT.get(lang) or PROMPT["fr"]
+    lines = [t["title"].format(name=a["name"]), "", t["intro"].format(image=res.get("image")), "", t["head"], "|---|---|---|---|---|"]
     for x in g:
-        lines.append(f"| {x['pkg']} | {x['installed']} | {x['fixed']} | {'critique' if x['sev'] == 'CRITICAL' else 'élevée'} | "
+        lines.append(f"| {x['pkg']} | {x['installed']} | {x['fixed']} | {t['crit'] if x['sev'] == 'CRITICAL' else t['high']} | "
                      f"{', '.join(x['ids'][:6])}{'…' if len(x['ids']) > 6 else ''} |")
-    lines += ["", "À faire :",
-              "1. Monte chaque paquet au moins à la version « Corrigé en » (la plus basse qui corrige, si plusieurs : "
-              "reste dans la même version majeure quand c'est possible).",
-              "2. Si un paquet n'est qu'une dépendance indirecte, monte le paquet qui l'amène, ou fixe sa version.",
-              "3. Lis les notes de version des montées de version majeures et adapte le code si besoin.",
-              "4. Lance les tests, puis construis l'image et vérifie qu'elle démarre et que /health répond.",
-              "5. Publie une nouvelle version (tag) : Hangar la déploie et la réanalyse."]
+    lines += ["", t["todo"]] + [f"{i}. {step}" for i, step in enumerate(t["steps"], 1)]
     return "\n".join(lines)

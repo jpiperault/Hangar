@@ -133,6 +133,11 @@ def send(title, msg, priority=3, tags=None, key=None, cooldown=0, force=False, o
             if time.time() - _last.get(key, 0) < cooldown:
                 return False, "déjà envoyée récemment"
             _last[key] = time.time()
+    lang = s.get("alerts_lang") or "fr"
+    if lang != "fr":   # alertes composées en français par le code : traduites si la langue des alertes est autre
+        from . import msgs
+        title = msgs.tr(title, lang)
+        msg = msgs.tr(msg, lang) if "\n" not in msg else "\n".join(msgs.tr(line, lang) for line in msg.split("\n"))
     sent, errs = False, []
     for name, c in chans:
         if not force and not all_channels and priority < int(c.get("min") or DEFAULT_MIN[name]):

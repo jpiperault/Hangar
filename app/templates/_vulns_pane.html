@@ -8,7 +8,7 @@
     </div>
     <form method="post" action="/apps/{{ a.slug }}/vulns/scan"><button class="btn sm" {{ 'disabled' if vul_busy or patch_busy }}>{{ 'Analyse en cours…' if vul_busy else 'Analyser maintenant' }}</button></form>
   </div>
-  {% if vul and vul.error %}<p class="lv-warn" style="margin:0">Analyse impossible ({{ vul.ts | ago }}) : {{ vul.error }}</p>
+  {% if vul and vul.error %}<p class="lv-warn" style="margin:0">Analyse impossible ({{ vul.ts | ago }}) : {{ vul.error | trmsg }}</p>
   {% elif vul and vul.counts %}
   <div class="kpis" style="margin:0">
     <span class="kpi"><strong class="{{ 'lv-error' if vul.counts.CRITICAL }}">{{ vul.counts.CRITICAL }}</strong> critique{{ 's' if vul.counts.CRITICAL > 1 }}</span>
@@ -25,7 +25,7 @@
   <h2 style="margin:0">Corriger les paquets système {% if patch_on %}<span class="pill s-running">image corrigée en ligne</span>{% endif %}</h2>
   <p class="hint" style="margin:0">Hangar construit, sur la machine de l'appli, une image tirée de celle en ligne avec les paquets du système (Alpine, Debian, Ubuntu, Fedora) mis à jour, puis la déploie. Si l'appli ne répond plus, l'image d'avant revient toute seule. Ça ne touche pas aux dépendances de l'appli elle-même (voir plus bas). La correction vaut pour la version en ligne : une nouvelle version repart de son image d'origine.</p>
   {% if patch_on %}<p class="hint" style="margin:0">En ligne : <span class="mono">{{ patch_on.ref }}</span>, tirée de <span class="mono">{{ patch_on.base }}</span>, {{ patch_on.ts | ago }} ({{ patch_on.by }}).</p>{% endif %}
-  {% if patch_try %}<p class="{{ 'hint' if patch_try.ok else 'lv-warn' }}" style="margin:0">Dernier essai {{ patch_try.ts | ago }} : {{ patch_try.msg }}</p>{% endif %}
+  {% if patch_try %}<p class="{{ 'hint' if patch_try.ok else 'lv-warn' }}" style="margin:0">Dernier essai {{ patch_try.ts | ago }} : {{ patch_try.msg | trmsg }}</p>{% endif %}
   {% if patch_busy %}<p style="margin:0"><span class="pill s-deploying">correction en cours</span> <span class="hint">construction, déploiement puis nouvelle analyse.</span></p>{% endif %}
   <div class="acts" style="justify-content:flex-start;gap:8px;flex-wrap:wrap">
     <form method="post" action="/apps/{{ a.slug }}/vulns/fix" data-confirm="Construire une image corrigée et la déployer ? L'image d'avant revient si l'appli ne répond plus."><button class="btn sm primary" {{ 'disabled' if patch_busy or vul_busy or a.status == 'deploying' }}>Corriger maintenant{% if g and g.os %} ({{ g.os | map(attribute='ids') | map('length') | sum }}){% endif %}</button></form>
