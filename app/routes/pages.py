@@ -61,6 +61,25 @@ async def journal(request: Request):
     return render(request, "journal.html", title="Journal", nav="journal", events=events, names=names, app_filter=app_filter)
 
 
+# ---------------------------------------------------------------- logs de toutes les applis
+
+@router.get("/logs")
+async def all_logs(request: Request):
+    from .. import applogs, perms
+    qp = request.query_params
+    role, me = getattr(request.state, "role", "admin"), request.session.get("user")
+    mine = [a for a in db.apps() if a["kind"] != "static" and perms.visible(role, me, a["slug"])]
+    period = qp.get("p") if qp.get("p") in ("1h", "24h", "168h") else "24h"
+    q, err, app = (qp.get("q") or "")[:200], qp.get("e") == "1", qp.get("app") or ""
+    slugs = [app] if app in {a["slug"] for a in mine} else [a["slug"] for a in mine]
+    found, errs, cut, asked = [], {}, False, bool(q or err)
+    if asked:
+        found, errs, cut = await asyncio.to_thread(applogs.search, q, period, err, slugs)
+    return render(request, "all_logs.html", title="Logs des applis", nav="logs", found=found, errs=errs, cut=cut,
+                  asked=asked, q=q, err=err, period=period, app=app, apps=mine,
+                  periods={k: v for k, v in applogs.PERIODS.items() if k})
+
+
 # ---------------------------------------------------------------- premier démarrage
 
 @router.get("/bienvenue")

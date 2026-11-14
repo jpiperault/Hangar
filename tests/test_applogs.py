@@ -46,3 +46,22 @@ def test_alerte(monkeypatch, app_row):
     monkeypatch.setattr(applogs.alerts, "send", lambda title, msg, **k: sent.append((title, k.get("key"))))
     applogs.tick(1_800_000_000)
     assert sent == [("Mon jeu : « OutOfMemory » dans les logs", "logs:mon-jeu:OutOfMemory")]
+
+
+def test_recherche_toutes_applis(app_row, monkeypatch):
+    from app import applogs, db
+    for s in ("mon-jeu", "autre-log"):
+        db.x("DELETE FROM apps WHERE slug = ?", (s,))
+    db.insert_app("mon-jeu", {**app_row, "state": "ok", "created_at": 0})
+    db.insert_app("autre-log", {**app_row, "pkg": "", "name": "Autre", "state": "ok", "created_at": 0, "host_port": 18904})
+    logs = {"mon-jeu": "2026-11-14T10:00:02Z requête 42 ok\n2026-11-14T10:00:05Z ERROR requête 43",
+            "autre-log": "2026-11-14T10:00:03Z requête 42 vue ici aussi\n2026-11-14T10:00:04Z rien"}
+    monkeypatch.setattr(applogs.P, "app_dir", lambda slug: slug)
+    monkeypatch.setattr(applogs.P, "dk", lambda node, *a, cwd=None, **k: (0, logs[cwd]))
+    found, errs, cut = applogs.search("requête 42", "24h")
+    assert [(f["slug"], f["ts"]) for f in found] == [("mon-jeu", "2026-11-14T10:00:02Z"), ("autre-log", "2026-11-14T10:00:03Z")]
+    assert found[0]["line"] == "requête 42 ok" and not errs and not cut
+    found, _, _ = applogs.search("", "24h", errors_only=True, slugs=["mon-jeu", "autre-log"])
+    assert [f["line"] for f in found] == ["ERROR requête 43"]
+    for s in ("mon-jeu", "autre-log"):
+        db.x("DELETE FROM apps WHERE slug = ?", (s,))

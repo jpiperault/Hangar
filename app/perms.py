@@ -56,7 +56,7 @@ def refused(method, path, username):
         return None
     sc = scopes(username)
     if method in ("GET", "HEAD", "OPTIONS"):
-        if path in ("/", "/compte"):
+        if path in ("/", "/compte", "/logs"):   # /logs : limité à ses applis par la page elle-même
             return None
         m = APP_RE.match(path)
         if m and m.group(1) in sc and not path.endswith(("/download", "/db/export")):

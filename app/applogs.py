@@ -34,6 +34,31 @@ def read(slug, period="", q="", errors_only=False, limit=2000):
     return lines[-limit:], total, cut
 
 
+def search(q="", period="24h", errors_only=False, slugs=None, limit=1000):
+    """Recherche dans les logs de plusieurs applis à la fois (en parallèle, une machine lente ne bloque pas les
+    autres). Retourne (résultats triés par heure : [{slug, name, ts, line}], {appli: erreur}, tronqué ?)."""
+    import concurrent.futures
+    apps = [a for a in db.apps() if (slugs is None or a["slug"] in slugs) and a["kind"] != "static"]
+
+    def one(a):
+        try:
+            lines, _, _ = read(a["slug"], period or "24h", q, errors_only, limit=limit)
+            return a, lines, None
+        except Exception as e:
+            return a, [], str(e)[:200]
+    found, errs = [], {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(8, len(apps)))) as ex:
+        for a, lines, err in ex.map(one, apps):
+            if err:
+                errs[a["slug"]] = err
+            for l in lines:
+                ts, _, rest = l.partition(" ")
+                found.append({"slug": a["slug"], "name": a["name"], "ts": ts, "line": rest if ts[:2].isdigit() else l})
+    found.sort(key=lambda x: x["ts"])
+    cut = len(found) > limit
+    return found[-limit:], errs, cut
+
+
 def _matcher(p):
     p = p.strip()
     if p.startswith("re:"):

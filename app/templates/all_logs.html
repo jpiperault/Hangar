@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="bar"><div><h1>Logs des applis</h1><span class="hint">Chercher dans les logs de toutes les applis à la fois, triés par heure.</span></div></div>
+<form class="panel" method="get" action="/logs" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+  <div class="field" style="flex:1;min-width:220px"><label for="q">Chercher</label><input id="q" name="q" value="{{ q }}" spellcheck="false" placeholder="texte, ou re:expression régulière" autofocus></div>
+  <div class="field"><label for="app">Appli</label><select id="app" name="app"><option value="">toutes</option>{% for a in apps %}<option value="{{ a.slug }}" {{ 'selected' if a.slug == app }}>{{ a.name }}</option>{% endfor %}</select></div>
+  <div class="field"><label for="p">Période</label><select id="p" name="p">{% for k, v in periods.items() %}<option value="{{ k }}" {{ 'selected' if k == period }}>{{ v }}</option>{% endfor %}</select></div>
+  <label class="check" style="margin-bottom:8px"><input type="checkbox" name="e" value="1" {{ 'checked' if err }}><span>Erreurs seulement</span></label>
+  <button class="btn sm primary" style="margin-bottom:4px">Chercher</button>
+</form>
+{% if not asked %}
+<p class="hint">Tape un texte (un identifiant de requête, une adresse e-mail, un message d'erreur…) ou coche « Erreurs seulement ».</p>
+{% else %}
+{% set nb = found | map(attribute='slug') | unique | list | length %}<p class="hint">{{ found | length }} ligne{{ 's' if found | length > 1 }}{% if cut %} (les 1000 plus récentes){% endif %} dans {{ nb }} appli{{ 's' if nb > 1 }}.
+  Docker garde jusqu'à 30 Mo de logs par conteneur : la période réellement disponible dépend du volume écrit.
+  {% for s, e in errs.items() %}<br><span class="lv-warn">{{ s }} : logs illisibles ({{ e }})</span>{% endfor %}</p>
+<div class="tablebox"><table class="logtable">
+  <thead><tr><th>Heure</th><th>Appli</th><th>Ligne</th></tr></thead>
+  <tbody>{% for f in found | reverse %}<tr><td class="mono" style="white-space:nowrap">{{ f.ts[:19] | replace('T', ' ') }}</td>
+    <td style="white-space:nowrap"><a href="/apps/{{ f.slug }}/logs?p={{ period }}&q={{ q | urlencode }}">{{ f.name }}</a></td>
+    <td class="mono" style="word-break:break-all">{{ f.line }}</td></tr>{% else %}<tr><td colspan="3" class="empty">Aucune ligne trouvée.</td></tr>{% endfor %}</tbody>
+</table></div>
+{% endif %}
+{% endblock %}
