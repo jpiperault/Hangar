@@ -14,6 +14,9 @@ KINDS = {
                "desc": "L'API d'une appli Android ou iOS, avec configuration à distance et rapports de plantage.",
                "http": True, "client": True, "client_open": True,
                "defaults": {"port": 8080, "health_path": "/health", "db": 1}},
+    "static": {"name": "Site statique", "short": "Site statique",
+               "desc": "HTML, ou un front React/Vue déjà construit. Servi par Caddy, sans conteneur.",
+               "http": True, "static": True, "client": False, "defaults": {"port": 8080, "health_path": "/", "db": 0}},
     "tool": {"name": "Outil auto-hébergé", "short": "Outil",
              "desc": "Une appli open source prête, installée depuis le catalogue.",
              "http": True, "client": False, "catalog": True, "defaults": {"port": 8080, "health_path": "/", "db": 0}},
@@ -24,7 +27,7 @@ KINDS = {
              "desc": "Minecraft, serveur UDP, tout service qui n'est pas du web : ports publics sur sa machine.",
              "http": False, "ports": True, "client": False, "defaults": {"port": 25565, "health_path": "/", "db": 0}},
 }
-ORDER = ["web", "api", "mobile", "worker", "game", "tool"]
+ORDER = ["static", "web", "api", "mobile", "worker", "game", "tool"]
 DEFAULT = "web"
 
 
@@ -35,6 +38,10 @@ def get(kind):
 def http(kind):
     """L'appli sert-elle du web (adresses, Caddy, adresse de santé) ?"""
     return get(kind).get("http", True)
+
+
+def static(kind):
+    return bool(get(kind).get("static"))
 
 
 def valid(kind):

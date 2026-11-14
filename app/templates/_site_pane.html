@@ -1,0 +1,60 @@
+{% set sm = site_meta %}
+<div data-pane="site" style="display:flex;flex-direction:column;gap:20px">
+  <div class="cols" style="align-items:start">
+    <section class="panel" style="display:flex;flex-direction:column;gap:12px">
+      <h2 style="margin:0">Publier une nouvelle version</h2>
+      {% if site_busy %}<p class="hint"><span class="pill s-deploying">construction en cours</span> Le journal de l'appli affiche le résultat ; la page se recharge toute seule.</p>{% endif %}
+      <form method="post" action="/apps/{{ a.slug }}/site/upload" enctype="multipart/form-data" class="dropzone">
+        <strong>Zip du dossier construit</strong>
+        <span class="hint">dist/, build/ ou public/ zippé : index.html à la racine (ou dans un seul dossier en tête). 200 Mo au plus.</span>
+        <div class="inlinefield"><input name="file" type="file" accept=".zip,application/zip" required aria-label="Zip du site"><button class="btn primary sm" {{ 'disabled' if site_busy }}>Publier</button></div>
+      </form>
+      <form method="post" action="/apps/{{ a.slug }}/site/git" autocomplete="off" style="display:flex;flex-direction:column;gap:10px">
+        <strong>Ou depuis un dépôt Git</strong>
+        <div class="row2">
+          <div class="field"><label for="srepo">Dépôt (https)</label><input id="srepo" name="repo" value="{{ sm.git.repo or '' }}" spellcheck="false" placeholder="https://github.com/moi/site"></div>
+          <div class="field"><label for="sbranch">Branche</label><input id="sbranch" name="branch" value="{{ sm.git.branch or 'main' }}" spellcheck="false"></div>
+          <div class="field"><label for="scmd">Commande de build</label><input id="scmd" name="cmd" value="{{ sm.git.cmd if sm.git else 'npm ci && npm run build' }}" spellcheck="false"><span class="hint">Vide : fichiers déjà prêts dans le dépôt.</span></div>
+          <div class="field"><label for="sout">Dossier produit</label><input id="sout" name="out" value="{{ sm.git.out or 'dist' }}" spellcheck="false"></div>
+        </div>
+        <details><summary class="hint">Image de build</summary><div class="field" style="margin-top:6px"><input name="image" value="{{ sm.git.image or 'node:22-alpine' }}" spellcheck="false" aria-label="Image de build"><span class="hint">Conteneur jetable (1 Go, 2 cœurs au plus, 30 min au plus) où tourne la commande. Dépôt privé : mets un jeton dans l'adresse (https://jeton@github.com/…).</span></div></details>
+        <div><button class="btn sm" {{ 'disabled' if site_busy }}>Construire et publier</button></div>
+      </form>
+    </section>
+    <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+      <section class="panel">
+        <h2>En ligne</h2>
+        <dl class="facts">
+          <dt>Version</dt><dd>{% if sm.current %}#{{ sm.current }}{% else %}<span class="lv-warn">rien de publié</span>{% endif %}</dd>
+          <dt>Adresses</dt><dd>{% for k, u in a.urls %}<a href="{{ u }}" target="_blank" rel="noopener" class="mono">{{ u }}</a><br>{% else %}aucune{% endfor %}</dd>
+          <dt>Servi par</dt><dd>Caddy, sur la console et les nœuds qui reçoivent le trafic</dd>
+        </dl>
+        <div class="acts" style="justify-content:flex-start;flex-wrap:wrap">
+          {% if a.desired == 'running' %}<form class="inline" method="post" action="/apps/{{ a.slug }}/stop"><button class="btn sm">Mettre hors ligne</button></form>
+          {% else %}<form class="inline" method="post" action="/apps/{{ a.slug }}/start"><button class="btn sm primary">Remettre en ligne</button></form>{% endif %}
+        </div>
+      </section>
+      <form class="panel" method="post" action="/apps/{{ a.slug }}/site/settings" style="display:flex;flex-direction:column;gap:8px">
+        <h2 style="margin:0">Réglages du site</h2>
+        <label class="check"><input type="checkbox" name="spa" {{ 'checked' if sm.spa }}><span>Appli monopage : toute adresse inconnue renvoie index.html</span></label>
+        <span class="hint">Les fichiers avec une empreinte dans le nom (app.3f9a2b7c.js) sont mis en cache un an ; index.html jamais.</span>
+        <div><button class="btn sm">Enregistrer</button></div>
+      </form>
+    </div>
+  </div>
+  <section class="panel">
+    <h2>Versions publiées</h2>
+    {% for r in sm.releases %}
+    <div class="cert"><span><strong>#{{ r.n }}</strong> <span class="hint">{{ r.source }} · {{ r.files }} fichier{{ 's' if r.files > 1 }} · {{ r.size | size }} · {{ r.ts | ago }}</span></span>
+      {% if r.n == sm.current %}<span class="pill s-running">en ligne</span>
+      {% else %}<form class="inline" method="post" action="/apps/{{ a.slug }}/site/activate/{{ r.n }}" data-confirm="Remettre la version #{{ r.n }} en ligne ?"><button class="btn sm">Revenir à cette version</button></form>{% endif %}</div>
+    {% else %}<p class="hint">Aucune version pour l'instant.</p>{% endfor %}
+    <p class="hint">Les 10 dernières versions sont gardées sur la console et sauvegardées chaque nuit ; revenir à l'une d'elles est instantané.</p>
+  </section>
+  {% if events %}
+  <section class="panel">
+    <div class="bar"><h2>Derniers événements</h2><a class="btn sm link" href="/journal?app={{ a.slug }}">Tout voir</a></div>
+    <ul class="events">{% for e in events %}<li><time>{{ e.ts | when }}</time><span class="lv-{{ e.level }}">{{ e.msg }}</span></li>{% endfor %}</ul>
+  </section>
+  {% endif %}
+</div>

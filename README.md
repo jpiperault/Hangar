@@ -53,7 +53,7 @@ FastAPI + Jinja, sans build front. Elle écoute en HTTPS (certificat auto-signé
 - **Affinité par partie** en instances multiples : même partie (en-tête, paramètre, cookie ou adresse) → même instance.
 - **Comptes en lecture seule** et **journal des actions** (qui a fait quoi, quand, depuis où).
 - **Applis Android** : configuration à distance (version minimale ou conseillée, interrupteurs de fonctionnalités, annonce) servie à côté de `apps.json`, et **rapports de plantage** reçus par Hangar, regroupés, avec alerte au premier plantage d'un groupe et en cas de régression.
-- **Types d'applis** : appli web, API, backend d'appli mobile, service sans page web (jugé sain tant que son conteneur tourne), serveur de jeu avec ports TCP/UDP publics, outil auto-hébergé.
+- **Types d'applis** : site statique (sans conteneur : zip ou dépôt Git construit dans un conteneur jetable, 10 versions, retour arrière instantané), appli web, API, backend d'appli mobile, service sans page web (jugé sain tant que son conteneur tourne), serveur de jeu avec ports TCP/UDP publics, outil auto-hébergé.
 - **Catalogue d'applis prêtes** (Umami, Uptime Kuma, Vaultwarden, Gitea, n8n, Wiki.js, IT-Tools, Excalidraw) : image, port, santé, base, secrets et variables remplis à l'installation.
 - **Clients** d'une appli : Android, iOS et navigateur (script servi sur l'adresse de l'appli), avec configuration à distance et rapports de plantage.
 - **Page de statut publique** (`status.<domaine>`) : état et disponibilité sur 30 jours des applis choisies.

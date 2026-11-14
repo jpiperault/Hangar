@@ -21,7 +21,9 @@ _started = False
 
 
 def _probe(a):
-    from . import kinds
+    from . import kinds, sites
+    if kinds.static(a["kind"]):   # site statique : la version en ligne est-elle là ?
+        return sites.healthy(a["slug"]), ("" if sites.healthy(a["slug"]) else "aucune version publiée")
     if not kinds.http(a["kind"]):   # sans page web : le conteneur tourne-t-il ?
         st = P._container_state(f"app-{a['slug']}-app-1", a["node"])
         if not st:

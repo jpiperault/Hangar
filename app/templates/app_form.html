@@ -36,7 +36,7 @@
     </div>
   </div>
 
-  <div class="group" data-kinds="web api mobile">
+  <div class="group" data-kinds="web api mobile tool static">
     <span class="lbl">Adresses publiques</span>
     <div class="field {{ 'bad' if errors.slug }}"><label for="slug">Identifiant</label>
       <input id="slug" name="slug" value="{{ a.slug }}" spellcheck="false" {{ 'readonly' if not new }} placeholder="courses">
@@ -59,7 +59,7 @@
     <div class="preview" id="preview" aria-live="polite"></div>
   </div>
 
-  <div class="group">
+  <div class="group" data-kinds="web api mobile worker game tool">
     <span class="lbl">Source</span>
     <div class="seg" role="radiogroup" aria-label="Source">
       <label><input type="radio" name="source" value="image" {{ 'checked' if a.source == 'image' }}><span>Image Docker</span></label>
@@ -83,7 +83,7 @@
     </div>
   </div>
 
-  <div class="group">
+  <div class="group" data-kinds="web api mobile worker game tool">
     <span class="lbl">Exécution</span>
     {% if new %}
     <div class="field {{ 'bad' if errors.node }}"><label for="node">Nœud</label>
@@ -91,8 +91,8 @@
       {{ err('node') }}<span class="hint">La machine qui fait tourner l'appli et sa base. Conseillé : celle qui a le plus de mémoire libre (total moins la RAM réservée par les applis).</span></div>
     {% endif %}
     <div class="row3">
-      <div class="field {{ 'bad' if errors.port }}" data-kinds="web api mobile"><label for="port">Port interne</label><input id="port" name="port" type="number" min="1" max="65535" value="{{ a.port }}">{{ err('port') }}</div>
-      <div class="field {{ 'bad' if errors.health_path }}" data-kinds="web api mobile"><label for="health_path">Adresse de santé</label><input id="health_path" name="health_path" value="{{ a.health_path }}" spellcheck="false">{{ err('health_path') }}</div>
+      <div class="field {{ 'bad' if errors.port }}" data-kinds="web api mobile tool"><label for="port">Port interne</label><input id="port" name="port" type="number" min="1" max="65535" value="{{ a.port }}">{{ err('port') }}</div>
+      <div class="field {{ 'bad' if errors.health_path }}" data-kinds="web api mobile tool"><label for="health_path">Adresse de santé</label><input id="health_path" name="health_path" value="{{ a.health_path }}" spellcheck="false">{{ err('health_path') }}</div>
       <div class="field {{ 'bad' if errors.mem_mb }}"><label for="mem_mb">RAM max (Mo)</label><input id="mem_mb" name="mem_mb" type="number" min="32" max="4096" value="{{ a.mem_mb }}">{{ err('mem_mb') }}</div>
     </div>
     <div class="field {{ 'bad' if errors.gports }}" data-kinds="game"><label for="gports">Ports publics</label>
@@ -125,6 +125,9 @@
 </div>
 {% else %}
 <nav class="tabs" aria-label="Sections de l'appli">
+  {% if kind.static %}<a href="#site" data-tab="site">Site</a>
+  <a href="#reglages" data-tab="reglages">Réglages</a>
+  {% else %}
   <a href="#apercu" data-tab="apercu">Vue d'ensemble</a>
   <a href="#reglages" data-tab="reglages">Réglages</a>
   <a href="#base" data-tab="base">Base et services</a>
@@ -132,8 +135,10 @@
   <a href="#taches" data-tab="taches">Tâches{% if jobs %} <span class="hint">{{ jobs | length }}</span>{% endif %}</a>
   {% if has_clients %}<a href="#mobile" data-tab="mobile">Clients{% if crash_groups | selectattr('status', 'equalto', 'open') | list %} <span class="pill s-error">{{ crash_groups | selectattr('status', 'equalto', 'open') | list | length }}</span>{% endif %}</a>{% endif %}
   <a href="#restauration" data-tab="restauration">Revenir en arrière</a>
+  {% endif %}
 </nav>
 
+{% if kind.static %}{% include "_site_pane.html" %}{% else %}
 <div data-pane="apercu">
 <div class="cols">
 <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
@@ -264,6 +269,8 @@
 </section>
 </div>
 
+{% endif %}
+
 <div data-pane="reglages">
 <div class="cols">
 <form class="panel" method="post" action="{{ '/apps/new' if new else '/apps/' ~ a.slug }}" id="appform" novalidate>
@@ -283,7 +290,7 @@
     </div>
   </div>
 
-  <div class="group" data-kinds="web api mobile">
+  <div class="group" data-kinds="web api mobile tool static">
     <span class="lbl">Adresses publiques</span>
     <div class="field {{ 'bad' if errors.slug }}"><label for="slug">Identifiant</label>
       <input id="slug" name="slug" value="{{ a.slug }}" spellcheck="false" {{ 'readonly' if not new }} placeholder="courses">
@@ -306,7 +313,7 @@
     <div class="preview" id="preview" aria-live="polite"></div>
   </div>
 
-  <div class="group">
+  <div class="group" data-kinds="web api mobile worker game tool">
     <span class="lbl">Source</span>
     <div class="seg" role="radiogroup" aria-label="Source">
       <label><input type="radio" name="source" value="image" {{ 'checked' if a.source == 'image' }}><span>Image Docker</span></label>
@@ -330,7 +337,7 @@
     </div>
   </div>
 
-  <div class="group">
+  <div class="group" data-kinds="web api mobile worker game tool">
     <span class="lbl">Exécution</span>
     {% if new %}
     <div class="field {{ 'bad' if errors.node }}"><label for="node">Nœud</label>
@@ -338,8 +345,8 @@
       {{ err('node') }}<span class="hint">La machine qui fait tourner l'appli et sa base. Conseillé : celle qui a le plus de mémoire libre (total moins la RAM réservée par les applis).</span></div>
     {% endif %}
     <div class="row3">
-      <div class="field {{ 'bad' if errors.port }}" data-kinds="web api mobile"><label for="port">Port interne</label><input id="port" name="port" type="number" min="1" max="65535" value="{{ a.port }}">{{ err('port') }}</div>
-      <div class="field {{ 'bad' if errors.health_path }}" data-kinds="web api mobile"><label for="health_path">Adresse de santé</label><input id="health_path" name="health_path" value="{{ a.health_path }}" spellcheck="false">{{ err('health_path') }}</div>
+      <div class="field {{ 'bad' if errors.port }}" data-kinds="web api mobile tool"><label for="port">Port interne</label><input id="port" name="port" type="number" min="1" max="65535" value="{{ a.port }}">{{ err('port') }}</div>
+      <div class="field {{ 'bad' if errors.health_path }}" data-kinds="web api mobile tool"><label for="health_path">Adresse de santé</label><input id="health_path" name="health_path" value="{{ a.health_path }}" spellcheck="false">{{ err('health_path') }}</div>
       <div class="field {{ 'bad' if errors.mem_mb }}"><label for="mem_mb">RAM max (Mo)</label><input id="mem_mb" name="mem_mb" type="number" min="32" max="4096" value="{{ a.mem_mb }}">{{ err('mem_mb') }}</div>
     </div>
     <div class="field {{ 'bad' if errors.gports }}" data-kinds="game"><label for="gports">Ports publics</label>
@@ -371,11 +378,12 @@
 </form>
 
 <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
-  <form class="panel" id="limites" method="post" action="/apps/{{ a.slug }}/limits" style="display:flex;flex-direction:column;gap:10px">
+  {% if not kind.static %}<form class="panel" id="limites" method="post" action="/apps/{{ a.slug }}/limits" style="display:flex;flex-direction:column;gap:10px">
     <h2 style="margin:0">Processeur max</h2>
     <p class="hint" style="margin:0">Sans limite, une appli qui s'emballe peut prendre tout le processeur du nœud et ralentir les autres. Nombre de cœurs (0,5 = la moitié d'un cœur) ; vide = sans limite. Alerte si elle reste à sa limite 10 minutes, si sa mémoire dépasse 90 % pendant 5 minutes, ou si elle redémarre toute seule (tuée faute de mémoire, plantée).</p>
     <div class="inlinefield"><input name="cpus" value="{{ cpus if cpus else '' }}" inputmode="decimal" placeholder="sans limite" aria-label="Processeur max en cœurs" style="max-width:9em"><span class="hint">cœur(s)</span><button class="btn sm primary" {{ 'disabled' if a.status == 'deploying' }}>Enregistrer</button></div>
   </form>
+  {% endif %}
   {% if kind.http %}<form class="panel" id="verifs" method="post" action="/apps/{{ a.slug }}/smoke" style="display:flex;flex-direction:column;gap:10px">
     <h2 style="margin:0">Vérifications après déploiement</h2>
     <p class="hint" style="margin:0">En plus de <code>{{ a.health_path }}</code>, ces adresses doivent répondre comme prévu pour qu'une nouvelle version soit gardée ; sinon la précédente revient. Une par ligne : <code>/chemin [code] [texte attendu]</code>, code 200 par défaut, <code>{version}</code> remplacé par la version déployée.</p>
@@ -396,6 +404,7 @@
 </div>
 </div>
 
+{% if not kind.static %}
 <div data-pane="base" style="display:flex;flex-direction:column;gap:20px">
   {% if a.db %}
   <section class="panel" id="base">
@@ -666,6 +675,7 @@ try { /* … */ } catch (e) { hangar.report(e); }</pre>{% endif %}
   {% if not safety %}<section class="panel" id="securite"><h2>Revenir en arrière</h2><p class="hint">Aucune copie de sécurité pour l'instant. Avant chaque restauration ou import de données, l'état de l'appli est mis de côté ici. Pour revenir à une sauvegarde de nuit : page <a href="/backups">Sauvegardes</a>.</p>{{ rp_form() }}</section>{% endif %}
 </div>
 {% endif %}
+{% endif %}
 
 {% if not new %}
 <script nonce="{{ csp_nonce }}" id="stdata" type="application/json">{{ st | tojson }}</script>
@@ -753,7 +763,7 @@ try { /* … */ } catch (e) { hangar.report(e); }</pre>{% endif %}
 <script nonce="{{ csp_nonce }}">
 (function () {   // onglets : l'adresse garde l'onglet (#reglages…) ; une ancre (#stats, #securite, #nodemove…) ouvre le sien
   var panes = document.querySelectorAll('[data-pane]'), tabs = document.querySelectorAll('[data-tab]');
-  var def = {{ ('reglages' if errors else 'apercu') | tojson }};
+  var def = {{ ('reglages' if errors else ('site' if kind.static else 'apercu')) | tojson }};
   function show() {
     var h = (location.hash || '').slice(1), id = h, el = null;
     if (!document.querySelector('[data-pane="' + id + '"]')) {

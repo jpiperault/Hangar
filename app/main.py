@@ -7,6 +7,7 @@ import re
 import secrets
 import time
 import urllib.parse
+import zipfile
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
@@ -16,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import access, affinity, alerts, catalog, gameports, kinds, applogs, backup, cache, cloudflare, crashes, limits, remoteconfig, smoke, crypt, dataimport, db, dbadmin, ha, jobs, monitor, move, nodes, preprod, report, security, services, stats, statuspage, system
+from . import access, affinity, alerts, catalog, gameports, kinds, sites, applogs, backup, cache, cloudflare, crashes, limits, remoteconfig, smoke, crypt, dataimport, db, dbadmin, ha, jobs, monitor, move, nodes, preprod, report, security, services, stats, statuspage, system
 from . import domains as D
 from . import platform as P
 
@@ -278,6 +279,13 @@ def validate(f, cur=None):
     d["source"] = "git" if f.get("source") == "git" else "image"
     d["image"] = (f.get("image") or "").strip()
     version = (f.get("version") or "").strip()
+    if kinds.static(d["kind"]):   # site statique : ni image, ni conteneur, ni base, ni variables
+        d.update(source="static", image="", port=80, health_path="/", mem_mb=32, env="", db=0, data_user="",
+                 pkg="", ios_bundle="", web_client=0)
+        if not cur:
+            d["version"] = "—"
+            d["node"] = P.LOCAL
+        return d, e
     if d["source"] == "image":
         last = d["image"].rsplit("/", 1)[-1]
         if ":" in last:  # tag collé à l'image : on le sépare
@@ -529,10 +537,16 @@ async def create_app(request: Request):
     slug = d.pop("slug")
     rts = d.pop("routes")
     gameports.save(slug, d.pop("_ports") or [])
-    d.update(host_port=P.next_host_port(), state="deploying", desired="running", created_at=time.time(),
-             db_password=secrets.token_hex(16) if d["db"] else None)
+    static = kinds.static(d["kind"])
+    d.update(host_port=P.next_host_port(), state="ok" if static else "deploying", desired="running",
+             created_at=time.time(), db_password=secrets.token_hex(16) if d["db"] else None)
     db.insert_app(slug, d)
     D.set_routes(slug, rts)
+    if static:
+        P.log("info", slug, "site statique créé : publie une première version (zip ou dépôt Git)")
+        await asyncio.to_thread(P.apply_routing)
+        flash(request, f"{d['name']} créé. Publie maintenant une première version : un zip du dossier construit, ou un dépôt Git.")
+        return go(f"/apps/{slug}#site")
     P.log("info", slug, f"appli créée, port local {d['host_port']}")
     P.spawn(P.deploy, slug, d["version"], "create")
     flash(request, f"{d['name']} créée. Déploiement de {d['version']} en cours.")
@@ -556,11 +570,12 @@ async def _app_ctx(request, slug):
     busy = (hst and (hst["busy"] or hst["h"]["state"] == "setup"))
     return dict(title=a["name"], nav="apps", a=a, new=False, errors={}, events=events, names=names, ha=hst,
                 kinds=kinds.choices(), kind=kinds.get(a["kind"]), gports=gameports.text(slug),
+                site_meta=sites.meta(slug), site_busy=sites.busy(slug),
                 public_addr=_public_addr(a),
                 console_only=nodes.console_role()["manage_only"],
                 ha_nodes=[c for c in node_choices("standby") if c["id"] != a["node"]],
                 ha_inst=[c for c in others if c["id"] != a["node"]],
-                refresh=a["status"] == "deploying" or bool(busy), registries=P.registry_logins(), st=st, dbi=dbi,
+                refresh=a["status"] == "deploying" or bool(busy) or sites.busy(slug), registries=P.registry_logins(), st=st, dbi=dbi,
                 ranges=list(stats.RANGES), others=others, dsize=dsize, domains=D.all_domains(), cf=cloudflare.status(),
                 safety=backup.safety_copies(slug), maint=P.maintenance(slug),
                 jobs=[{**j, "desc": jobs.describe(j), "busy": jobs.is_running(slug, j["id"])} for j in jobs.of(slug)],
@@ -677,6 +692,15 @@ async def save_app(request: Request, slug: str):
     d.pop("slug")
     rts = d.pop("routes")
     D.set_routes(slug, rts)
+    if kinds.static(cur["kind"]) or kinds.static(d["kind"]):   # site statique : nom et adresses seulement
+        if kinds.static(cur["kind"]) != kinds.static(d["kind"]):
+            flash(request, "Un site statique ne peut pas devenir une appli en conteneur (ni l'inverse) : crée une nouvelle appli.", "error")
+            return go(f"/apps/{slug}#reglages")
+        d.pop("_ports", None)
+        db.update_app(slug, name=d["name"])
+        await asyncio.to_thread(P.apply_routing)
+        flash(request, "Enregistré. Adresses publiques mises à jour.")
+        return go(f"/apps/{slug}#reglages")
     new_ports = d.pop("_ports") or []
     ports_changed = new_ports != gameports.of(slug)
     gameports.save(slug, new_ports)
@@ -1007,6 +1031,77 @@ async def app_smoke(request: Request, slug: str):
                                                                    if smoke.text_of(slug) else "aucune"))
         flash(request, "Vérifications enregistrées : elles s'appliquent au prochain déploiement.")
     return go(f"/apps/{slug}#verifs")
+
+
+@app.post("/apps/{slug}/site/upload")
+async def site_upload(request: Request, slug: str):
+    a = get_app_or_404(slug)
+    if not kinds.static(a["kind"]):
+        return go(f"/apps/{slug}")
+    f = await request.form()
+    up = f.get("file")
+    if not up or not getattr(up, "filename", ""):
+        flash(request, "Choisis le zip du dossier construit.", "error")
+        return go(f"/apps/{slug}#site")
+    os.makedirs("/srv/backups/restore-tmp", mode=0o700, exist_ok=True)
+    part = f"/srv/backups/restore-tmp/site-{slug}-{secrets.token_hex(6)}.zip"
+    size = 0
+    try:
+        with open(part, "wb") as out:
+            while chunk := await up.read(4 * 1024 * 1024):
+                size += len(chunk)
+                if size > sites.MAX_ZIP:
+                    raise ValueError("zip trop gros (200 Mo au plus)")
+                out.write(chunk)
+        n = await asyncio.to_thread(sites.publish_zip, slug, part, os.path.basename(up.filename)[:80])
+        flash(request, f"Version #{n} en ligne.")
+    except (ValueError, OSError, zipfile.BadZipFile) as e:
+        P.log("error", slug, f"publication refusée : {e}")
+        flash(request, f"Publication refusée : {e}", "error")
+    finally:
+        if os.path.exists(part):
+            os.remove(part)
+    return go(f"/apps/{slug}#site")
+
+
+@app.post("/apps/{slug}/site/git")
+async def site_git(request: Request, slug: str):
+    a = get_app_or_404(slug)
+    if not kinds.static(a["kind"]):
+        return go(f"/apps/{slug}")
+    f = await request.form()
+    try:
+        sites.save_git(slug, f)
+    except ValueError as e:
+        flash(request, str(e), "error")
+        return go(f"/apps/{slug}#site")
+    if sites.busy(slug):
+        flash(request, "Une construction est déjà en cours.", "error")
+    else:
+        P.spawn(sites.build_git, slug)
+        flash(request, "Construction lancée : clonage, build dans un conteneur jetable, puis publication.")
+    return go(f"/apps/{slug}#site")
+
+
+@app.post("/apps/{slug}/site/activate/{n}")
+async def site_activate(request: Request, slug: str, n: int):
+    get_app_or_404(slug)
+    try:
+        await asyncio.to_thread(sites.activate, slug, n)
+        flash(request, f"Version #{n} remise en ligne.")
+    except ValueError as e:
+        flash(request, str(e), "error")
+    return go(f"/apps/{slug}#site")
+
+
+@app.post("/apps/{slug}/site/settings")
+async def site_settings(request: Request, slug: str):
+    get_app_or_404(slug)
+    f = await request.form()
+    sites.set_spa(slug, f.get("spa") == "on")
+    await asyncio.to_thread(P.apply_routing)
+    flash(request, "Réglages du site enregistrés.")
+    return go(f"/apps/{slug}#site")
 
 
 @app.post("/apps/{slug}/{action}")

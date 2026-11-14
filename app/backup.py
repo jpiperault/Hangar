@@ -1103,6 +1103,11 @@ def _recreate_app(e, src_data, src_dump, parts, name):
             shutil.move(src_data, f"{P.app_dir(slug)}/data")
         else:
             P.push_dir(node, src_data, f"{P.app_dir(slug)}/data")
+    from . import kinds
+    if kinds.static(a["kind"]):   # site statique : ses versions ne sont pas dans l'archive, à republier
+        P.log("warn", slug, "site statique recréé sans ses fichiers : publie une version (zip ou dépôt Git)")
+        P.apply_routing()
+        return
     P.deploy(slug, a["version"], "create")   # pull, /data, démarrage, healthcheck, routes
 
 

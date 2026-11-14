@@ -377,7 +377,8 @@ def render_caddyfile(s, apps, here=LOCAL):
                     continue
                 L += ["", f"\t# appli {slug}", f"\tredir /{slug} /{slug}/ 308", f"\thandle_path /{slug}/* {{",
                       f"\t\tlog_append hangar_app {slug}"]
-                L += _upstream(a, f"/{slug}", "\t\t", here)
+                from . import kinds, sites
+                L += sites.caddy_lines(a, "\t\t") if kinds.static(a["kind"]) else _upstream(a, f"/{slug}", "\t\t", here)
                 L.append("\t}")
             L += ["", "\thandle {", '\t\trespond "Not found" 404', "\t}", "}"]
         for slug, rs in rts.items():
@@ -398,7 +399,8 @@ def render_caddyfile(s, apps, here=LOCAL):
                       "\thandle /.well-known/hangar/crash {", "\t\trequest_body {", "\t\t\tmax_size 64KB", "\t\t}",
                       f"\t\trewrite * /.well-known/hangar/crash/web/{slug}",
                       f"\t\treverse_proxy {coll} {{", "\t\t\theader_up X-Real-IP {client_ip}", "\t\t}", "\t}"]
-            L += _upstream(a, None, "\t", here)
+            from . import kinds, sites
+            L += sites.caddy_lines(a, "\t") if kinds.static(a["kind"]) else _upstream(a, None, "\t", here)
             L.append("}")
     if any_tunnel:
         L += ["", "# Tout autre nom arrivant par le tunnel", f"http://:{port} {{", "\timport tunnel",
@@ -754,7 +756,15 @@ def push_routing(s, apps, files):
         if rc:
             return f"{n['id']} : " + tail(out, 2)
         rc, out = nsh(n["id"], PUSH_PUBLIC, timeout=30, input=blob)
-        return f"{n['id']} : " + tail(out, 2) if rc else None
+        if rc:
+            return f"{n['id']} : " + tail(out, 2)
+        if os.path.isdir("/srv/platform/sites"):   # sites statiques servis aussi par ce nœud
+            try:
+                nsh(n["id"], "install -d -m 0755 /srv/platform/sites", timeout=30)
+                push_dir(n["id"], "/srv/platform/sites", "/srv/platform/sites")
+            except Exception as e:
+                return f"{n['id']} : sites statiques non copiés ({e})"
+        return None
 
     def empty(n):
         nsh(n["id"], PUSH_CADDY, timeout=60, input="# Généré par Hangar : ce nœud ne reçoit pas de trafic\n"
@@ -868,9 +878,9 @@ def check_app_entry(e):
     chk(not e.get("ios_bundle") or (isinstance(e["ios_bundle"], str) and re.fullmatch(r"[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+", e["ios_bundle"])), "bundle iOS")
     chk(e.get("web_client", 0) in (0, 1, True, False), "client web")
     src = e.get("source", "image")
-    chk(src in ("image", "git"), "source")
+    chk(src in ("image", "git", "static"), "source")
     img = e.get("image")
-    chk(isinstance(img, str) and (IMAGE if src == "image" else GIT).match(img), "image")
+    chk(src == "static" or (isinstance(img, str) and (IMAGE if src == "image" else GIT).match(img)), "image")
     chk(isinstance(e.get("version"), str) and VERSION.match(e["version"]), "version")
     for k, lo, hi in (("port", 1, 65535), ("mem_mb", 32, 4096)):
         chk(isinstance(e.get(k), int) and not isinstance(e.get(k), bool) and lo <= e[k] <= hi, k)
@@ -1224,6 +1234,9 @@ def display_status(a, cs):
         return "deploying"
     if a["desired"] == "stopped":
         return "stopped"
+    from . import kinds, sites
+    if kinds.static(a["kind"]):   # pas de conteneur : en ligne dès qu'une version est publiée
+        return "running" if sites.healthy(a["slug"]) else "error"
     c = cs.get(a["slug"])
     if a["state"] != "error" and c and c[0] == "running":
         return "running"
@@ -1484,7 +1497,16 @@ def deploy(slug, version, kind, previous=None):
             pass
 
 
+def _static_toggle(slug, desired, verb):
+    db.update_app(slug, desired=desired, state="ok")
+    log("ok" if desired == "running" else "info", slug, verb)
+    apply_routing()
+
+
 def start(slug):
+    from . import kinds
+    if kinds.static(db.app(slug)["kind"]):
+        return _static_toggle(slug, "running", "site remis en ligne")
     with op_lock:
         a = db.app(slug)
         db.update_app(slug, state="deploying", desired="running")
@@ -1498,6 +1520,9 @@ def start(slug):
 
 
 def stop(slug):
+    from . import kinds
+    if kinds.static(db.app(slug)["kind"]):
+        return _static_toggle(slug, "stopped", "site arrêté (Caddy répond 503)")
     with op_lock:
         db.update_app(slug, desired="stopped")
         rc, out = dk(app_node(slug), "compose", "stop", cwd=app_dir(slug), timeout=120)
@@ -1509,6 +1534,9 @@ def stop(slug):
 
 
 def restart(slug):
+    from . import kinds
+    if kinds.static(db.app(slug)["kind"]):
+        return _static_toggle(slug, "running", "site rechargé")
     with op_lock:
         a = db.app(slug)
         db.update_app(slug, state="deploying", desired="running")
@@ -1531,7 +1559,18 @@ def delete(slug):
         os.makedirs(keep, exist_ok=True)
         os.chmod(keep, 0o700)
         d, node = app_dir(slug), a["node"]
-        from . import gameports, ha, limits, preprod, services
+        from . import gameports, ha, kinds, limits, preprod, services, sites
+        if kinds.static(a["kind"]):   # site statique : versions gardées avec les copies des applis supprimées
+            if os.path.isdir(f"{d}/site"):
+                shutil.move(f"{d}/site", f"{keep}/site")
+            shutil.rmtree(d, ignore_errors=True)
+            sites.remove(slug)
+            db.x("DELETE FROM apps WHERE slug = ?", (slug,))
+            D.set_routes(slug, [])
+            preprod.forget(slug)
+            log("info", slug, f"site supprimé ; ses versions sont gardées dans {keep}")
+            apply_routing()
+            return
         services.drop(slug)
         gameports.save(slug, [])
         limits.drop(slug)
