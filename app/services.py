@@ -91,6 +91,7 @@ def compose_extra(a, net, data_dir, instance=None):
     """(services à ajouter au compose, variables à donner à l'appli). `instance` : compose d'une instance
     supplémentaire (haute dispo) ; elle utilise le Redis du nœud principal."""
     svcs, env = _redis_extra(a, net, data_dir, instance)
+    env.update(mail_env(a["slug"]))   # relais e-mail : sur chaque instance
     if mysql(a["slug"]) and instance is None:
         svcs["mysql"] = _mysql_service(a, net, data_dir)
         env.update(mysql_env(a["slug"]))
@@ -262,3 +263,52 @@ def mysql_state(a):
         size, ts = dump.split()[:2]
         out.update(dump_size=int(size), dump_ts=float(ts))
     return out
+
+
+# ---------------------------------------------------------------- relais e-mail
+
+def relay():
+    """Compte SMTP partagé par les applis qui envoient des e-mails (kv « mail_relay »), ou None s'il n'est pas réglé."""
+    r = db.kv_get("mail_relay") or {}
+    return r if r.get("host") else None
+
+
+def save_relay(cfg):
+    db.kv_set("mail_relay", cfg or None)
+
+
+def mail(slug):
+    return of(slug).get("mail")
+
+
+def enable_mail(slug, sender):
+    from . import alerts
+    if not relay():
+        raise ValueError("règle d'abord le relais e-mail (Système et alertes)")
+    sender = (sender or "").strip()
+    if not alerts.MAIL_RE.match(sender):
+        raise ValueError("adresse d'expéditeur invalide, par exemple noreply@exemple.fr")
+    svc = of(slug)
+    svc["mail"] = {"from": sender}
+    _save(slug, svc)
+
+
+def disable_mail(slug):
+    svc = of(slug)
+    svc.pop("mail", None)
+    _save(slug, svc)
+
+
+def mail_env(slug):
+    m, r = mail(slug), relay()
+    if not m or not r:
+        return {}
+    sec = r.get("security") or "starttls"
+    return {"SMTP_HOST": r["host"], "SMTP_PORT": str(r.get("port") or 587), "SMTP_USER": r.get("user") or "",
+            "SMTP_USERNAME": r.get("user") or "", "SMTP_PASSWORD": r.get("password") or "", "SMTP_SECURE": sec,
+            "SMTP_TLS": "true" if sec == "ssl" else "false", "SMTP_STARTTLS": "true" if sec == "starttls" else "false",
+            "SMTP_FROM": m["from"], "MAIL_FROM": m["from"]}
+
+
+def mail_users():
+    return [slug for slug, v in (db.kv_get("app_services") or {}).items() if v.get("mail")]

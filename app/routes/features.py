@@ -71,6 +71,29 @@ async def app_redis(request: Request, slug: str):
     return go(f"/apps/{slug}#redis")
 
 
+@router.post("/apps/{slug}/services/mail")
+async def app_mail(request: Request, slug: str):
+    a = get_app_or_404(slug)
+    f = await request.form()
+    try:
+        if request.query_params.get("off") == "1":
+            services.disable_mail(slug)
+            msg = "E-mails coupés : l'appli est redéployée sans les variables SMTP_…."
+        else:
+            had = services.mail(slug)
+            services.enable_mail(slug, f.get("sender"))
+            msg = ("Expéditeur changé" if had else "E-mails activés") + " : l'appli est redéployée avec SMTP_HOST, SMTP_PORT, " \
+                  "SMTP_USER, SMTP_PASSWORD, SMTP_SECURE et SMTP_FROM."
+    except ValueError as e:
+        flash(request, str(e), "error")
+        return go(f"/apps/{slug}#mail")
+    P.log("info", slug, msg.split(" :")[0])
+    if a["state"] != "deploying" and a["version"]:
+        P.spawn(P.deploy, slug, a["version"], "config", dict(a))
+    flash(request, msg)
+    return go(f"/apps/{slug}#mail")
+
+
 @router.post("/apps/{slug}/services/mysql")
 async def app_mysql(request: Request, slug: str):
     a = get_app_or_404(slug)

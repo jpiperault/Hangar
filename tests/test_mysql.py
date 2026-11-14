@@ -82,3 +82,19 @@ def test_nouvelle_image(app_row, monkeypatch):
     monkeypatch.setattr(monitor, "_running_digests", lambda a: {"sha256:neuf"})
     monitor.check_image_update(a)
     assert monitor.image_update("mon-jeu") is None
+
+
+def test_relais_email(app_row, tmp_path, monkeypatch):
+    db.kv_set("mail_relay", None)
+    with pytest.raises(ValueError):
+        services.enable_mail("mon-jeu", "noreply@exemple.fr")          # pas de relais
+    services.save_relay({"host": "smtp.exemple.fr", "port": 587, "security": "starttls", "user": "u", "password": "p$w",
+                         "from": "noreply@exemple.fr"})
+    with pytest.raises(ValueError):
+        services.enable_mail("mon-jeu", "pas-une-adresse")
+    services.enable_mail("mon-jeu", "jeu@exemple.fr")
+    env = _doc({**app_row, "env": "SMTP_PORT=2525"}, tmp_path, monkeypatch)["services"]["app"]["environment"]
+    assert env["SMTP_HOST"] == "smtp.exemple.fr" and env["SMTP_FROM"] == "jeu@exemple.fr"
+    assert env["SMTP_PASSWORD"] == "p$$w" and env["SMTP_PORT"] == "2525"        # $ protégé ; réglage de l'appli gardé
+    assert services.mail_users() == ["mon-jeu"]
+    db.kv_set("mail_relay", None)

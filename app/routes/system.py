@@ -4,7 +4,7 @@ import re
 
 from fastapi import APIRouter, Request
 
-from .. import alerts, cache, db, images, report, runopts, system
+from .. import alerts, cache, db, images, report, runopts, services, system
 from .. import platform as P
 from .common import _int, flash, go, render, tpl
 
@@ -27,6 +27,7 @@ async def system_page(request: Request):
                   tzs=system.tz_settings(), tz_common=system.TZ_COMMON, tz_all=system.timezones(),
                   tz_now=await asyncio.to_thread(cache.get, "tz_now", 600, _tz_now), chans=alerts.channels(),
                   img=images.settings(), img_last=db.kv_get("image_cleanup_last"), rep=report.options(),
+                  relay=services.relay() or {}, relay_users=services.mail_users(),
                   health_modes=runopts.HEALTH_MODES, health_default=db.kv_get("health_mode") or "lenient",
                   levels=[(1, "toutes, même discrètes"), (3, "normales et plus"), (4, "importantes et urgentes"), (5, "urgentes seulement")])
 
@@ -121,6 +122,49 @@ async def system_images_run(request: Request):
 async def system_images_preview(request: Request):
     pv = await asyncio.to_thread(images.preview)
     return tpl.TemplateResponse(request, "_images_preview.html", {"pv": pv})
+
+
+@router.post("/system/mail-relay")
+async def system_mail_relay(request: Request):
+    f = await request.form()
+    old = services.relay() or {}
+    if request.query_params.get("off") == "1":
+        services.save_relay(None)
+        users = services.mail_users()
+        flash(request, "Relais e-mail retiré." + (f" Applis concernées (plus de SMTP_… au prochain déploiement) : "
+                                                   f"{', '.join(users)}." if users else ""))
+        return go("/system#relais")
+    try:
+        c = _channel_form("email", {**dict(f), "to": "essai@exemple.fr", "on": "on",
+                                    "password": f.get("password") if f.get("password") != P.MASK else P.MASK}, False)
+    except ValueError as e:
+        flash(request, f"Relais e-mail : {e}", "error")
+        return go("/system#relais")
+    if (f.get("password") or "") == P.MASK:
+        c["password"] = old.get("password", "")
+    cfg = {k: c[k] for k in ("host", "port", "security", "user", "password", "from")}
+    services.save_relay(cfg)
+    test_to = (f.get("test_to") or "").strip()
+    if test_to:
+        if not alerts.MAIL_RE.match(test_to):
+            flash(request, "Adresse du test invalide.", "error")
+            return go("/system#relais")
+        try:
+            await asyncio.to_thread(alerts._email, {**cfg, "to": [test_to], "from": cfg["from"] or cfg["user"]},
+                                    "Test du relais e-mail", "Si tu lis ceci, les applis peuvent envoyer des e-mails.", 3)
+        except Exception as e:
+            flash(request, f"Relais enregistré, mais l'envoi du test a échoué : {str(e)[:200]}", "error")
+            return go("/system#relais")
+    users = services.mail_users()
+    if cfg != old:
+        for slug in users:   # nouvelles valeurs SMTP_… : les applis qui envoient sont redéployées
+            a = db.app(slug)
+            if a and a["desired"] == "running" and a["state"] != "deploying":
+                P.spawn(P.deploy, slug, a["version"], "config", dict(a))
+    P.log("info", "console", f"relais e-mail des applis : {cfg['host']}")
+    flash(request, "Relais e-mail enregistré" + (f", test envoyé à {test_to}" if test_to else "") +
+          (f". Redéployées avec les nouveaux réglages : {', '.join(users)}." if users and cfg != old else "."))
+    return go("/system#relais")
 
 
 @router.post("/system/health")

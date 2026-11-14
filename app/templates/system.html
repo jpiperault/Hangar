@@ -75,6 +75,23 @@
     <div class="acts" style="justify-content:flex-start;gap:8px"><button class="btn sm primary">Enregistrer</button>
       <button class="btn sm" formaction="/system/images/run" data-confirm="Supprimer maintenant les anciennes images sur toutes les machines ?">Nettoyer maintenant</button></div>
   </form>
+  <form class="panel" id="relais" method="post" action="/system/mail-relay" autocomplete="off" style="display:flex;flex-direction:column;gap:10px">
+    <h2 style="margin:0">Relais e-mail des applis {% if relay.host %}<span class="pill s-running">réglé</span>{% endif %}</h2>
+    <p class="hint" style="margin:0">Un compte SMTP (Brevo, Mailjet, Postmark, ton fournisseur…) partagé par les applis qui doivent envoyer des e-mails : inscriptions, mots de passe oubliés, notifications. Une appli l'utilise si on coche « E-mails » dans sa fiche (onglet Base) : elle reçoit <code>SMTP_HOST</code>, <code>SMTP_PORT</code>, <code>SMTP_USER</code>, <code>SMTP_PASSWORD</code>, <code>SMTP_SECURE</code> et <code>SMTP_FROM</code>.</p>
+    <div class="row2">
+      <div class="field"><label for="rl_host">Serveur SMTP</label><input id="rl_host" name="host" value="{{ relay.host or '' }}" spellcheck="false" placeholder="smtp-relay.brevo.com"></div>
+      <div class="field"><label for="rl_port">Port</label><input id="rl_port" name="port" inputmode="numeric" value="{{ relay.port or 587 }}"></div>
+      <div class="field"><label for="rl_sec">Chiffrement</label><select id="rl_sec" name="security">{% for k, l in [('starttls', 'STARTTLS (587)'), ('ssl', 'SSL/TLS (465)'), ('none', 'aucun (relais local)')] %}<option value="{{ k }}" {{ 'selected' if (relay.security or 'starttls') == k }}>{{ l }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="rl_user">Identifiant</label><input id="rl_user" name="user" value="{{ relay.user or '' }}" spellcheck="false" autocomplete="off"></div>
+      <div class="field"><label for="rl_pw">Mot de passe ou clé</label><input id="rl_pw" name="password" type="password" value="{{ '••••••' if relay.password }}" autocomplete="new-password"></div>
+      <div class="field"><label for="rl_from">Expéditeur par défaut</label><input id="rl_from" name="from" value="{{ relay['from'] or '' }}" spellcheck="false" placeholder="noreply@exemple.fr"></div>
+    </div>
+    <div class="field"><label for="rl_test">Envoyer un test à (facultatif)</label><input id="rl_test" name="test_to" spellcheck="false" placeholder="moi@exemple.fr"></div>
+    {% if relay_users %}<p class="hint" style="margin:0">Utilisé par : {{ relay_users | join(', ') }}. Changer ces réglages les redéploie.</p>{% endif %}
+    <div class="acts" style="justify-content:flex-start;gap:8px"><button class="btn sm primary">Enregistrer</button>
+      {% if relay.host %}<button class="btn sm link" formaction="/system/mail-relay?off=1" formnovalidate data-confirm="Retirer le relais e-mail ?">Retirer</button>{% endif %}</div>
+    <span class="hint">L'expéditeur doit être autorisé chez le fournisseur (domaine vérifié, SPF et DKIM), sinon les messages partent en indésirables.</span>
+  </form>
   <form class="panel" id="sante" method="post" action="/system/health" style="display:flex;flex-direction:column;gap:10px">
     <h2 style="margin:0">Contrôle de santé des applis</h2>
     <p class="hint" style="margin:0">Réponses de l'adresse de santé qui valident un déploiement et que la supervision accepte. Chaque appli peut choisir autrement (fiche → Réglages → Démarrage et santé).</p>

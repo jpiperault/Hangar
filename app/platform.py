@@ -1021,7 +1021,11 @@ def write_compose(a, version, instance=None, role=None):
         env["DATABASE_URL"] = db_url(a, node)
     from . import services
     extra, extra_env = services.compose_extra(a, f"hangar-{a['slug']}", f"{app_dir(a['slug'])}/data", instance)
-    env.update(extra_env)
+    for k, v in extra_env.items():   # relais e-mail : une variable SMTP_… réglée par l'appli elle-même l'emporte
+        if k.startswith(("SMTP_", "MAIL_")):
+            env.setdefault(k, v)
+        else:
+            env[k] = v
     from . import system
     tzs = system.tz_settings()
     if tzs["apps"] and tzs["tz"] and "TZ" not in env:   # heure locale dans l'appli (sauf TZ déjà choisie par elle)

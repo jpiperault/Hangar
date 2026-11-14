@@ -462,6 +462,17 @@
     <div class="inlinefield"><input name="mem" type="number" min="32" max="4096" value="128" aria-label="Mémoire de Redis en Mo"><span class="hint">Mo</span><button class="btn sm primary" {{ 'disabled' if a.status == 'deploying' }}>Ajouter Redis</button></div>
     {% endif %}
   </form>
+  <form class="panel" id="mail" method="post" action="/apps/{{ a.slug }}/services/mail" autocomplete="off" style="display:flex;flex-direction:column;gap:10px">
+    <h2 style="margin:0">E-mails {% if mail %}<span class="pill s-running">activés</span>{% endif %}</h2>
+    {% if not relay %}
+    <p class="hint" style="margin:0">Pour que l'appli envoie des e-mails (inscriptions, mots de passe oubliés, notifications), règle d'abord le <a href="/system#relais">relais e-mail</a> une fois pour toutes, puis reviens ici.</p>
+    {% else %}
+    <p class="hint" style="margin:0">Par le relais {{ relay.host }}. L'appli reçoit <code>SMTP_HOST</code>, <code>SMTP_PORT</code>, <code>SMTP_USER</code>, <code>SMTP_PASSWORD</code>, <code>SMTP_SECURE</code> (starttls, ssl ou none) et <code>SMTP_FROM</code> ; une variable du même nom réglée dans ses Variables l'emporte. Si l'appli attend d'autres noms, reprends ces valeurs dans ses Variables.</p>
+    <div class="inlinefield"><input name="sender" value="{{ mail['from'] if mail else (relay['from'] or ('noreply@' ~ (s.domain or 'exemple.fr'))) }}" spellcheck="false" aria-label="Expéditeur" style="min-width:16em">
+      <button class="btn sm primary" {{ 'disabled' if a.status == 'deploying' }}>{{ "Changer l'expéditeur" if mail else 'Activer les e-mails' }}</button>
+      {% if mail %}<button class="btn sm link" formaction="/apps/{{ a.slug }}/services/mail?off=1" formnovalidate data-confirm="Couper les e-mails de cette appli ?">Couper</button>{% endif %}</div>
+    {% endif %}
+  </form>
   <form class="panel" id="mysql" method="post" action="/apps/{{ a.slug }}/services/mysql" style="display:flex;flex-direction:column;gap:10px">
     {% set ms = mysql_st or {} %}
     <h2 style="margin:0">MySQL / MariaDB {% if mysql %}<span class="pill {{ 's-running' if ms.state == 'running' and ms.health != 'unhealthy' else ('s-deploying' if ms.state in ('…', 'absent') else 's-error') }}">{{ {'running': 'en marche' if ms.health != 'starting' else 'démarrage', 'absent': 'pas encore créée', '…': '…'}.get(ms.state, ms.state) }}</span>{% endif %}</h2>

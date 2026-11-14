@@ -172,7 +172,7 @@ async def _app_ctx(request, slug):
                 rc_urls={"android": _rc_url(a, a["pkg"]), "ios": _rc_url(a, a["ios_bundle"])},
                 has_clients=bool(a["pkg"] or a["ios_bundle"] or a["web_client"]), client_names=_client_names(a),
                 crash_groups=crashes.groups(slug) if (a["pkg"] or a["ios_bundle"] or a["web_client"]) else [], aff=affinity.of(slug), aff_modes=affinity.MODES,
-                aff_default=affinity.DEFAULT_NAME, smoke_text=smoke.text_of(slug), smoke_last=db.kv_get(f"smoke_last:{slug}"), redis=services.redis(slug), mysql=services.mysql(slug), mysql_engines=services.ENGINES, img_update=monitor.image_update(slug), pre=db.app(preprod.of(slug) or ""),
+                aff_default=affinity.DEFAULT_NAME, smoke_text=smoke.text_of(slug), smoke_last=db.kv_get(f"smoke_last:{slug}"), redis=services.redis(slug), mysql=services.mysql(slug), mail=services.mail(slug), relay=services.relay(), mysql_engines=services.ENGINES, img_update=monitor.image_update(slug), pre=db.app(preprod.of(slug) or ""),
                 prod=db.app(preprod.prod_of(slug) or ""),
                 redis_st=(cache.get(f"redis:{slug}", 20, _redis_state, a, wait=False) or {"state": "…"})
                 if services.redis(slug) else None,
