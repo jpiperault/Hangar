@@ -46,6 +46,7 @@ FastAPI + Jinja, sans build front. Elle écoute en HTTPS (certificat auto-signé
 - **Préproduction** d'une appli : copie `<appli>-preprod` avec la base et `data/` de la production, `HANGAR_ENVIRONMENT=preprod`, recopie des données et déploiement en production d'un clic.
 - **Tâches planifiées** par appli : commande lancée dans son conteneur toutes les N minutes, chaque jour ou chaque semaine, résultat gardé, alerte en cas d'échec.
 - **Redis (Valkey)** à la demande pour une appli : sur son réseau cloisonné, persistant dans `data/`, `REDIS_URL` injectée.
+- **Protéger une appli** par mot de passe ou adresses IP (appliqué par Caddy, chemins techniques laissés ouverts).
 - **Relais e-mail** partagé : un compte SMTP réglé une fois, variables `SMTP_…` données aux applis qui en ont besoin.
 - **MySQL 8.4 ou MariaDB 11.4** à la demande : base propre à l'appli, exportée de façon cohérente avant chaque sauvegarde, archive ou déplacement, et rechargée depuis cet export après une restauration (`MYSQL_HOST`, `MYSQL_URL`…).
 - **Logs** consultables (période, recherche, erreurs seulement) et **alertes sur motif** (`Exception`, `OutOfMemory`…).

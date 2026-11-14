@@ -389,6 +389,7 @@
 
 <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
   {% if a.source in ('image', 'git') and not kind.static %}{% include "_hook_panel.html" %}{% endif %}
+  {% if kind.http and not kind.static %}{% include "_protect_panel.html" %}{% endif %}
   {% if a.source == 'image' and not kind.static %}<form class="panel" id="modele" method="post" action="/apps/{{ a.slug }}/template" autocomplete="off" style="display:flex;flex-direction:column;gap:10px">
     <h2 style="margin:0">Garder comme modèle</h2>
     <p class="hint" style="margin:0">Ajoute cette appli au catalogue (« Mes modèles ») pour la réinstaller en un clic : image, version, port, santé, mémoire, base, MySQL, dossiers, démarrage et variables. Les variables qui ressemblent à des secrets (SECRET, TOKEN, PASSWORD, …_KEY) reçoivent une nouvelle valeur à chaque installation ; son adresse est remplacée par celle de la nouvelle appli. Les données ne sont pas copiées.</p>

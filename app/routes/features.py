@@ -195,6 +195,33 @@ async def app_crash_op(request: Request, slug: str, fp: str, op: str):
     return go(f"/apps/{slug}#mobile")
 
 
+@router.post("/apps/{slug}/protect/{op}")
+async def app_protect(request: Request, slug: str, op: str):
+    from .. import protect
+    get_app_or_404(slug)
+    f = await request.form()
+    try:
+        if op == "adduser":
+            await asyncio.to_thread(protect.add_user, slug, f.get("name"), f.get("password") or "")
+            msg = f"Compte {f.get('name')} ajouté : l'appli demande maintenant un mot de passe."
+        elif op == "deluser":
+            protect.remove_user(slug, f.get("name") or "")
+            msg = f"Compte {f.get('name')} retiré."
+        elif op == "ips":
+            protect.set_ips(slug, protect.parse_ips(f.get("ips")))
+            ips = protect.of(slug).get("ips")
+            msg = f"Adresses autorisées : {', '.join(ips)}." if ips else "Plus de restriction par adresse."
+        else:
+            return go(f"/apps/{slug}")
+    except (ValueError, RuntimeError) as e:
+        flash(request, str(e), "error")
+        return go(f"/apps/{slug}#protection")
+    await asyncio.to_thread(P.apply_routing)
+    P.log("info", slug, "protection : " + msg)
+    flash(request, msg)
+    return go(f"/apps/{slug}#protection")
+
+
 @router.post("/apps/{slug}/hook/{op}")
 async def app_hook(request: Request, slug: str, op: str):
     a = get_app_or_404(slug)

@@ -379,6 +379,8 @@ def render_caddyfile(s, apps, here=LOCAL):
                     continue
                 L += ["", f"\t# appli {slug}", f"\tredir /{slug} /{slug}/ 308", f"\thandle_path /{slug}/* {{",
                       f"\t\tlog_append hangar_app {slug}"]
+                from . import protect
+                L += protect.caddy_lines(slug, "\t\t", site=False)   # mot de passe, adresses autorisées
                 from . import kinds, sites
                 L += sites.caddy_lines(a, "\t\t") if kinds.static(a["kind"]) else _upstream(a, f"/{slug}", "\t\t", here)
                 L.append("\t}")
@@ -393,6 +395,8 @@ def render_caddyfile(s, apps, here=LOCAL):
                 L.append("\timport tunnel")
             L += ["\timport hangar_log", f"\tlog_append hangar_app {slug}", "\tencode zstd gzip"]
             L += hooks.caddy_app_lines(slug, f"{'127.0.0.1' if here == LOCAL else node_wg(LOCAL)}:8099")
+            from . import protect
+            L += protect.caddy_lines(slug, "\t")   # mot de passe, adresses autorisées
             if a["web_client"]:   # client web : script, configuration et envoi des erreurs, sur l'adresse de l'appli
                 coll = f"{'127.0.0.1' if here == LOCAL else node_wg(LOCAL)}:8099"
                 L += ["\thandle /.well-known/hangar/client.js {", f"\t\troot * {PUBLIC}/_clients",
@@ -1658,9 +1662,10 @@ def delete(slug):
                 shutil.move(f"{d}/site", f"{keep}/site")
             shutil.rmtree(d, ignore_errors=True)
             sites.remove(slug)
-            from . import hooks, perms
+            from . import hooks, perms, protect
             hooks.forget(slug)
             perms.forget_app(slug)
+            protect.drop(slug)
             db.x("DELETE FROM apps WHERE slug = ?", (slug,))
             D.set_routes(slug, [])
             preprod.forget(slug)
@@ -1677,9 +1682,10 @@ def delete(slug):
         limits.drop(slug)
         from . import runopts
         runopts.drop(slug)
-        from . import hooks, perms
+        from . import hooks, perms, protect
         hooks.forget(slug)
         perms.forget_app(slug)
+        protect.drop(slug)
         preprod.forget(slug)
         if ha.get(slug):   # haute dispo : base dédiée rapatriée dans le PostgreSQL partagé, secours et instances retirés
             ha.disable(slug, "suppression", locked=True)

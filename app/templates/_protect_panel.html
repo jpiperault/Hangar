@@ -1,0 +1,17 @@
+<section class="panel" id="protection" style="display:flex;flex-direction:column;gap:10px">
+  <h2 style="margin:0">Protection {% if prot.users or prot.ips %}<span class="pill s-running">active</span>{% endif %}</h2>
+  <p class="hint" style="margin:0">Pour un outil qui ne doit pas être ouvert à tout Internet : Caddy demande un mot de passe, ou refuse les adresses non autorisées, avant même d'atteindre l'appli. Sur toutes ses adresses.{% if kind.client %} <strong>Attention :</strong> les applis mobiles qui appellent cette API seraient bloquées aussi.{% endif %}</p>
+  <form method="post" action="/apps/{{ a.slug }}/protect/adduser" autocomplete="off" style="display:flex;flex-direction:column;gap:8px">
+    <strong>Mot de passe</strong>
+    {% for u in prot.users or [] %}<div class="cert"><span class="mono">{{ u.name }}</span><button class="btn sm link" formaction="/apps/{{ a.slug }}/protect/deluser" name="name" value="{{ u.name }}" formnovalidate data-confirm="Retirer le compte {{ u.name }} ?">Retirer</button></div>{% else %}<span class="hint">Aucun compte : pas de mot de passe demandé.</span>{% endfor %}
+    <div class="inlinefield" style="flex-wrap:wrap"><input name="name" placeholder="identifiant" aria-label="Identifiant" spellcheck="false" style="max-width:12em">
+      <input name="password" type="password" placeholder="mot de passe (8 caractères au moins)" aria-label="Mot de passe" autocomplete="new-password" style="max-width:18em">
+      <button class="btn sm primary">Ajouter</button></div>
+  </form>
+  <form method="post" action="/apps/{{ a.slug }}/protect/ips" autocomplete="off" style="display:flex;flex-direction:column;gap:8px">
+    <strong>Adresses autorisées</strong>
+    <input name="ips" value="{{ (prot.ips or []) | join(', ') }}" spellcheck="false" placeholder="tout le monde" aria-label="Adresses autorisées">
+    <span class="hint">IP ou réseaux séparés par des virgules (203.0.113.4, 198.51.100.0/24, 2001:db8::/48). Les autres reçoivent « Accès refusé ». Vide : ouvert à tous. Webhooks et rapports de plantage restent ouverts (ils ont leur propre clé).</span>
+    <div><button class="btn sm primary">Enregistrer</button></div>
+  </form>
+</section>
