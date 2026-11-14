@@ -75,3 +75,16 @@ def test_retrait_par_un_admin():
     totp.disable("perdu")
     assert not totp.enabled("perdu")
     db.x("DELETE FROM users WHERE username = 'perdu'")
+
+
+def test_secours_en_ligne_de_commande(capsys):
+    from app import __main__ as cli
+    db.x("INSERT OR REPLACE INTO users(username, hash, role) VALUES('perdu2', 'x', 'admin')")
+    totp.enable("perdu2", totp.new_secret(), totp.new_recovery()[1])
+    cli.users_cmd([])
+    assert "perdu2" in capsys.readouterr().out
+    cli.twofa_reset(["perdu2"])
+    assert not totp.enabled("perdu2") and "retirée" in capsys.readouterr().out
+    with pytest.raises(SystemExit):
+        cli.twofa_reset(["inconnu-xyz"])
+    db.x("DELETE FROM users WHERE username = 'perdu2'")

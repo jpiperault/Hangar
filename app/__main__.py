@@ -1,5 +1,6 @@
 """Point d'entrée : `python -m app` lance la console.
-`python -m app passwd [--random]` gère le compte, `backup [--manual]` sauvegarde, `archive` crée une archive, `restore <archive>` reprend tout,
+`python -m app passwd [compte] [--random]` gère un compte, `users` liste les comptes,
+`2fa-reset <compte>` retire la double authentification d'un compte (téléphone et codes de secours perdus), `backup [--manual]` sauvegarde, `archive` crée une archive, `restore <archive>` reprend tout,
 `routing` régénère la configuration de Caddy, `sysupdate <composant> [--node <nœud>]` met à jour."""
 import getpass
 import os
@@ -11,7 +12,8 @@ def passwd(args):
     from argon2 import PasswordHasher
     from . import db
     db.init()
-    user = os.environ.get("HANGAR_USER", "admin")
+    names = [x for x in args if not x.startswith("-")]
+    user = names[0] if names else os.environ.get("HANGAR_USER", "admin")
     if "--random" in args:
         pw = secrets.token_urlsafe(15)
         path = "/root/hangar-mot-de-passe.txt"
@@ -29,6 +31,37 @@ def passwd(args):
     db.x("INSERT INTO users(username, hash) VALUES(?, ?) ON CONFLICT(username) DO UPDATE SET hash = excluded.hash",
          (user, PasswordHasher().hash(pw)))
     db.x("DELETE FROM sessions WHERE username = ?", (user,))   # sessions ouvertes fermées
+
+
+def users_cmd(args):
+    from . import db
+    db.init()
+    rows = db.q("SELECT username, role, totp_secret IS NOT NULL AS totp FROM users ORDER BY username")
+    if not rows:
+        print("Aucun compte. Crée-en un : hangar passwd admin")
+    for r in rows:
+        print(f"{r['username']:24} {r['role']:8} {'double authentification' if r['totp'] else ''}")
+
+
+def twofa_reset(args):
+    """Secours : retire la double authentification d'un compte (en root sur la console)."""
+    from . import db, totp
+    from . import platform as P
+    db.init()
+    names = [x for x in args if not x.startswith("-")]
+    if len(names) != 1:
+        sys.exit("Usage : hangar 2fa-reset <compte>   (hangar users pour la liste)")
+    user = names[0]
+    if not db.one("SELECT 1 FROM users WHERE username = ?", (user,)):
+        sys.exit(f"Compte inconnu : {user}")
+    if not totp.enabled(user):
+        print(f"{user} n'a pas de double authentification : rien à faire.")
+        return
+    totp.disable(user)
+    db.x("DELETE FROM sessions WHERE username = ?", (user,))
+    P.log("warn", "console", f"double authentification de {user} retirée en ligne de commande (secours)")
+    print(f"Double authentification retirée pour {user}. Il se connecte avec son mot de passe seul, puis peut la remettre"
+          " (Accès et comptes). Mot de passe oublié aussi : hangar passwd " + user)
 
 
 def serve():
@@ -146,6 +179,10 @@ if __name__ == "__main__":
     cmd = sys.argv[1:2]
     if cmd == ["passwd"]:
         passwd(sys.argv[2:])
+    elif cmd == ["users"]:
+        users_cmd(sys.argv[2:])
+    elif cmd == ["2fa-reset"]:
+        twofa_reset(sys.argv[2:])
     elif cmd == ["backup"]:
         backup_cmd(sys.argv[2:])
     elif cmd == ["routing"]:
