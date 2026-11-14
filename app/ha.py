@@ -310,6 +310,11 @@ def sync_data(slug):
     if dst in stale(h) or not _ok(src) or not _ok(dst) or N._fails.get(src, 0) > 0 or N._fails.get(dst, 0) > 0:
         return   # un des deux ne répond pas en ce moment : la copie attendra
     d = f"{_d(slug)}/data"
+    from . import services
+    try:   # MySQL/MariaDB : export à jour, qui part avec data/ (le secours repart de lui)
+        services.fresh_dump(a, quiet=True)
+    except RuntimeError as e:
+        P.log("warn", slug, f"{e} : le secours garde l'export précédent")
     try:
         if P.is_local(src):
             P.push_dir(dst, d, d)
@@ -331,6 +336,10 @@ def _prepull(a, node):
         P.dk(node, "compose", "-f", P.compose_path(a["slug"]), "-p", f"app-{a['slug']}", "build", timeout=1800)
     else:
         P.dk(node, "pull", "--quiet", P.image_ref(a, a["version"]), timeout=900)
+    from . import services
+    m = services.mysql(a["slug"])
+    if m:   # sa base MySQL/MariaDB aussi
+        P.dk(node, "pull", "--quiet", services.ENGINES[m["engine"]]["image"], timeout=900)
 
 
 def _instance_up(a, node):
@@ -406,8 +415,9 @@ def validate(a, mode, nodes_, ack):
     if mode not in ("standby", "replicas"):
         return "Mode inconnu."
     from . import services
-    if services.mysql(a["slug"]):
-        return "Cette appli a une base MySQL/MariaDB : pas encore compatible avec la haute dispo."
+    if services.mysql(a["slug"]) and mode == "replicas":
+        return ("Cette appli a une base MySQL/MariaDB : choisis le secours à chaud (les instances multiples demandent "
+                "une base partagée en direct).")
     nodes_ = [n for n in dict.fromkeys(nodes_) if n and n != a["node"]]
     if not nodes_:
         return "Choisis au moins un autre nœud."
@@ -550,6 +560,8 @@ def _disable(slug, by):
         if _ok(n):
             _db_remove(slug, n)
         if n != node and _ok(n):   # copie de data/ du secours, ou data/ d'une instance
+            from . import segment
+            segment.drop(n, slug)    # son réseau Docker n'y sert plus
             if P.is_local(n):
                 import shutil
                 shutil.rmtree(f"{d}/data", ignore_errors=True)   # le dossier de l'appli garde ses compose
@@ -613,6 +625,8 @@ def _failover(slug, dead, reason):
         b = db.app(slug)
         if h["mode"] == "replicas":
             _instance_down_file(slug, target)
+        from . import services
+        services.reset_mysql(b, target)   # MySQL/MariaDB : repart de l'export de la dernière copie de data/
         ok, detail = P._up(b, b["version"])
         if not ok and b["desired"] == "running":
             raise RuntimeError(detail)
@@ -667,6 +681,11 @@ def _switchover(slug, by):
         raise RuntimeError("bascule impossible : il faut le nœud principal et le secours en ligne, et à jour")
     P.log("info", slug, f"bascule programmée de {old} vers {target} ({by})")
     t0 = time.time()
+    db.update_app(slug, state="deploying")   # la supervision ne signale pas la courte coupure voulue
+    from . import services
+    if services.mysql(slug):   # l'appli d'abord, puis l'export de sa base à l'arrêt des écritures
+        P.dk(old, "compose", "stop", "app", cwd=d, timeout=120)
+        services.fresh_dump(a)
     P.dk(old, "compose", "stop", cwd=d, timeout=120)   # plus aucune écriture
     try:
         if h["mode"] == "standby":
@@ -693,6 +712,7 @@ def _switchover(slug, by):
         if h["mode"] == "replicas":
             _instance_down_file(slug, target)
             P.dk(old, "compose", "-p", f"app-{slug}", "down", timeout=120)
+        services.reset_mysql(b, target)
         ok, detail = P._up(b, b["version"])
         if not ok:
             raise RuntimeError(f"l'appli ne répond pas sur {target} : {detail}")
@@ -706,7 +726,8 @@ def _switchover(slug, by):
             _db_wait(old, slug)
             _save(slug, db_node=old)
         db.update_app(slug, node=a["node"])
-        P._up(db.app(slug), a["version"])
+        ok_back, _ = P._up(db.app(slug), a["version"])
+        db.update_app(slug, state="ok" if ok_back else "error")
         if a["db"]:
             P.spawn(_rebuild_standby, slug, target)
         raise
@@ -727,6 +748,7 @@ def _switchover(slug, by):
         P.dk(old, "compose", "-p", f"app-{slug}", "down", timeout=120)
         _prepull(db.app(slug), old)
         sync_data(slug)
+    db.update_app(slug, state="ok")
     P.log("ok", slug, f"basculée sur {target} en {time.time() - t0:.0f} s ; " + (
         f"{old} est maintenant le secours" if h["mode"] == "standby" else
         f"base principale sur {target}, {old} reste une instance" + (" avec la réplique" if a["db"] else "")))

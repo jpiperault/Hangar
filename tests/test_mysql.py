@@ -98,3 +98,16 @@ def test_relais_email(app_row, tmp_path, monkeypatch):
     assert env["SMTP_PASSWORD"] == "p$$w" and env["SMTP_PORT"] == "2525"        # $ protégé ; réglage de l'appli gardé
     assert services.mail_users() == ["mon-jeu"]
     db.kv_set("mail_relay", None)
+
+
+def test_haute_dispo(app_row, monkeypatch):
+    from app import ha
+    services.enable_mysql("mon-jeu", "mariadb", 256)
+    monkeypatch.setattr(ha, "_ok", lambda n: True)
+    monkeypatch.setattr(ha.P, "node_wg", lambda n: "10.88.0.9")
+    a = {**app_row, "node": "n1"}
+    assert ha.validate(a, "standby", ["n2"], False) is None
+    assert "secours à chaud" in ha.validate(a, "replicas", ["n2"], True)
+    monkeypatch.setattr(ha, "get", lambda slug: {"mode": "replicas"})
+    with pytest.raises(ValueError):
+        services.enable_mysql("mon-jeu", "mariadb", 512)

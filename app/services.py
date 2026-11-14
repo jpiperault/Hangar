@@ -16,7 +16,9 @@ MySQL / MariaDB (au choix) : une base propre à l'appli, hôte « mysql », port
   déplacement (fresh_dump).
 - Ce dossier est aussi le dossier d'initialisation de l'image : quand data/ est remplacé (restauration, import,
   déplacement), les fichiers bruts sont effacés (reset) et la base repart de l'export, toute seule, au démarrage.
-- Pas de haute dispo pour l'instant (la copie vers un secours se fait fichier par fichier).
+- Haute dispo en secours à chaud : l'export est refait avant chaque copie de data/ vers le secours ; à la bascule,
+  le secours repart de lui (on perd au plus les écritures depuis la dernière copie, comme pour Redis). Bascule
+  programmée : l'appli s'arrête, l'export est fait, puis la base s'arrête (rien n'est perdu). Pas d'instances multiples.
 Réglage kv « app_services » : {slug: {"redis": {"mem": Mo, "password": "..."},
                                        "mysql": {"engine": "mariadb"|"mysql", "mem": Mo, "password", "root"}}}.
 """
@@ -156,8 +158,9 @@ def enable_mysql(slug, engine, mem):
     if not 128 <= mem <= 8192:
         raise ValueError("mémoire de la base : entre 128 et 8192 Mo")
     from . import ha
-    if ha.get(slug):
-        raise ValueError("MySQL / MariaDB n'est pas encore compatible avec la haute dispo : retire-la d'abord")
+    h = ha.get(slug)
+    if h and h["mode"] == "replicas":
+        raise ValueError("MySQL / MariaDB ne va pas avec les instances multiples (seulement avec le secours à chaud)")
     svc = of(slug)
     cur = svc.get("mysql") or {}
     if cur and cur["engine"] != engine:
