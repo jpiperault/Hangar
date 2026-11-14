@@ -8,7 +8,10 @@ local, ni les autres nœuds.
   rechargée au démarrage avec le pare-feu de la machine) :
     * aucun trafic d'un réseau d'appli vers un autre, même par un port publié sur l'adresse de l'hôte ;
     * aucun trafic entre un réseau d'appli et les réseaux Docker historiques (docker0, platform) ;
-    * vers le réseau privé 10.88.0.0/24 : seulement le port de sa propre base dédiée (haute dispo).
+    * vers le réseau privé 10.88.0.0/24 : seulement le port de sa propre base dédiée (haute dispo) ;
+    * ports publics réservés à certaines adresses (gameports.sources) : le reste est jeté, en IPv4 après la
+      redirection de Docker (port d'origine retrouvé par conntrack), en IPv6 à l'entrée de la machine (Docker y passe
+      par son proxy, sans redirection).
   Le reste (réseau local, adresses internes, services de l'hôte) est bloqué par le pare-feu de chaque machine.
 """
 import hashlib
@@ -54,8 +57,32 @@ def _dbports():
     return out
 
 
-def render():
+def _restrict_rules(node):
+    """Règles des ports publics réservés : (lignes de la chaîne forward, lignes de la chaîne input de ce nœud)."""
+    from . import gameports
+    fwd, inp = [], []
+    for slug, where, ports, nets in gameports.restricted():
+        v4 = [n for n in nets if ":" not in n]
+        v6 = [n for n in nets if ":" in n]
+        for proto in ("tcp", "udp"):
+            ps = sorted({p["port"] for p in ports if p["proto"] == proto})
+            if not ps:
+                continue
+            pl = "{ " + ", ".join(map(str, ps)) + " }"
+            c4 = f"ip saddr != {{ {', '.join(v4)} }} " if v4 else ""
+            c6 = f"ip6 saddr != {{ {', '.join(v6)} }} " if v6 else ""
+            fwd.append(f'\t\toifname "{bridge(slug)}" ct state new meta nfproto ipv4 meta l4proto {proto} '
+                       f"ct original proto-dst {pl} {c4}counter drop")
+            fwd.append(f'\t\toifname "{bridge(slug)}" ct state new meta nfproto ipv6 meta l4proto {proto} '
+                       f"ct original proto-dst {pl} {c6}counter drop")
+            if where == (node or P.LOCAL):
+                inp.append(f"\t\tmeta nfproto ipv6 {proto} dport {pl} {c6}counter drop")
+    return fwd, inp
+
+
+def render(node=None):
     br = [bridge(s) for s in _slugs()]
+    fwd, inp = _restrict_rules(node)
     dbp = [(bridge(s), p) for s, p in _dbports()]
     wg = "10.88.0.0/24"
     L = ["# Cloisonnement des applis, généré par la console Hangar. Ne pas modifier à la main.",
@@ -75,14 +102,20 @@ def render():
           "\t\tiifname { \"docker0\", \"br-*\" } oifname \"hg-*\" ct state new counter drop",
           "\t\t# réseau privé des nœuds : seulement le port de sa propre base dédiée",
           f"\t\tiifname \"hg-*\" ct state new ip daddr {wg} meta l4proto != tcp counter drop",
-          f"\t\tiifname \"hg-*\" ct state new ip daddr {wg} iifname . tcp dport != @dbports counter drop",
-          "\t}", "}"]
+          f"\t\tiifname \"hg-*\" ct state new ip daddr {wg} iifname . tcp dport != @dbports counter drop"]
+    if fwd:
+        L += ["\t\t# ports publics réservés à certaines adresses"] + fwd
+    L += ["\t}"]
+    if inp:
+        L += ["", "\tchain input {", "\t\ttype filter hook input priority -2; policy accept;",
+              "\t\t# ports publics réservés, en IPv6 (proxy de Docker sur la machine)"] + inp + ["\t}"]
+    L += ["}"]
     return "\n".join(L) + "\n"
 
 
 def push(node):
     """Écrit et charge la table de cloisonnement sur un nœud (la console : node None ou 'local')."""
-    txt = render()
+    txt = render(node)
     cmd = (f"set -e; install -d /etc/nftables.d; cat > {NFT}.new; nft -c -f {NFT}.new; "
            f"mv {NFT}.new {NFT}; nft -f {NFT}")
     rc, out = P.nsh(node, cmd, timeout=60, input=txt)

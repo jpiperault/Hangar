@@ -5,7 +5,7 @@ import time
 
 from fastapi import APIRouter, Request
 
-from .. import affinity, runopts, applogs, backup, cache, catalog, cloudflare, crashes, db, dbadmin, gameports, ha, jobs, kinds, limits, nodes, preprod, remoteconfig, services, sites, smoke, stats
+from .. import affinity, runopts, segment, applogs, backup, cache, catalog, cloudflare, crashes, db, dbadmin, gameports, ha, jobs, kinds, limits, nodes, preprod, remoteconfig, services, sites, smoke, stats
 from .. import domains as D
 from .. import platform as P
 from .common import RESERVED, SLUG, VERSION, _client_names, _public_addr, _rc_url, _redis_state, apply_registry, flash, get_app_or_404, go, node_choices, render, tpl, validate
@@ -110,10 +110,12 @@ async def create_app(request: Request):
         return render(request, "app_form.html", 400, title="Nouvelle application", nav="apps", a=d, new=True,
                       errors=errors, registries=P.registry_logins(), reg_user=f.get("reg_user") or "",
                       node_choices=node_choices(), best=None, domains=D.all_domains(), kinds=kinds.choices(),
-                      gports=f.get("gports") or "")
+                      gports=f.get("gports") or "", gfrom=f.get("gfrom") or "")
     slug = d.pop("slug")
     rts = d.pop("routes")
     gameports.save(slug, d.pop("_ports") or [])
+    if gameports.save_sources(slug, d.pop("_from") or []):
+        P.spawn(segment.push_all)
     static = kinds.static(d["kind"])
     d.update(host_port=P.next_host_port(), state="ok" if static else "deploying", desired="running",
              created_at=time.time(), db_password=secrets.token_hex(16) if d["db"] else None)
@@ -146,7 +148,7 @@ async def _app_ctx(request, slug):
     hst = await asyncio.to_thread(ha.status, slug)
     busy = (hst and (hst["busy"] or hst["h"]["state"] == "setup"))
     return dict(title=a["name"], nav="apps", a=a, new=False, errors={}, events=events, names=names, ha=hst,
-                kinds=kinds.choices(), kind=kinds.get(a["kind"]), gports=gameports.text(slug),
+                kinds=kinds.choices(), kind=kinds.get(a["kind"]), gports=gameports.text(slug), gfrom=", ".join(gameports.sources(slug)),
                 site_meta=sites.meta(slug), site_busy=sites.busy(slug),
                 public_addr=_public_addr(a),
                 console_only=nodes.console_role()["manage_only"],
@@ -186,7 +188,7 @@ async def save_app(request: Request, slug: str):
     if errors:
         ctx = await _app_ctx(request, slug)
         ctx["a"].update(d)          # saisie conservée, adresses comprises
-        ctx.update(errors=errors, refresh=False, reg_user=f.get("reg_user") or "", gports=f.get("gports") or "")
+        ctx.update(errors=errors, refresh=False, reg_user=f.get("reg_user") or "", gports=f.get("gports") or "", gfrom=f.get("gfrom") or "")
         return render(request, "app_form.html", 400, **ctx)
     d.pop("slug")
     rts = d.pop("routes")
@@ -196,6 +198,7 @@ async def save_app(request: Request, slug: str):
             flash(request, "Un site statique ne peut pas devenir une appli en conteneur (ni l'inverse) : crée une nouvelle appli.", "error")
             return go(f"/apps/{slug}#reglages")
         d.pop("_ports", None)
+        d.pop("_from", None)
         db.update_app(slug, name=d["name"])
         await asyncio.to_thread(P.apply_routing)
         flash(request, "Enregistré. Adresses publiques mises à jour.")
@@ -203,6 +206,14 @@ async def save_app(request: Request, slug: str):
     new_ports = d.pop("_ports") or []
     ports_changed = new_ports != gameports.of(slug)
     gameports.save(slug, new_ports)
+    from_changed = gameports.save_sources(slug, d.pop("_from") or [])
+    if from_changed or (ports_changed and gameports.sources(slug)):   # pare-feu des ports réservés à jour
+        errs = await asyncio.to_thread(segment.push_all)
+        if errs:
+            flash(request, "Pare-feu des ports publics pas mis à jour partout : " + " ; ".join(errs)[:300], "error")
+            return go(f"/apps/{slug}#reglages")
+        if from_changed and not ports_changed:
+            P.log("info", slug, "ports publics ouverts à : " + (", ".join(gameports.sources(slug)) or "tous"))
     runtime = ("port", "health_path", "mem_mb", "source", "image", "env", "db", "data_user", "kind")
     changed = [k for k in runtime if str(d[k]) != str(cur[k])] + (["ports publics"] if ports_changed else [])
     if logged and cur["state"] == "error":

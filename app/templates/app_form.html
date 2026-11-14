@@ -98,6 +98,9 @@
     <div class="field {{ 'bad' if errors.gports }}" data-kinds="game"><label for="gports">Ports publics</label>
       <input id="gports" name="gports" value="{{ gports or '' }}" spellcheck="false" placeholder="tcp 25565, udp 19132, tcp 8081:8080">
       {{ err('gports') }}<span class="hint">Ouverts sur toutes les adresses de la machine (son adresse publique). « tcp 8081:8080 » : port public 8081 vers le port 8080 du conteneur. Le tunnel Cloudflare ne transporte que le web : les joueurs se connectent à l'adresse de la machine, ou à un nom DNS qui pointe vers elle.</span></div>
+    <div class="field {{ 'bad' if errors.gfrom }}" data-kinds="game"><label for="gfrom">Ouverts seulement à</label>
+      <input id="gfrom" name="gfrom" value="{{ gfrom or '' }}" spellcheck="false" placeholder="tout le monde">
+      {{ err('gfrom') }}<span class="hint">Facultatif : adresses IP ou réseaux autorisés, séparés par des virgules (203.0.113.4, 198.51.100.0/24, 2001:db8::/48). Les autres sont bloqués par le pare-feu, en IPv4 comme en IPv6.</span></div>
     <div class="field {{ 'bad' if errors.env }}"><label for="env">Variables d'environnement</label>
       <textarea id="env" name="env" spellcheck="false" placeholder="JWT_SECRET=...&#10;PUSH_ENABLED=true">{{ a.env if new else mask_env(a.env) }}</textarea>
       {{ err('env') }}<span class="hint">Une par ligne, CLE=valeur. Les valeurs des clés finissant par SECRET, KEY, TOKEN ou PASSWORD sont masquées : laisse ••••••  pour ne pas les changer.</span></div>
@@ -155,7 +158,7 @@
     {% for n in names %}
     <div class="cert"><span class="mono">{{ n.name }}</span>{{ dnspill(n) }}</div>
     {% endfor %}
-    {% if kind.ports %}{% for p in gports.split(', ') if gports %}<div class="cert"><span class="mono">{{ public_addr }}:{{ p.split(' ')[1].split(':')[0] }}</span><span class="pill s-stopped">{{ p.split(' ')[0] | upper }} public{{ ' → conteneur ' ~ p.split(':')[1] if ':' in p }}</span></div>{% endfor %}
+    {% if kind.ports %}{% for p in gports.split(', ') if gports %}<div class="cert"><span class="mono">{{ public_addr }}:{{ p.split(' ')[1].split(':')[0] }}</span><span class="pill s-stopped">{{ p.split(' ')[0] | upper }} public{{ ' → conteneur ' ~ p.split(':')[1] if ':' in p }}</span></div>{% endfor %}{% if gfrom %}<p class="hint">Ports publics ouverts seulement à : <span class="mono">{{ gfrom }}</span></p>{% endif %}
     {% elif not kind.http %}<p class="hint" style="margin:0">Pas d'adresse publique : ce service n'est pas publié sur Internet. Sa santé, c'est son conteneur qui tourne.</p>{% endif %}
     {% for n in names if n.cf and n.cf.ok is false %}<span class="hint lv-error">{{ n.name }} : {{ n.cf.msg }}</span>{% endfor %}
     {% if names | selectattr('ok', 'false') | list %}
@@ -352,6 +355,9 @@
     <div class="field {{ 'bad' if errors.gports }}" data-kinds="game"><label for="gports">Ports publics</label>
       <input id="gports" name="gports" value="{{ gports or '' }}" spellcheck="false" placeholder="tcp 25565, udp 19132, tcp 8081:8080">
       {{ err('gports') }}<span class="hint">Ouverts sur toutes les adresses de la machine (son adresse publique). « tcp 8081:8080 » : port public 8081 vers le port 8080 du conteneur. Le tunnel Cloudflare ne transporte que le web : les joueurs se connectent à l'adresse de la machine, ou à un nom DNS qui pointe vers elle.</span></div>
+    <div class="field {{ 'bad' if errors.gfrom }}" data-kinds="game"><label for="gfrom">Ouverts seulement à</label>
+      <input id="gfrom" name="gfrom" value="{{ gfrom or '' }}" spellcheck="false" placeholder="tout le monde">
+      {{ err('gfrom') }}<span class="hint">Facultatif : adresses IP ou réseaux autorisés, séparés par des virgules (203.0.113.4, 198.51.100.0/24, 2001:db8::/48). Les autres sont bloqués par le pare-feu, en IPv4 comme en IPv6.</span></div>
     <div class="field {{ 'bad' if errors.env }}"><label for="env">Variables d'environnement</label>
       <textarea id="env" name="env" spellcheck="false" placeholder="JWT_SECRET=...&#10;PUSH_ENABLED=true">{{ a.env if new else mask_env(a.env) }}</textarea>
       {{ err('env') }}<span class="hint">Une par ligne, CLE=valeur. Les valeurs des clés finissant par SECRET, KEY, TOKEN ou PASSWORD sont masquées : laisse ••••••  pour ne pas les changer.</span></div>

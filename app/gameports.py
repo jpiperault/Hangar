@@ -2,7 +2,10 @@
 machine, donc joignables sur son adresse publique (pas par le tunnel Cloudflare, qui ne transporte que le web).
 Réglage kv « public_ports » : {slug: [{"proto": "tcp", "port": 25565, "cport": 25565}]} (port public, port du conteneur).
 Saisie : « tcp 25565 » (même port des deux côtés) ou « tcp 8081:8080 » (public:conteneur).
+Sources autorisées (kv « public_ports_from » : {slug: ["203.0.113.4/32", "2001:db8::/48"]}) : si la liste n'est pas
+vide, seuls ces réseaux atteignent les ports publics de l'appli (filtré par segment.py, sur la console et les nœuds).
 """
+import ipaddress
 import re
 
 from . import db
@@ -79,4 +82,47 @@ def expected(node):
         a = db.app(slug)
         if a and (a["node"] or "local") == (node or "local"):
             out |= {(f"app-{slug}-app-1", p["port"]) for p in ports}
+    return out
+
+
+def sources(slug):
+    return (db.kv_get("public_ports_from") or {}).get(slug) or []
+
+
+def parse_sources(raw):
+    """« 203.0.113.4, 198.51.100.0/24, 2001:db8::/48 » → liste normalisée ; ValueError si invalide."""
+    out = []
+    for item in [x.strip() for x in re.split(r"[,;\s]+", raw or "") if x.strip()]:
+        try:
+            n = ipaddress.ip_network(item, strict=False)
+        except ValueError:
+            raise ValueError(f"« {item[:60]} » : une adresse IP ou un réseau, par exemple 203.0.113.4 ou 198.51.100.0/24")
+        if n.prefixlen == 0:
+            raise ValueError("0.0.0.0/0 ou ::/0 : laisse le champ vide pour ouvrir à tous")
+        if str(n) not in out:
+            out.append(str(n))
+    if len(out) > 50:
+        raise ValueError("50 adresses ou réseaux au plus")
+    return out
+
+
+def save_sources(slug, nets):
+    allv = db.kv_get("public_ports_from") or {}
+    if (allv.get(slug) or []) == (nets or []):
+        return False
+    if nets:
+        allv[slug] = nets
+    else:
+        allv.pop(slug, None)
+    db.kv_set("public_ports_from", allv)
+    return True
+
+
+def restricted():
+    """[(appli, nœud, ports, sources)] des applis dont les ports publics sont réservés à certaines adresses."""
+    out = []
+    for slug, nets in sorted((db.kv_get("public_ports_from") or {}).items()):
+        a, ports = db.app(slug), of(slug)
+        if a and nets and ports:
+            out.append((slug, a["node"] or "local", ports, nets))
     return out

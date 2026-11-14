@@ -124,8 +124,12 @@ def validate(f, cur=None):
             e["routes"] = err
     else:   # sans page web : pas d'adresse publique
         d["routes"] = []
-    d["_ports"] = None
+    d["_ports"], d["_from"] = None, []
     if kinds.get(d["kind"]).get("ports"):
+        try:
+            d["_from"] = gameports.parse_sources(f.get("gfrom") or "")
+        except ValueError as x:
+            e["gfrom"] = str(x)
         try:
             d["_ports"] = gameports.parse(f.get("gports") or "", d["slug"], cur["node"] if cur else f.get("node"))
             if not d["_ports"]:

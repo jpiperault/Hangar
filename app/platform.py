@@ -1616,6 +1616,7 @@ def delete(slug):
             return
         services.drop(slug)
         gameports.save(slug, [])
+        restricted = gameports.save_sources(slug, [])
         limits.drop(slug)
         from . import runopts
         runopts.drop(slug)
@@ -1646,6 +1647,10 @@ def delete(slug):
         D.set_routes(slug, [])   # ses adresses partent avec elle (sinon elles bloquent le retrait d'un domaine)
         log("warn", slug, f"supprimée, fichiers et dump conservés dans {keep}")
     apply_routing()
+    if restricted:   # règles de ses ports réservés retirées (le port pourra servir à une autre appli)
+        from . import segment
+        for e in segment.push_all():
+            log("warn", slug, e)
 
 
 def logs(slug, lines=300):

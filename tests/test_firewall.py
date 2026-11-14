@@ -82,3 +82,31 @@ def test_plage_docker_hors_reseau_local():
         assert not net.overlaps(ipaddress.ip_network("192.168.0.0/16"))
         assert not net.overlaps(ipaddress.ip_network("10.88.0.0/24"))
     assert P.HOST_PORT_MIN == 18001
+
+
+@pytest.mark.parametrize("nets", [["203.0.113.4/32"], ["2001:db8::/48"], ["203.0.113.0/24", "2001:db8::/48"]])
+def test_ports_publics_reserves(nft_check, monkeypatch, nets):
+    from app import gameports
+    monkeypatch.setattr(segment, "_slugs", lambda: ["jeu"])
+    monkeypatch.setattr(segment, "_dbports", lambda: [])
+    monkeypatch.setattr(gameports, "restricted", lambda: [
+        ("jeu", "ns1", [{"proto": "tcp", "port": 25565, "cport": 25565}, {"proto": "udp", "port": 19132, "cport": 19132},
+                        {"proto": "tcp", "port": 8081, "cport": 8080}], nets)])
+    b = segment.bridge("jeu")
+    ici, ailleurs = segment.render("ns1"), segment.render("local")
+    nft_check(ici)
+    nft_check(ailleurs)
+    v4 = [n for n in nets if ":" not in n]
+    assert (f'oifname "{b}" ct state new meta nfproto ipv4 meta l4proto tcp ct original proto-dst {{ 8081, 25565 }} '
+            + (f"ip saddr != {{ {', '.join(v4)} }} " if v4 else "") + "counter drop") in ici
+    assert "chain input" in ici and "udp dport { 19132 }" in ici
+    assert "chain input" not in ailleurs and "proto-dst { 8081, 25565 }" in ailleurs   # instances ailleurs : filtrées aussi
+
+
+def test_sources_saisie():
+    from app import gameports
+    assert gameports.parse_sources("203.0.113.4, 198.51.100.7/24 2001:db8::1/48") == \
+        ["203.0.113.4/32", "198.51.100.0/24", "2001:db8::/48"]
+    for bad in ("pas-une-ip", "0.0.0.0/0", "::/0"):
+        with pytest.raises(ValueError):
+            gameports.parse_sources(bad)
