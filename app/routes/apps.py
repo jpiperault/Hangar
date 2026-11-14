@@ -5,7 +5,7 @@ import time
 
 from fastapi import APIRouter, Request
 
-from .. import affinity, hooks, runopts, segment, applogs, backup, cache, catalog, cloudflare, crashes, db, dbadmin, gameports, ha, jobs, kinds, limits, nodes, preprod, remoteconfig, services, sites, smoke, stats
+from .. import affinity, hooks, monitor, runopts, segment, applogs, backup, cache, catalog, cloudflare, crashes, db, dbadmin, gameports, ha, jobs, kinds, limits, nodes, preprod, remoteconfig, services, sites, smoke, stats
 from .. import domains as D
 from .. import platform as P
 from .common import RESERVED, SLUG, VERSION, _client_names, _public_addr, _rc_url, _redis_state, apply_registry, flash, get_app_or_404, go, node_choices, render, tpl, validate
@@ -21,7 +21,7 @@ async def home(request: Request):
     return render(request, "apps.html", title="Applications", nav="apps", apps=rows, req24=stats.requests_24h(),
                   kind_list=kinds.choices(), kind_names={k: v["short"] for k, v in kinds.KINDS.items()},
                   ports={a["slug"]: gameports.text(a["slug"]) for a in rows},
-                  refresh=any(r["status"] == "deploying" for r in rows),
+                  refresh=any(r["status"] == "deploying" for r in rows), img_updates=db.kv_get("image_updates") or {},
                   ram_total=sum(r["ram"] for r in rows))
 
 
@@ -66,8 +66,13 @@ async def catalogue_install(request: Request):
     host = D.host_of(rts[0]) if rts else ""
     pw = secrets.token_hex(16) if c["db"] else None
     a = {"slug": slug, "node": node, "db_password": pw}
-    vals = {"url": f"https://{host}/", "host": host, "db_host": "postgres", "db_port": 5432, "db_name": P.db_name(slug),
-            "db_user": P.db_name(slug), "db_password": pw or ""}
+    my_pw = None
+    if c.get("mysql"):   # base MySQL/MariaDB : son mot de passe va dans les variables de l'appli
+        services.enable_mysql(slug, c["mysql"], c.get("mysql_mem", 256))
+        my_pw = services.mysql(slug)["password"]
+    vals = {"url": f"https://{host}/", "url_noslash": f"https://{host}", "host": host, "db_host": "postgres",
+            "db_port": 5432, "db_name": P.db_name(slug), "db_user": P.db_name(slug), "db_password": pw or "",
+            "mysql_password": my_pw or ""}
     if c["db"]:
         vals["db_url"] = P.db_url({**a, "db": 1}, node)
     d = {"name": name, "kind": "tool", "pkg": "", "source": "image", "image": c["image"], "version": c["version"],
@@ -76,6 +81,8 @@ async def catalogue_install(request: Request):
          "host_port": P.next_host_port(), "state": "deploying", "desired": "running", "created_at": time.time()}
     db.insert_app(slug, d)
     D.set_routes(slug, rts)
+    if c.get("mounts"):
+        runopts.save(slug, {"mounts": c["mounts"]})
     P.log("info", slug, f"installée depuis le catalogue ({c['name']}, {c['image']}:{c['version']})")
     P.spawn(P.deploy, slug, c["version"], "create")
     flash(request, f"{c['name']} en cours d'installation sur https://{host}/. {c['after']}")
@@ -162,10 +169,12 @@ async def _app_ctx(request, slug):
                 rc_urls={"android": _rc_url(a, a["pkg"]), "ios": _rc_url(a, a["ios_bundle"])},
                 has_clients=bool(a["pkg"] or a["ios_bundle"] or a["web_client"]), client_names=_client_names(a),
                 crash_groups=crashes.groups(slug) if (a["pkg"] or a["ios_bundle"] or a["web_client"]) else [], aff=affinity.of(slug), aff_modes=affinity.MODES,
-                aff_default=affinity.DEFAULT_NAME, smoke_text=smoke.text_of(slug), smoke_last=db.kv_get(f"smoke_last:{slug}"), redis=services.redis(slug), pre=db.app(preprod.of(slug) or ""),
+                aff_default=affinity.DEFAULT_NAME, smoke_text=smoke.text_of(slug), smoke_last=db.kv_get(f"smoke_last:{slug}"), redis=services.redis(slug), mysql=services.mysql(slug), mysql_engines=services.ENGINES, img_update=monitor.image_update(slug), pre=db.app(preprod.of(slug) or ""),
                 prod=db.app(preprod.prod_of(slug) or ""),
                 redis_st=(cache.get(f"redis:{slug}", 20, _redis_state, a, wait=False) or {"state": "…"})
-                if services.redis(slug) else None)
+                if services.redis(slug) else None,
+                mysql_st=(cache.get(f"mysql:{slug}", 20, services.mysql_state, a, wait=False) or {"state": "…"})
+                if services.mysql(slug) else None)
 
 
 @router.get("/apps/{slug}")

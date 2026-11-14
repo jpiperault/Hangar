@@ -16,9 +16,9 @@ def test_modeles_valides():
              "port": c["port"], "mem_mb": c["mem"], "health_path": c["health"], "env": catalog.render_env(c["env"], {}),
              "db": 1 if c["db"] else 0, "kind": "tool"}
         assert P.check_app_entry(e) == [], (c["id"], P.check_app_entry(e))
-        assert not re.search(r"\{(?!secret)[a-z_]+\}", c["env"].replace("{url}", "").replace("{host}", "")
-                             .replace("{db_url}", "").replace("{db_host}", "").replace("{db_port}", "")
-                             .replace("{db_name}", "").replace("{db_user}", "").replace("{db_password}", "")), c["id"]
+        allowed = {"secret", "url", "url_noslash", "host", "db_url", "db_host", "db_port", "db_name", "db_user",
+                   "db_password", "mysql_password"}
+        assert set(re.findall(r"\{([a-z_]+)\}", c["env"])) <= allowed, c["id"]
     assert kinds.get("tool")["http"]
 
 

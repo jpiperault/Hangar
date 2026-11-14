@@ -25,6 +25,8 @@ async def versions_check(request: Request, slug: str):
         flash(request, f"Vérification impossible : {a['latest_error']}", "error")
     elif a["latest_version"]:
         flash(request, f"Version {a['latest_version']} disponible.")
+    elif monitor.image_update(slug):
+        flash(request, f"Une image plus récente est publiée sous le tag {a['version']} : « Mettre à jour » la déploie.")
     else:
         flash(request, f"{a['version']} est la version la plus récente.")
     return go(f"/apps/{slug}")

@@ -405,6 +405,9 @@ def instances_do(slug, action):
 def validate(a, mode, nodes_, ack):
     if mode not in ("standby", "replicas"):
         return "Mode inconnu."
+    from . import services
+    if services.mysql(a["slug"]):
+        return "Cette appli a une base MySQL/MariaDB : pas encore compatible avec la haute dispo."
     nodes_ = [n for n in dict.fromkeys(nodes_) if n and n != a["node"]]
     if not nodes_:
         return "Choisis au moins un autre nœud."

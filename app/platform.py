@@ -1048,7 +1048,7 @@ def write_compose(a, version, instance=None, role=None):
     if limits.cpus(a["slug"]):        # processeur borné : une appli qui s'emballe ne ralentit pas ses voisines
         svc["cpus"] = limits.cpus(a["slug"])
     from . import runopts
-    runopts.apply(a["slug"], svc)      # point d'entrée, commande, santé par commande
+    runopts.apply(a["slug"], svc, f"{app_dir(a['slug'])}/data")   # point d'entrée, commande, santé, dossiers
     if role is None:
         from . import ha
         role = ha.role_of(a["slug"], instance)
@@ -1056,6 +1056,8 @@ def write_compose(a, version, instance=None, role=None):
         svc["labels"]["fr.hangar.ha-role"] = role
     if a["source"] == "git":
         svc["build"] = {"context": f"{a['image']}#{version}"}
+    if "mysql" in extra:   # l'appli démarre quand la base répond (première initialisation, restauration d'un export)
+        svc["depends_on"] = {"mysql": {"condition": "service_healthy"}}
     doc = {"name": f"app-{a['slug']}", "services": {"app": svc, **extra},
            "networks": {f"hangar-{a['slug']}": {"external": True}}}
     d = app_dir(a["slug"])
@@ -1358,6 +1360,24 @@ def _health_log(name, node):
     return f"code de sortie {last.get('ExitCode')}" + (f", « {msg[-300:]} »" if msg else "")
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None
+
+
+_probe_opener = urllib.request.build_opener(_NoRedirect)
+
+
+def http_probe(url, timeout=3):
+    """Code HTTP de `url`, sans suivre les redirections (une appli qui renvoie vers https est bien en marche).
+    Lève une exception si rien ne répond."""
+    try:
+        with _probe_opener.open(url, timeout=timeout) as r:
+            return r.status
+    except urllib.error.HTTPError as e:   # 3xx (non suivie), 4xx, 5xx
+        return e.code
+
+
 def wait_health(a, timeout=90):
     from . import kinds, runopts
     if not kinds.http(a.get("kind")):
@@ -1377,12 +1397,10 @@ def wait_health(a, timeout=90):
             why = "s'est arrêté" if st["status"] in ("exited", "dead") else "redémarre en boucle"
             return False, f"le conteneur {why}.\n{container_report(name, node=node)}"
         try:
-            with urllib.request.urlopen(url, timeout=3) as r:
-                return True, f"HTTP {r.status}"
-        except urllib.error.HTTPError as e:
-            if e.code < 500:
-                return True, f"HTTP {e.code}"
-            last = f"HTTP {e.code}"
+            code = http_probe(url, timeout=3)
+            if code < 500:
+                return True, f"HTTP {code}"
+            last = f"HTTP {code}"
         except Exception as e:
             last = str(getattr(e, "reason", e))
         time.sleep(2)
@@ -1436,6 +1454,12 @@ def prepare_data(a, version):
     db.update_app(a["slug"], data_owner=f"{uid}:{gid}")
 
 
+def up_timeout(slug):
+    """Délai d'un « compose up » : long avec une base MySQL/MariaDB, que l'appli attend (rechargement d'un export)."""
+    from . import services
+    return 1800 if services.mysql(slug) else 300
+
+
 def _up(a, version):
     d, node = app_dir(a["slug"]), a.get("node")
     write_compose(a, version)
@@ -1463,7 +1487,7 @@ def _up(a, version):
                     f"téléchargement de {image_ref(a, version)} impossible : " + tail(out)
             log("warn", a["slug"], f"registre injoignable pour {image_ref(a, version)}, image déjà présente utilisée")
     prepare_data(a, version)
-    rc, out = dk(node, "compose", "up", "-d", "--remove-orphans", "--no-build", cwd=d, timeout=300)
+    rc, out = dk(node, "compose", "up", "-d", "--remove-orphans", "--no-build", cwd=d, timeout=up_timeout(a["slug"]))
     if rc:
         return False, "démarrage impossible : " + tail(out)
     ok, detail = wait_health(a)
@@ -1502,6 +1526,9 @@ def deploy(slug, version, kind, previous=None):
             prev = old if version != old else a["prev_version"]
             db.update_app(slug, state="ok", desired="running", version=version, prev_version=prev, deployed_at=time.time())
             log("ok", slug, f"{version} en ligne ({detail})")
+            upd = db.kv_get("image_updates") or {}
+            if upd.pop(slug, None) is not None:   # image du tag tirée et en ligne : plus rien en attente
+                db.kv_set("image_updates", upd)
             if a.get("latest_version"):
                 from . import registry
                 if registry.newest([a["latest_version"]], version) is None:   # plus rien de plus récent
@@ -1618,6 +1645,10 @@ def delete(slug):
             log("info", slug, f"site supprimé ; ses versions sont gardées dans {keep}")
             apply_routing()
             return
+        try:   # MySQL / MariaDB : export à jour gardé avec les fichiers de l'appli supprimée
+            services.fresh_dump(a, quiet=True)
+        except RuntimeError as e:
+            log("warn", slug, str(e))
         services.drop(slug)
         gameports.save(slug, [])
         restricted = gameports.save_sources(slug, [])

@@ -103,6 +103,9 @@ def create(slug, version=None):
     r = services.redis(slug)
     if r:
         services.enable_redis(pre, r["mem"])   # son propre Redis (mot de passe à lui), données copiées avec data/
+    my = services.mysql(slug)
+    if my:   # sa propre base MySQL/MariaDB, remplie par l'export de la production (copié avec data/)
+        services.enable_mysql(pre, my["engine"], my["mem"])
     m = links()
     m[pre] = slug
     db.kv_set("preprod", m)
@@ -133,6 +136,8 @@ def refresh(pre):
     started = False
     try:
         parts = ["data"]
+        from . import services
+        services.fresh_dump(prod)   # MySQL / MariaDB de la production : export à jour, copié avec data/
         if prod["db"] and a["db"]:
             _dump(slug, f"{work}/db.dump")
             parts.append("db")

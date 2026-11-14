@@ -16,7 +16,7 @@
       <span style="display:flex;align-items:center;gap:10px"><span class="catlogo" style="background:{{ c.color }}">{{ c.name[0] }}</span><b>{{ c.name }}</b>
         {% if c.image in used %}<span class="pill s-running" style="margin-left:auto">installée</span>{% endif %}</span>
       <small>{{ c.desc }}</small>
-      <small class="hint">{{ 'PostgreSQL' if c.db else 'sans base' }} · {{ c.mem }} Mo</small>
+      <small class="hint">{{ 'PostgreSQL' if c.db else ({'mariadb': 'MariaDB', 'mysql': 'MySQL'}[c.mysql] if c.mysql else 'sans base') }} · {{ c.mem + (c.mysql_mem or 0) }} Mo</small>
     </a>
     {% endfor %}
   </div>
@@ -36,8 +36,8 @@
       <select id="cnode" name="node">{% for n in node_choices %}<option value="{{ n.id }}" {{ 'selected' if (fm.node or best) == n.id }}>{{ n.name }} · {{ '%.0f' % n.free }} Mo libres{{ ' (conseillé)' if n.id == best and node_choices | length > 1 }}</option>{% endfor %}</select></div>
     <dl class="facts">
       <dt>Image</dt><dd class="mono" style="word-break:break-all">{{ cur.image }}:{{ cur.version }}</dd>
-      <dt>Base</dt><dd>{{ 'PostgreSQL dédiée' if cur.db else 'aucune (données dans /data)' }}</dd>
-      <dt>Mémoire</dt><dd>{{ cur.mem }} Mo</dd>
+      <dt>Base</dt><dd>{{ 'PostgreSQL dédiée' if cur.db else ({'mariadb': 'MariaDB 11.4 dédiée', 'mysql': 'MySQL 8.4 dédiée'}[cur.mysql] if cur.mysql else 'aucune (données dans /data)') }}</dd>
+      <dt>Mémoire</dt><dd>{{ cur.mem }} Mo{% if cur.mysql %} + {{ cur.mysql_mem }} Mo pour la base{% endif %}</dd>
       <dt>Secrets</dt><dd>générés à l'installation, rangés dans ses variables</dd>
     </dl>
     <p class="hint" style="margin:0"><strong>Ensuite :</strong> {{ cur.after }}</p>

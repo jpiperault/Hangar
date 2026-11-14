@@ -390,6 +390,9 @@ def drive_usage():
 # ---------------------------------------------------------------- sauvegarde
 
 def _dump_apps():
+    from . import services
+    for a in db.apps():   # MySQL / MariaDB : export cohérent dans data/, qui part avec lui
+        services.fresh_dump(a)
     os.makedirs(f"{STAGING}/db", mode=0o700, exist_ok=True)
     keep = set()
     for a in db.apps():
@@ -474,7 +477,7 @@ def _send(d, trigger):
                           # fichiers bruts de PostgreSQL et registre en cours d'écriture : incohérents
                           # si copiés à chaud ; remplacés par les exports et la copie du registre
                           "--exclude", f"{P.PLATFORM}/postgres", "--exclude", f"{P.PLATFORM}/platform.db*",
-                          "--exclude", "/srv/apps/*/pgdata",
+                          "--exclude", "/srv/apps/*/pgdata", "--exclude", "/srv/apps/*/mysql",
                           STAGING, P.APPS_DIR, P.PLATFORM, timeout=6 * 3600, d=d)
     summary = next((json.loads(l) for l in out.splitlines()[::-1] if l.startswith("{") and '"summary"' in l), None)
     if rc not in (0, 3) or not summary:   # 3 : certains fichiers illisibles, instantané quand même créé
@@ -682,6 +685,9 @@ def _apply(a, src_data, src_dump, parts, label):
         raise RuntimeError("cette sauvegarde ne contient pas de base pour cette appli")
     os.makedirs(safe, mode=0o700, exist_ok=True)
     maint = P.set_maintenance(slug, True, auto=True, msg="Restauration des données en cours.")
+    from . import services
+    if "data" in parts:
+        services.fresh_dump(a, quiet=True)   # la copie de sécurité garde la base MySQL/MariaDB d'avant
     P.dk(node, "compose", "stop", cwd=d, timeout=120)
     try:
         if "db" in parts:
@@ -697,6 +703,7 @@ def _apply(a, src_data, src_dump, parts, label):
                 P.pull_dir(node, f"{d}/data", f"{safe}/data")
                 os.makedirs(f"{safe}/data", exist_ok=True)   # data/ vide sur le nœud : la copie de sécurité en a un aussi
                 P.push_dir(node, src_data, f"{d}/data")
+            services.reset_mysql(a)   # MySQL / MariaDB repart de l'export contenu dans le data/ restauré
     except BaseException:
         if maint:   # échec : l'appli repart sur son état d'avant, la page de maintenance s'en va
             maint = False
@@ -706,7 +713,7 @@ def _apply(a, src_data, src_dump, parts, label):
     finally:
         if a["desired"] == "running":
             P.prepare_data(a, a["version"])
-            P.dk(node, "compose", "up", "-d", "--no-build", cwd=d, timeout=300)
+            P.dk(node, "compose", "up", "-d", "--no-build", cwd=d, timeout=P.up_timeout(slug))
     ok, detail = P.wait_health(a) if a["desired"] == "running" else (True, "appli arrêtée, non redémarrée")
     from . import dbadmin
     dbadmin.forget(slug)
@@ -770,6 +777,8 @@ def restore_point(slug, note=""):
     try:
         if a["db"]:
             P.dump_db(slug, f"{d}/base-avant.sql.gz")
+        from . import services
+        services.fresh_dump(a)   # MySQL / MariaDB : son export à jour part avec data/
         if P.is_local(a["node"]):
             src = f"{P.app_dir(slug)}/data"
             if os.path.isdir(src):
@@ -913,6 +922,18 @@ def archive_path(name):
     return p if os.path.exists(p) else None
 
 
+def _services_of(slug):
+    """Services de l'appli pour le manifeste (sans mots de passe : de nouveaux sont créés à la restauration)."""
+    from . import services
+    out = {}
+    if services.redis(slug):
+        out["redis"] = {"mem": services.redis(slug)["mem"]}
+    if services.mysql(slug):
+        m = services.mysql(slug)
+        out["mysql"] = {"engine": m["engine"], "mem": m["mem"]}
+    return out
+
+
 def create_archive(trigger="manuelle"):
     """Crée l'archive (unité transitoire `hangar archive`). Partage le verrou des sauvegardes (exports communs)."""
     import tarfile
@@ -935,7 +956,7 @@ def create_archive(trigger="manuelle"):
         manifest = {"format": 2, "created": time.time(), "hangar": head.strip(),
                     "settings": {"domains": D.export(), "security": db.kv_get("security")},
                     "apps": [{"slug": a["slug"], "node": a["node"], "routes": D.export_routes(a["slug"]),
-                              **{k: a[k] for k in APP_KEYS}} for a in apps]}
+                              "services": _services_of(a["slug"]), **{k: a[k] for k in APP_KEYS}} for a in apps]}
         fdp = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fdp, "wb") as raw, tarfile.open(fileobj=raw, mode="w:gz", compresslevel=6) as tar:
             data = json.dumps(manifest, ensure_ascii=False, indent=1).encode()
@@ -1092,6 +1113,12 @@ def _recreate_app(e, src_data, src_dump, parts, name):
     data.update(host_port=P.next_host_port(), state="deploying", desired="running", created_at=time.time(), node=node)
     db.insert_app(slug, data)
     D.set_routes(slug, rts)
+    from . import services
+    sv = e.get("services") or {}
+    if sv.get("redis"):
+        services.enable_redis(slug, sv["redis"]["mem"])
+    if sv.get("mysql"):   # repart de l'export contenu dans data/
+        services.enable_mysql(slug, sv["mysql"]["engine"], sv["mysql"]["mem"])
     a = db.app(slug)
     P.log("info", slug, f"appli recréée depuis l'archive {name}" + ("" if P.is_local(node) else f" sur le nœud {node}"))
     os.makedirs(P.app_dir(slug), mode=0o700, exist_ok=True)

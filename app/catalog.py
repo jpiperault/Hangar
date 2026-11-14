@@ -5,15 +5,37 @@ Variables : les valeurs entre accolades sont remplies à l'installation :
   {url}         adresse publique (https://…/)        {host}  son nom (sans https)
   {db_url}      DATABASE_URL (libpq)                  {db_host} {db_port} {db_name} {db_user} {db_password}
   {secret}      chaîne aléatoire (64 caractères hexadécimaux), une nouvelle à chaque occurrence
-Seules les applis qui tiennent dans le modèle de Hangar y sont : un conteneur, données dans /data, PostgreSQL ou rien.
+  {mysql_password}  mot de passe de la base MySQL/MariaDB de l'appli (hôte mysql, base et utilisateur app)
+Seules les applis qui tiennent dans le modèle de Hangar y sont : un conteneur, données dans /data (ou dans des
+dossiers de data/ montés ailleurs : « mounts »), PostgreSQL, MySQL/MariaDB (« mysql » : moteur) ou rien.
 """
 import re
 import secrets
 
-CATS = {"stats": "Statistiques et surveillance", "secu": "Sécurité", "dev": "Développement",
-        "auto": "Automatisation", "doc": "Documentation", "tools": "Outils"}
+CATS = {"site": "Sites et blogs", "stats": "Statistiques et surveillance", "secu": "Sécurité",
+        "dev": "Développement", "auto": "Automatisation", "doc": "Documentation", "tools": "Outils"}
 
 CATALOG = [
+    {"id": "wordpress", "name": "WordPress", "cat": "site", "color": "#21759b",
+     "desc": "Le moteur de sites et de blogs le plus répandu, avec ses thèmes et extensions.",
+     "image": "wordpress", "version": "6-apache", "port": 80, "health": "/wp-includes/images/blank.gif", "mem": 256,
+     "db": False, "mysql": "mariadb", "mysql_mem": 256, "mounts": "www:/var/www/html",
+     "env": ("WORDPRESS_DB_HOST=mysql\nWORDPRESS_DB_NAME=app\nWORDPRESS_DB_USER=app\n"
+             "WORDPRESS_DB_PASSWORD={mysql_password}\n"
+             "WORDPRESS_CONFIG_EXTRA=define('WP_HOME', '{url_noslash}'); define('WP_SITEURL', '{url_noslash}');"),
+     "after": "L'assistant d'installation s'ouvre à la première visite : choisis-y le compte administrateur. "
+              "Extensions et médias sont gardés dans data/www.",
+     "site": "https://wordpress.org"},
+    {"id": "ghost", "name": "Ghost", "cat": "site", "color": "#15171a",
+     "desc": "Blog et lettre d'information modernes, avec abonnements.",
+     "image": "ghost", "version": "6-alpine", "port": 2368, "health": "/favicon.ico", "mem": 512,
+     "db": False, "mysql": "mysql", "mysql_mem": 512, "mounts": "content:/var/lib/ghost/content",
+     "env": ("url={url_noslash}\ndatabase__client=mysql\ndatabase__connection__host=mysql\n"
+             "database__connection__user=app\ndatabase__connection__password={mysql_password}\n"
+             "database__connection__database=app"),
+     "after": "Crée le compte propriétaire sur /ghost à la première visite. Pour les invitations et les lettres, "
+              "règle l'envoi d'e-mails (variables mail__…, voir la documentation de Ghost).",
+     "site": "https://ghost.org"},
     {"id": "umami", "name": "Umami", "cat": "stats", "color": "#1f2a44",
      "desc": "Statistiques de visite simples, sans cookies, respectueuses de la vie privée.",
      "image": "ghcr.io/umami-software/umami", "version": "postgresql-latest", "port": 3000,

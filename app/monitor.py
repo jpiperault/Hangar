@@ -6,9 +6,8 @@
 """
 import shutil
 import threading
+import json
 import time
-import urllib.error
-import urllib.request
 
 from . import alerts, applogs, backup, cache, db, limits, ha, jobs, nodes, registry, report, security, stats, statuspage, system
 from . import platform as P
@@ -35,10 +34,8 @@ def _probe(a):
         return True, ""
     url = f"http://{P.app_host(a)}:{a['host_port']}{a['health_path']}"
     try:
-        with urllib.request.urlopen(url, timeout=5):
-            return True, ""
-    except urllib.error.HTTPError as e:
-        return e.code < 500, f"HTTP {e.code}"
+        code = P.http_probe(url, timeout=5)
+        return code < 500, ("" if code < 500 else f"HTTP {code}")
     except Exception as e:
         return False, str(getattr(e, "reason", e))
 
@@ -207,11 +204,58 @@ def check_usage(now=None):
                             priority=4, tags=["warning"], key=f"restart:{slug}", cooldown=3600)
 
 
+def _running_digests(a):
+    """Empreintes (RepoDigests) de l'image du conteneur en marche ; None si inconnu."""
+    rc, img = P.dk(a["node"], "inspect", "-f", "{{.Image}}", f"app-{a['slug']}-app-1", timeout=20)
+    if rc or not img.strip():
+        return None
+    rc, out = P.dk(a["node"], "image", "inspect", "-f", "{{json .RepoDigests}}", img.strip(), timeout=20)
+    try:
+        return {d.split("@", 1)[1] for d in json.loads(out) if "@" in d} if rc == 0 else None
+    except ValueError:
+        return None
+
+
+def check_image_update(a):
+    """Tag qui bouge (latest, 6-apache…) : une image plus récente est-elle publiée sous ce tag ? Note le résultat
+    dans kv « image_updates » ({slug: {"digest", "ts"}}). Retourne True si une nouvelle image vient d'être vue."""
+    remote = registry.digest(a["image"], a["version"])
+    local = _running_digests(a)
+    upd = db.kv_get("image_updates") or {}
+    before = upd.get(a["slug"])
+    if remote and local and remote not in local:
+        if (before or {}).get("digest") == remote:
+            return False
+        upd[a["slug"]] = {"digest": remote, "ts": time.time()}
+        db.kv_set("image_updates", upd)
+        P.log("info", a["slug"], f"nouvelle image publiée sous le tag {a['version']}")
+        alerts.send(f"{a['name']} : nouvelle image {a['version']}",
+                    "Une image plus récente est publiée sous ce tag. À déployer depuis la console (Mettre à jour).",
+                    priority=2, tags=["package"])
+        return True
+    if before and local is not None:
+        upd.pop(a["slug"], None)
+        db.kv_set("image_updates", upd)
+    return False
+
+
+def image_update(slug):
+    return (db.kv_get("image_updates") or {}).get(slug)
+
+
 def check_versions(slug=None):
     """Cherche une version plus récente pour les applis en image. Retourne le nombre de nouveautés."""
     found = 0
     for a in ([db.app(slug)] if slug else db.apps()):
         if not a or a["source"] != "image":
+            continue
+        if not registry.semver(a["version"]):   # tag qui bouge : on compare les empreintes de l'image
+            try:
+                found += check_image_update(a)
+                err = None
+            except Exception as e:
+                err = f"vérification de l'image impossible : {str(e)[:250]}"
+            db.update_app(a["slug"], latest_version=None, latest_checked=time.time(), latest_error=err)
             continue
         try:
             latest = registry.newest(registry.tags(a["image"]), a["version"])

@@ -46,6 +46,7 @@ FastAPI + Jinja, sans build front. Elle écoute en HTTPS (certificat auto-signé
 - **Préproduction** d'une appli : copie `<appli>-preprod` avec la base et `data/` de la production, `HANGAR_ENVIRONMENT=preprod`, recopie des données et déploiement en production d'un clic.
 - **Tâches planifiées** par appli : commande lancée dans son conteneur toutes les N minutes, chaque jour ou chaque semaine, résultat gardé, alerte en cas d'échec.
 - **Redis (Valkey)** à la demande pour une appli : sur son réseau cloisonné, persistant dans `data/`, `REDIS_URL` injectée.
+- **MySQL 8.4 ou MariaDB 11.4** à la demande : base propre à l'appli, exportée de façon cohérente avant chaque sauvegarde, archive ou déplacement, et rechargée depuis cet export après une restauration (`MYSQL_HOST`, `MYSQL_URL`…).
 - **Logs** consultables (période, recherche, erreurs seulement) et **alertes sur motif** (`Exception`, `OutOfMemory`…).
 - **Rapport hebdomadaire** sur ntfy le lundi : disponibilité, trafic, sauvegardes, mises à jour, machines, incidents.
 - **Vérifications après déploiement** : adresses qui doivent répondre comme prévu (code, texte, `{version}`) pour garder une nouvelle version.
@@ -54,7 +55,7 @@ FastAPI + Jinja, sans build front. Elle écoute en HTTPS (certificat auto-signé
 - **Comptes en lecture seule** et **journal des actions** (qui a fait quoi, quand, depuis où).
 - **Applis Android** : configuration à distance (version minimale ou conseillée, interrupteurs de fonctionnalités, annonce) servie à côté de `apps.json`, et **rapports de plantage** reçus par Hangar, regroupés, avec alerte au premier plantage d'un groupe et en cas de régression.
 - **Types d'applis** : site statique (sans conteneur : zip ou dépôt Git construit dans un conteneur jetable, 10 versions, retour arrière instantané), appli web, API, backend d'appli mobile, service sans page web (jugé sain tant que son conteneur tourne), serveur de jeu avec ports TCP/UDP publics, outil auto-hébergé.
-- **Catalogue d'applis prêtes** (Umami, Uptime Kuma, Vaultwarden, Gitea, n8n, Wiki.js, IT-Tools, Excalidraw) : image, port, santé, base, secrets et variables remplis à l'installation.
+- **Catalogue d'applis prêtes** (WordPress, Ghost, Umami, Uptime Kuma, Vaultwarden, Gitea, n8n, Wiki.js, IT-Tools, Excalidraw) : image, port, santé, base, secrets et variables remplis à l'installation. Pour un tag qui bouge (`latest`…), Hangar signale quand une image plus récente est publiée.
 - **Clients** d'une appli : Android, iOS et navigateur (script servi sur l'adresse de l'appli), avec configuration à distance et rapports de plantage.
 - **Page de statut publique** (`status.<domaine>`) : état et disponibilité sur 30 jours des applis choisies.
 - Liste des noms publics (sans joker), avec leur état DNS et Cloudflare. Remplacement du jeton du tunnel, avec retour à l'ancien si cloudflared ne se connecte pas.

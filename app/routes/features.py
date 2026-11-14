@@ -71,6 +71,34 @@ async def app_redis(request: Request, slug: str):
     return go(f"/apps/{slug}#redis")
 
 
+@router.post("/apps/{slug}/services/mysql")
+async def app_mysql(request: Request, slug: str):
+    a = get_app_or_404(slug)
+    f = await request.form()
+    if a["state"] == "deploying":
+        flash(request, "Une opération est en cours sur cette appli : réessaie dans un instant.", "error")
+        return go(f"/apps/{slug}#mysql")
+    try:
+        if request.query_params.get("off") == "1":
+            await asyncio.to_thread(services.fresh_dump, a, True)
+            services.disable_mysql(slug)
+            msg = ("Base MySQL/MariaDB retirée : l'appli est redéployée sans elle. Son dernier export reste dans "
+                   "data/.hangar-mysql.")
+        else:
+            had = services.mysql(slug)
+            services.enable_mysql(slug, f.get("engine") or "mariadb", f.get("mem") or 256)
+            msg = ("Mémoire de la base changée : l'appli est redéployée." if had else
+                   f"{services.ENGINES[services.mysql(slug)['engine']]['name']} ajoutée : l'appli est redéployée avec "
+                   "MYSQL_HOST, MYSQL_DATABASE, MYSQL_USER, MYSQL_PASSWORD et MYSQL_URL.")
+    except (ValueError, RuntimeError) as e:
+        flash(request, str(e), "error")
+        return go(f"/apps/{slug}#mysql")
+    P.log("info", slug, msg.split(" :")[0])
+    P.spawn(P.deploy, slug, a["version"], "config", dict(a))
+    flash(request, msg)
+    return go(f"/apps/{slug}#mysql")
+
+
 @router.post("/apps/{slug}/preprod")
 async def app_preprod(request: Request, slug: str):
     a = db.app(slug)

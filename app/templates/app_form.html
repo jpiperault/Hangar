@@ -183,8 +183,12 @@
     <dl class="facts">
       <dt>Déployée</dt><dd>{{ a.version }}</dd>
       <dt>Précédente</dt><dd>{{ a.prev_version or '—' }}</dd>
-      {% if a.source == 'image' %}<dt>Registre</dt><dd>{% if a.latest_version %}<span class="pill s-deploying">{{ a.latest_version }} disponible</span>{% elif a.latest_error %}<span class="lv-warn">{{ a.latest_error }}</span>{% elif a.latest_checked %}à jour{% else %}pas encore vérifié{% endif %}</dd>{% endif %}
+      {% if a.source == 'image' %}<dt>Registre</dt><dd>{% if a.latest_version %}<span class="pill s-deploying">{{ a.latest_version }} disponible</span>{% elif img_update %}<span class="pill s-deploying">nouvelle image {{ a.version }} ({{ img_update.ts | ago }})</span>{% elif a.latest_error %}<span class="lv-warn">{{ a.latest_error }}</span>{% elif a.latest_checked %}à jour{% else %}pas encore vérifié{% endif %}</dd>{% endif %}
     </dl>
+    {% if img_update and not a.latest_version and a.status != 'deploying' %}
+    <form method="post" action="/apps/{{ a.slug }}/version"><input type="hidden" name="version" value="{{ a.version }}">
+      <button class="btn primary sm">Mettre à jour ({{ a.version }})</button></form>
+    {% endif %}
     {% if a.latest_version and a.status != 'deploying' %}
     <form method="post" action="/apps/{{ a.slug }}/version"><input type="hidden" name="version" value="{{ a.latest_version }}">
       <button class="btn primary sm">Déployer {{ a.latest_version }}</button></form>
@@ -392,6 +396,8 @@
     <div class="field"><label for="rcmd">Commande</label><input id="rcmd" name="command" value="{{ run.command or '' }}" spellcheck="false" placeholder="celle de l'image, par exemple : python worker.py --queue emails"></div>
     <div class="field"><label for="rhealth">Commande de santé</label><input id="rhealth" name="health_cmd" value="{{ run.health_cmd or '' }}" spellcheck="false" placeholder="par exemple : redis-cli ping, pg_isready, test -f /tmp/vivant">
       <span class="hint">Lancée dans le conteneur toutes les 15 s ; code de sortie 0 = en bonne santé, 3 échecs de suite = malade.{% if not kind.http %} Le déploiement attend qu'elle réussisse (sinon la version précédente revient) et la supervision t'alerte si elle échoue.{% else %} La santé de l'appli reste vérifiée par <code>{{ a.health_path }}</code> ; celle-ci s'ajoute dans l'état Docker.{% endif %}</span></div>
+    <div class="field"><label for="rmounts">Dossiers persistants ailleurs que /data</label><input id="rmounts" name="mounts" value="{{ run.mounts or '' }}" spellcheck="false" placeholder="par exemple : www:/var/www/html">
+      <span class="hint">« www:/var/www/html » garde /var/www/html dans data/www : sauvegardé, restauré et déplacé avec data/. Pour les images qui ne rangent pas leurs données dans /data.</span></div>
     <div><button class="btn sm primary" {{ 'disabled' if a.status == 'deploying' }}>Enregistrer et redéployer</button></div>
   </form>
   {% endif %}
@@ -450,6 +456,28 @@
     <p class="hint" style="margin:0">Cache, files d'attente, sessions, classements, état des parties… Un Redis (Valkey) propre à l'appli, sur son réseau cloisonné, persistant et sauvegardé. L'appli reçoit <code>REDIS_URL</code> et est redéployée.{% if ha %} Haute dispo : {{ "un seul Redis sur le nœud principal, partagé par les instances par le réseau privé" if ha.h.mode == 'replicas' else "il suit l'appli, sa copie part vers le secours avec data/" }}.{% endif %}</p>
     <input type="hidden" name="on" value="1">
     <div class="inlinefield"><input name="mem" type="number" min="32" max="4096" value="128" aria-label="Mémoire de Redis en Mo"><span class="hint">Mo</span><button class="btn sm primary" {{ 'disabled' if a.status == 'deploying' }}>Ajouter Redis</button></div>
+    {% endif %}
+  </form>
+  <form class="panel" id="mysql" method="post" action="/apps/{{ a.slug }}/services/mysql" style="display:flex;flex-direction:column;gap:10px">
+    {% set ms = mysql_st or {} %}
+    <h2 style="margin:0">MySQL / MariaDB {% if mysql %}<span class="pill {{ 's-running' if ms.state == 'running' and ms.health != 'unhealthy' else ('s-deploying' if ms.state in ('…', 'absent') else 's-error') }}">{{ {'running': 'en marche' if ms.health != 'starting' else 'démarrage', 'absent': 'pas encore créée', '…': '…'}.get(ms.state, ms.state) }}</span>{% endif %}</h2>
+    {% if mysql %}
+    <dl class="facts">
+      <dt>Moteur</dt><dd>{{ mysql_engines[mysql.engine].name }}</dd>
+      <dt>Connexion</dt><dd>hôte <code>mysql</code>, port 3306, base et utilisateur <code>app</code> ; variables <code>MYSQL_HOST</code>, <code>MYSQL_DATABASE</code>, <code>MYSQL_USER</code>, <code>MYSQL_PASSWORD</code>, <code>MYSQL_URL</code></dd>
+      <dt>Mémoire</dt><dd>{{ mysql.mem }} Mo</dd>
+      <dt>Dernier export</dt><dd>{% if ms.dump_ts %}{{ ms.dump_ts | ago }} · {{ ms.dump_size | size }}{% else %}aucun pour l'instant (le premier part avec la prochaine sauvegarde){% endif %}</dd>
+    </dl>
+    <p class="hint" style="margin:0">Ses fichiers ne sont jamais copiés pendant qu'elle tourne : un export cohérent (<code>data/.hangar-mysql/dump.sql.gz</code>) est fait avant chaque sauvegarde, archive, point de restauration ou déplacement. Après une restauration, la base repart de cet export. Joignable seulement par l'appli. Pas de haute dispo pour l'instant.</p>
+    <input type="hidden" name="engine" value="{{ mysql.engine }}">
+    <div class="inlinefield"><input name="mem" type="number" min="128" max="8192" value="{{ mysql.mem }}" aria-label="Mémoire de la base en Mo"><span class="hint">Mo</span><button class="btn sm" {{ 'disabled' if a.status == 'deploying' }}>Changer la mémoire</button></div>
+    <div><button class="btn sm link" formaction="/apps/{{ a.slug }}/services/mysql?off=1" data-confirm="Retirer la base ? L'appli est redéployée sans elle ; son dernier export reste dans data/.hangar-mysql.">Retirer la base</button></div>
+    {% elif ha %}
+    <p class="hint" style="margin:0">Pas encore compatible avec la haute dispo.</p>
+    {% else %}
+    <p class="hint" style="margin:0">Pour les applis qui veulent MySQL ou MariaDB plutôt que PostgreSQL (WordPress, Matomo, Ghost…). Une base propre à l'appli, sur son réseau cloisonné, exportée et sauvegardée chaque nuit. L'appli reçoit <code>MYSQL_HOST</code>, <code>MYSQL_DATABASE</code>, <code>MYSQL_USER</code>, <code>MYSQL_PASSWORD</code> et <code>MYSQL_URL</code>, et est redéployée.</p>
+    <div class="inlinefield"><select name="engine" aria-label="Moteur">{% for k, e in mysql_engines.items() %}<option value="{{ k }}">{{ e.name }}</option>{% endfor %}</select>
+      <input name="mem" type="number" min="128" max="8192" value="256" aria-label="Mémoire de la base en Mo"><span class="hint">Mo</span><button class="btn sm primary" {{ 'disabled' if a.status == 'deploying' }}>Ajouter la base</button></div>
     {% endif %}
   </form>
 </div>

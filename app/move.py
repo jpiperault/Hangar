@@ -80,6 +80,8 @@ def move(slug, target):
             P.pull_dir(src, f"{d}/data", f"{stage}/data")
             # 2. coupure
             P.write_compose(a, a["version"])
+            from . import services
+            services.fresh_dump(a)   # MySQL / MariaDB : voyage en export, repart de lui sur la cible
             P.dk(src, "compose", "stop", cwd=d, timeout=120)
             stopped = True
             t_cut = time.time()
@@ -92,8 +94,9 @@ def move(slug, target):
                 P.ensure_db(b)
                 _restore(slug, target, f"{stage}/base.dump")
             P.push_dir(target, f"{stage}/data", f"{d}/data")
+            services.reset_mysql(b, target)
             P.prepare_data(b, a["version"])
-            rc, out = P.dk(target, "compose", "up", "-d", "--remove-orphans", "--no-build", cwd=d, timeout=300)
+            rc, out = P.dk(target, "compose", "up", "-d", "--remove-orphans", "--no-build", cwd=d, timeout=P.up_timeout(slug))
             if rc:
                 raise RuntimeError("démarrage sur la cible impossible : " + P.tail(out, 2))
             ok, detail = P.wait_health(b)
@@ -122,7 +125,7 @@ def move(slug, target):
             db.update_app(slug, node=src)
             P.write_compose(a, a["version"])
             if stopped or a["desired"] == "running":
-                P.dk(src, "compose", "up", "-d", "--no-build", cwd=d, timeout=300)
+                P.dk(src, "compose", "up", "-d", "--no-build", cwd=d, timeout=P.up_timeout(slug))
             ok, detail = P.wait_health(a) if a["desired"] == "running" else (True, "")
             db.update_app(slug, state="ok" if ok else "error")
             P.log("warn" if ok else "error", slug, f"toujours sur {src}" + ("" if ok else f", mais ne répond pas : {detail}"))
