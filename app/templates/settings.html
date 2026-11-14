@@ -32,7 +32,7 @@
     <h2>Comptes</h2>
     {% for u in users %}
     <details class="cert" style="display:block">
-      <summary style="display:flex;justify-content:space-between;align-items:center;cursor:pointer"><span><span class="mono">{{ u.username }}{{ ' (toi)' if u.username == user }}</span> <span class="pill {{ 's-stopped' if u.role == 'lecture' else 's-running' }}">{{ 'lecture seule' if u.role == 'lecture' else 'administrateur' }}</span></span><span class="btn sm">Gérer</span></summary>
+      <summary style="display:flex;justify-content:space-between;align-items:center;cursor:pointer"><span><span class="mono">{{ u.username }}{{ ' (toi)' if u.username == user }}</span> <span class="pill {{ 's-stopped' if u.role == 'lecture' else 's-running' }}">{{ 'lecture seule' if u.role == 'lecture' else 'administrateur' }}</span>{% if u.totp %} <span class="pill s-running" title="Double authentification activée">2FA</span>{% endif %}</span><span class="btn sm">Gérer</span></summary>
       {% if u.username != user %}<form method="post" action="/users/{{ u.username }}/role" class="inlinefield" style="margin-top:10px">
         <select name="role" aria-label="Droits de {{ u.username }}"><option value="admin" {{ 'selected' if u.role != 'lecture' }}>Administrateur</option><option value="lecture" {{ 'selected' if u.role == 'lecture' }}>Lecture seule</option></select>
         <button class="btn sm">Changer les droits</button></form>{% endif %}
@@ -47,6 +47,7 @@
           {% if u.username != user and users | length > 1 %}<button class="btn sm danger" formaction="/users/{{ u.username }}/remove" formnovalidate data-confirm="Supprimer le compte {{ u.username }} ?">Supprimer le compte</button>{% endif %}
         </div>
       </form>
+      {% if u.username != user and u.totp %}<form method="post" action="/users/{{ u.username }}/2fa/disable" style="margin-top:8px" data-confirm="Retirer la double authentification de {{ u.username }} ? Il se connectera avec son mot de passe seul, puis pourra la remettre."><button class="btn sm">Retirer sa double authentification (téléphone perdu)</button></form>{% endif %}
     </details>
     {% endfor %}
     <form method="post" action="/users/add" autocomplete="off" style="display:flex;flex-direction:column;gap:10px;margin-top:6px">
@@ -62,6 +63,35 @@
       <span class="hint">10 caractères au moins. <strong>Lecture seule</strong> : voit tout (applis, supervision, journal, logs), ne change rien, ne télécharge ni archive ni export de base, et ne voit pas le mot de passe des sauvegardes ; il peut changer son propre mot de passe. En secours, <code>hangar passwd</code> en root remet le mot de passe d'admin.</span>
       <div><button class="btn sm">Créer le compte</button></div>
     </form>
+  </section>
+
+  <section class="panel" id="2fa" style="display:flex;flex-direction:column;gap:10px">
+    {% set me2fa = (users | selectattr('username', 'equalto', user) | first or {}).totp %}
+    <h2 style="margin:0">Ma double authentification {% if me2fa %}<span class="pill s-running">activée</span>{% else %}<span class="pill s-stopped">désactivée</span>{% endif %}</h2>
+    {% if totp_codes %}
+    <div class="flash ok" role="status"><strong>Codes de secours</strong> (un seul usage chacun, à garder hors du téléphone : gestionnaire de mots de passe, papier) :
+      <pre class="mono" style="margin:6px 0 0">{% for c in totp_codes %}{{ c }}{{ '   ' if loop.index is odd else '
+' }}{% endfor %}</pre></div>
+    {% endif %}
+    {% if totp_setup %}
+    <form class="ro-ok" method="post" action="/users/{{ user }}/2fa/confirm" autocomplete="off" style="display:flex;flex-direction:column;gap:10px">
+      <p class="hint" style="margin:0">1. Scanne ce QR code avec ton appli d'authentification (Aegis, Google Authenticator, 1Password, Bitwarden…).</p>
+      {% if totp_setup.qr %}<div style="background:#fff;padding:6px;border-radius:8px;width:max-content">{{ totp_setup.qr | safe }}</div>{% endif %}
+      <p class="hint" style="margin:0">Ou saisis la clé à la main : <code class="mono">{{ totp_setup.secret }}</code></p>
+      <div class="field"><label for="tcode">2. Tape le code à 6 chiffres affiché</label><input id="tcode" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required style="max-width:9em"></div>
+      <div class="acts" style="justify-content:flex-start;gap:8px"><button class="btn sm primary">Activer</button><button class="btn sm" formaction="/users/{{ user }}/2fa/cancel" formnovalidate>Annuler</button></div>
+    </form>
+    {% elif me2fa %}
+    <p class="hint" style="margin:0">À chaque connexion, le code de ton appli d'authentification est demandé après le mot de passe. Codes de secours restants : <strong>{{ totp_left }}</strong>.</p>
+    <form class="ro-ok" method="post" action="/users/{{ user }}/2fa/recovery" autocomplete="off">
+      <div class="inlinefield"><input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="12" placeholder="code actuel" aria-label="Code actuel" required style="max-width:10em">
+        <button class="btn sm">Nouveaux codes de secours</button>
+        <button class="btn sm danger" formaction="/users/{{ user }}/2fa/disable" data-confirm="Retirer la double authentification de ton compte ?">Désactiver</button></div>
+    </form>
+    {% else %}
+    <p class="hint" style="margin:0">Un code à usage unique, donné par une appli sur ton téléphone, en plus du mot de passe : un mot de passe volé ne suffit plus. Chaque compte choisit pour lui-même.</p>
+    <form class="ro-ok" method="post" action="/users/{{ user }}/2fa/start"><button class="btn sm primary">Mettre en place</button></form>
+    {% endif %}
   </section>
 
   <section class="panel" id="audit">

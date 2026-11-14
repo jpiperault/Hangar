@@ -6,7 +6,7 @@ from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from fastapi import APIRouter, Request
 from fastapi.responses import PlainTextResponse
 
-from .. import access, db
+from .. import access, db, totp
 from .. import platform as P
 from .common import flash, go, ph, render
 
@@ -19,7 +19,9 @@ router = APIRouter()
 async def settings_page(request: Request):
     return render(request, "settings.html", title="Réglages", nav="settings", acc=access.current(),
                   ips=access.local_ips(), pending=access.pending(), client=request.client.host,
-                  users=db.q("SELECT username, role FROM users ORDER BY username"), registries=P.registry_logins(),
+                  users=db.q("SELECT username, role, totp_secret IS NOT NULL AS totp FROM users ORDER BY username"),
+                  registries=P.registry_logins(), totp_setup=_setup_ctx(request), totp_codes=request.session.pop("totp_codes", None),
+                  totp_left=totp.recovery_left(request.session.get("user") or ""),
                   audit=db.q("SELECT * FROM audit ORDER BY id DESC LIMIT 15"),
                   aform=request.session.pop("aform", None), aerr=request.session.pop("aerr", None))
 
@@ -141,6 +143,69 @@ async def users_remove(request: Request, name: str):
         P.log("info", "console", f"compte {name} supprimé par {me}")
         flash(request, f"Compte {name} supprimé, ses sessions sont fermées.")
     return go("/settings#comptes")
+
+
+def _setup_ctx(request):
+    """Mise en place en cours de la double authentification (secret gardé dans la session signée)."""
+    sec = request.session.get("totp_setup")
+    if not sec:
+        return None
+    u = request.session.get("user")
+    link = totp.uri(sec, u, db.settings().get("home") or "")
+    return {"secret": " ".join(sec[i:i + 4] for i in range(0, len(sec), 4)), "qr": totp.qr_svg(link), "uri": link}
+
+
+@router.post("/users/{name}/2fa/{op}")
+async def users_2fa(request: Request, name: str, op: str):
+    me = request.session.get("user")
+    back = go("/settings#2fa")
+    if not db.one("SELECT 1 FROM users WHERE username = ?", (name,)):
+        return go("/settings")
+    f = await request.form()
+    if name != me:   # un administrateur ne peut que retirer celle d'un autre compte (téléphone perdu)
+        if op == "disable" and getattr(request.state, "role", "admin") == "admin":
+            totp.disable(name)
+            db.x("DELETE FROM sessions WHERE username = ?", (name,))
+            P.log("warn", "console", f"double authentification de {name} retirée par {me}")
+            flash(request, f"Double authentification de {name} retirée : il se reconnectera avec son mot de passe seul.")
+        return go("/settings#comptes")
+    if op == "start":
+        request.session["totp_setup"] = totp.new_secret()
+        return back
+    if op == "cancel":
+        request.session.pop("totp_setup", None)
+        return back
+    if op == "confirm":
+        sec = request.session.get("totp_setup")
+        if not sec or totp.check(sec, f.get("code")) is None:
+            flash(request, "Code incorrect : vérifie l'heure du téléphone, puis tape le code affiché maintenant.", "error")
+            return back
+        codes, hashes = totp.new_recovery()
+        totp.enable(me, sec, hashes)
+        request.session.pop("totp_setup", None)
+        request.session["totp_codes"] = codes
+        db.x("DELETE FROM sessions WHERE username = ? AND id != ?", (me, request.session.get("sid") or ""))
+        P.log("ok", "console", f"double authentification activée pour {me}")
+        flash(request, "Double authentification activée. Range les codes de secours ci-dessous : ils ne s'affichent qu'une fois.")
+        return back
+    if op in ("disable", "recovery"):
+        if not totp.enabled(me) or not await asyncio.to_thread(totp.verify_login, me, f.get("code") or ""):
+            flash(request, "Code incorrect.", "error")
+            return back
+        if op == "disable":
+            totp.disable(me)
+            P.log("warn", "console", f"double authentification retirée par {me}")
+            flash(request, "Double authentification retirée.")
+        else:
+            codes, hashes = totp.new_recovery()
+            u = totp.user(me)
+            totp.enable(me, u["totp_secret"], hashes)
+            db.x("UPDATE users SET totp_last = ? WHERE username = ?", (u["totp_last"], me))
+            request.session["totp_codes"] = codes
+            P.log("info", "console", f"nouveaux codes de secours pour {me}")
+            flash(request, "Nouveaux codes de secours : les anciens ne marchent plus.")
+        return back
+    return back
 
 
 def _last_admin(name):

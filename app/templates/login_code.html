@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connexion · Hangar</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="login">
+  <form class="panel" method="post" action="/login/code" autocomplete="off">
+    <div class="brand" style="padding:0"><b></b>Hangar</div>
+    <p class="hint">Double authentification pour <strong>{{ pending_user }}</strong></p>
+    {% if flash %}<div class="flash {{ flash.kind }}" role="status">{{ flash.msg }}</div>{% endif %}
+    <div class="field"><label for="code">Code de l'appli d'authentification</label>
+      <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="12" required autofocus spellcheck="false">
+      <span class="hint">6 chiffres, ou un code de secours (xxxx-xxxx).</span></div>
+    <button class="btn primary" type="submit">Valider</button>
+    <a class="hint" href="/login">Changer de compte</a>
+  </form>
+</div>
+</body>
+</html>

@@ -171,6 +171,10 @@ def init():
         ucols = {r["name"] for r in _c.execute("PRAGMA table_info(users)").fetchall()}
         if "role" not in ucols:   # admin : tous les droits ; lecture : voit tout (sauf secrets), ne change rien
             _c.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'")
+        if "totp_secret" not in ucols:   # double authentification (totp.py), choisie par chaque compte
+            _c.execute("ALTER TABLE users ADD COLUMN totp_secret TEXT")
+            _c.execute("ALTER TABLE users ADD COLUMN totp_recovery TEXT")
+            _c.execute("ALTER TABLE users ADD COLUMN totp_last INTEGER")
         if "latest_version" not in cols:  # dernière version trouvée sur le registre
             _c.execute("ALTER TABLE apps ADD COLUMN latest_version TEXT")
             _c.execute("ALTER TABLE apps ADD COLUMN latest_checked REAL")

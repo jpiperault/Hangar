@@ -6,7 +6,7 @@ import time
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from fastapi import APIRouter, Request
 
-from .. import alerts, db
+from .. import alerts, db, totp
 from .. import platform as P
 from .common import SESSION_IDLE, flash, go, ph, render
 
@@ -79,8 +79,63 @@ async def login(request: Request):
         flash(request, "Identifiant ou mot de passe incorrect.", "error")
         return go("/login")
     _fails.pop(("ip", ip), None)
+    if user["totp_secret"]:   # double authentification : le code avant d'ouvrir la session
+        request.session.clear()
+        request.session["pending"] = {"u": user["username"], "ts": now}
+        return go("/login/code")
     _new_session(request, user["username"])
     P.log("info", "console", f"connexion de {user['username']} depuis {ip}")
+    return go("/")
+
+
+PENDING_MAX = 5 * 60   # le code doit suivre le mot de passe dans les 5 minutes
+
+
+def _pending(request):
+    p = request.session.get("pending") or {}
+    if not p.get("u") or time.time() - p.get("ts", 0) > PENDING_MAX:
+        request.session.pop("pending", None)
+        return None
+    return p["u"]
+
+
+@router.get("/login/code")
+async def login_code_page(request: Request):
+    name = _pending(request)
+    if not name:
+        return go("/login")
+    return render(request, "login_code.html", title="Connexion", pending_user=name)
+
+
+@router.post("/login/code")
+async def login_code(request: Request):
+    name = _pending(request)
+    if not name:
+        flash(request, "Délai dépassé : reconnecte-toi.", "error")
+        return go("/login")
+    ip = request.client.host if request.client else "?"
+    now = time.time()
+    by_ip, by_user = _recent(("ip", ip), now), _recent(("user", name.lower()), now)
+    if len(by_ip) >= LOGIN_MAX_IP or len(by_user) >= LOGIN_MAX_IP:
+        request.session.clear()
+        flash(request, "Trop d'essais. Réessaie dans 15 min.", "error")
+        return go("/login")
+    how = await asyncio.to_thread(totp.verify_login, name, (await request.form()).get("code") or "")
+    if not how:
+        for k in (("ip", ip), ("user", name.lower())):
+            _fails.setdefault(k, []).append(now)
+        P.log("warn", "console", f"code de double authentification refusé pour « {name} » depuis {ip}")
+        await asyncio.sleep(1)
+        flash(request, "Code incorrect ou déjà utilisé.", "error")
+        return go("/login/code")
+    _fails.pop(("ip", ip), None)
+    _new_session(request, name)
+    left = totp.recovery_left(name)
+    P.log("info", "console", f"connexion de {name} depuis {ip} (double authentification"
+          + (f", code de secours : {left} restant(s))" if how == "secours" else ")"))
+    if how == "secours":
+        flash(request, f"Connecté avec un code de secours : il en reste {left}. Pense à en générer de nouveaux "
+              "(Accès et comptes).", "error" if left < 3 else "ok")
     return go("/")
 
 

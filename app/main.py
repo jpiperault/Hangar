@@ -49,7 +49,7 @@ def _readonly_refused(request, user):
     p = request.url.path
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return "Compte en lecture seule : téléchargement réservé aux administrateurs." if p.endswith(AUDIT_GET) else None
-    if p in READONLY_OK or p == f"/users/{user}/password":
+    if p in READONLY_OK or p == f"/users/{user}/password" or p.startswith(f"/users/{user}/2fa/"):
         return None
     return "Compte en lecture seule : cette action est réservée aux administrateurs."
 

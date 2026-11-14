@@ -52,7 +52,7 @@ FastAPI + Jinja, sans build front. Elle écoute en HTTPS (certificat auto-signé
 - **Vérifications après déploiement** : adresses qui doivent répondre comme prévu (code, texte, `{version}`) pour garder une nouvelle version.
 - **Processeur max** par appli, et alertes quand une appli frôle sa mémoire, reste bridée ou redémarre toute seule.
 - **Affinité par partie** en instances multiples : même partie (en-tête, paramètre, cookie ou adresse) → même instance.
-- **Comptes en lecture seule** et **journal des actions** (qui a fait quoi, quand, depuis où).
+- **Comptes en lecture seule**, **double authentification** (code à usage unique, choisie par chaque compte, codes de secours) et **journal des actions** (qui a fait quoi, quand, depuis où).
 - **Applis Android** : configuration à distance (version minimale ou conseillée, interrupteurs de fonctionnalités, annonce) servie à côté de `apps.json`, et **rapports de plantage** reçus par Hangar, regroupés, avec alerte au premier plantage d'un groupe et en cas de régression.
 - **Types d'applis** : site statique (sans conteneur : zip ou dépôt Git construit dans un conteneur jetable, 10 versions, retour arrière instantané), appli web, API, backend d'appli mobile, service sans page web (jugé sain tant que son conteneur tourne), serveur de jeu avec ports TCP/UDP publics, outil auto-hébergé.
 - **Catalogue d'applis prêtes** (WordPress, Ghost, Umami, Uptime Kuma, Vaultwarden, Gitea, n8n, Wiki.js, IT-Tools, Excalidraw) : image, port, santé, base, secrets et variables remplis à l'installation. Pour un tag qui bouge (`latest`…), Hangar signale quand une image plus récente est publiée.
