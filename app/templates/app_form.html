@@ -135,7 +135,7 @@
   <a href="#reglages" data-tab="reglages">Réglages</a>
   <a href="#acces" data-tab="acces">Accès et publication{% if prot.users or prot.ips %} <span class="hint">🔒</span>{% endif %}</a>
   <a href="#base" data-tab="base">Base et services</a>
-  <a href="#hautedispo" data-tab="hautedispo">Haute dispo et nœud</a>
+  <a href="#hautedispo" data-tab="hautedispo">HA et nœud</a>
   <a href="#taches" data-tab="taches">Tâches{% if jobs %} <span class="hint">{{ jobs | length }}</span>{% endif %}</a>
   {% if has_clients %}<a href="#mobile" data-tab="mobile">Clients{% if crash_groups | selectattr('status', 'equalto', 'open') | list %} <span class="pill s-error">{{ crash_groups | selectattr('status', 'equalto', 'open') | list | length }}</span>{% endif %}</a>{% endif %}
   <a href="#avance" data-tab="avance">Avancé</a>

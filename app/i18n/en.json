@@ -599,6 +599,7 @@
 "Google renvoie ensuite vers une adresse": "Google then redirects to an address",
 "Gravité": "Severity",
 "Gérer": "Manage",
+"HA et nœud": "HA and node",
 "HTML, ou un front React/Vue déjà construit. Servi par Caddy, sans conteneur.": "HTML, or an already built React/Vue frontend. Served by Caddy, no container.",
 "Hangar construit, sur la machine de l'appli, une image tirée de celle en ligne avec les paquets du système (Alpine, Debian, Ubuntu, Fedora) mis à jour, puis la déploie. Si l'appli ne répond plus, l'image d'avant revient toute seule. Ça ne touche pas aux dépendances de l'appli elle-même (voir plus bas). La correction vaut pour la version en ligne : une nouvelle version repart de son image d'origine.": "On the app's machine, Hangar builds an image derived from the online one with its system packages (Alpine, Debian, Ubuntu, Fedora) updated, then deploys it. If the app stops responding, the previous image comes back automatically. The app's own dependencies are not touched (see below). The fix applies to the online version: a new version starts again from its original image.",
 "Hangar crée, met à jour et retire lui-même les noms publics : règles du tunnel et enregistrements DNS. Il ne touche qu'à ses propres noms ; un nom déjà utilisé ailleurs n'est jamais écrasé.": "Hangar creates, updates and removes public names itself: tunnel rules and DNS records. It only touches its own names; a name already used elsewhere is never overwritten.",
