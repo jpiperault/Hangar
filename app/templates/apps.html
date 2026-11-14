@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block main %}
 <div class="bar"><div><h1>Applications</h1><span class="hint">Sites, API, applis web, jeux, outils et services.</span></div>
-  <div class="acts"><a class="btn" href="/catalogue">Installer une appli prête</a><a class="btn primary" href="/apps/new">Nouvelle application</a></div></div>
+  <div class="acts admin-only"><a class="btn" href="/catalogue">Installer une appli prête</a><a class="btn primary" href="/apps/new">Nouvelle application</a></div></div>
 <div class="kpis">
   <span class="kpi"><strong>{{ apps | selectattr('status', 'equalto', 'running') | list | length }}</strong> en ligne</span>
   <span class="kpi"><strong>{{ apps | selectattr('status', 'equalto', 'error') | list | length }}</strong> en erreur</span>

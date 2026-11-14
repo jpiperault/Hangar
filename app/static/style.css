@@ -264,3 +264,8 @@ html.navigating::before{content:"";position:fixed;top:0;left:0;height:3px;width:
 .catlogo{width:28px;height:28px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:.85rem;flex:none}
 
 .dropzone{border:2px dashed var(--line);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:8px;background:var(--sunken)}
+
+/* compte en lecture seule : aucune action proposée (le serveur les refuse de toute façon) */
+.ro form[method=post]:not(.ro-ok) button:not([type=button]), .ro form[method=post]:not(.ro-ok) [type=submit], .ro .admin-only,
+.ro a[href$="/download"], .ro a[href$="/db/export"] { display: none !important; }
+.ro form[method=post]:not(.ro-ok) :disabled { opacity: .75; cursor: default; }

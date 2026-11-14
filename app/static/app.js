@@ -16,11 +16,20 @@
     if (e.target.hasAttribute && e.target.hasAttribute('data-autosubmit') && e.target.form) e.target.form.submit();
   });
 
+  // compte en lecture seule : les champs des formulaires d'action sont figés (les boutons sont cachés par le CSS)
+  function readOnly(root) {
+    if (!document.body.classList.contains('ro')) return;
+    root.querySelectorAll('form[method=post]:not(.ro-ok)').forEach(function (f) {
+      f.querySelectorAll('input:not([type=hidden]), select, textarea').forEach(function (el) { el.disabled = true; });
+    });
+  }
+  readOnly(document);
+
   // blocs chargés après la page (lectures lentes sur un nœud) : data-lazy="/chemin/du/fragment"
   document.querySelectorAll('[data-lazy]').forEach(function (el) {
     fetch(el.getAttribute('data-lazy'), {credentials: 'same-origin'}).then(function (r) {
       return r.ok ? r.text() : Promise.reject(r.status);
-    }).then(function (h) { el.innerHTML = h; el.removeAttribute('data-lazy'); })
+    }).then(function (h) { el.innerHTML = h; el.removeAttribute('data-lazy'); readOnly(el); })
       .catch(function () { el.innerHTML = '<p class="hint">Lecture impossible pour l\'instant.</p>'; });
   });
 

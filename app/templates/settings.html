@@ -36,7 +36,7 @@
       {% if u.username != user %}<form method="post" action="/users/{{ u.username }}/role" class="inlinefield" style="margin-top:10px">
         <select name="role" aria-label="Droits de {{ u.username }}"><option value="admin" {{ 'selected' if u.role != 'lecture' }}>Administrateur</option><option value="lecture" {{ 'selected' if u.role == 'lecture' }}>Lecture seule</option></select>
         <button class="btn sm">Changer les droits</button></form>{% endif %}
-      <form method="post" action="/users/{{ u.username }}/password" autocomplete="off" style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
+      <form {% if u.username == user %}class="ro-ok" {% endif %}method="post" action="/users/{{ u.username }}/password" autocomplete="off" style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
         {% if u.username == user %}<div class="field"><label for="cur-{{ loop.index }}">Mot de passe actuel</label><input id="cur-{{ loop.index }}" name="current" type="password" autocomplete="current-password" required></div>{% endif %}
         <div class="row2">
           <div class="field"><label for="pw-{{ loop.index }}">Nouveau mot de passe</label><input id="pw-{{ loop.index }}" name="password" type="password" minlength="10" autocomplete="new-password" required></div>
