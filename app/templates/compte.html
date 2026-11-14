@@ -6,7 +6,7 @@
   <section class="panel">
     <h2>{{ user }}</h2>
     <p class="hint">Applis auxquelles ce compte a accès :</p>
-    <ul>{% for slug, lv in my_scopes.items() %}<li><a href="/apps/{{ slug }}">{{ names.get(slug, slug) }}</a> <span class="hint">· {{ levels[lv] }}</span></li>{% else %}<li class="hint">aucune pour l'instant : demande-les à un administrateur.</li>{% endfor %}</ul>
+    <ul>{% for slug, lv in my_scopes.items() %}<li><a href="/apps/{{ slug }}">{{ names.get(slug, slug) }}</a> <span class="hint">· {{ levels[lv] | tr }}</span></li>{% else %}<li class="hint">aucune pour l'instant : demande-les à un administrateur.</li>{% endfor %}</ul>
   </section>
   <form class="panel ro-ok" method="post" action="/users/{{ user }}/password" autocomplete="off" style="display:flex;flex-direction:column;gap:10px">
     <h2 style="margin:0">Mot de passe</h2>
@@ -20,6 +20,7 @@
 </div>
 <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
   {% include "_2fa_panel.html" %}
+  {% include "_lang_panel.html" %}
 </div>
 </div>
 {% endblock %}

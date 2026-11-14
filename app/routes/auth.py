@@ -85,7 +85,15 @@ async def login(request: Request):
         return go("/login/code")
     _new_session(request, user["username"])
     P.log("info", "console", f"connexion de {user['username']} depuis {ip}")
-    return go("/")
+    return _with_lang(go("/"), user["username"])
+
+
+def _with_lang(resp, username):
+    """La page de connexion parlera la langue du dernier compte connecté depuis ce navigateur."""
+    u = db.one("SELECT lang FROM users WHERE username = ?", (username,))
+    resp.set_cookie("hangar_lang", (u and u["lang"]) or "fr", max_age=365 * 86400, secure=True, httponly=True,
+                    samesite="strict")
+    return resp
 
 
 PENDING_MAX = 5 * 60   # le code doit suivre le mot de passe dans les 5 minutes
@@ -136,7 +144,7 @@ async def login_code(request: Request):
     if how == "secours":
         flash(request, f"Connecté avec un code de secours : il en reste {left}. Pense à en générer de nouveaux "
               "(Accès et comptes).", "error" if left < 3 else "ok")
-    return go("/")
+    return _with_lang(go("/"), name)
 
 
 @router.post("/logout")

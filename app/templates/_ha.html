@@ -35,7 +35,7 @@
       <span class="flabel">Affinité par partie</span>
       <span class="hint">Pour un jeu : toutes les requêtes d'une même partie (ou d'un même joueur) vont sur la même instance. Sinon, chaque requête part sur l'instance suivante.</span>
       <div class="row2">
-        <div class="field"><label for="affm">Choisir l'instance d'après</label><select id="affm" name="mode">{% for k, v in aff_modes.items() %}<option value="{{ k }}" {{ 'selected' if k == aff.mode }}>{{ v }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="affm">Choisir l'instance d'après</label><select id="affm" name="mode">{% for k, v in aff_modes.items() %}<option value="{{ k }}" {{ 'selected' if k == aff.mode }}>{{ v | tr }}</option>{% endfor %}</select></div>
         <div class="field" id="affn"><label for="affname">Nom</label><input id="affname" name="name" value="{{ aff.name }}" spellcheck="false" placeholder="X-Match-Id"></div>
       </div>
       <span class="hint" id="affh"></span>

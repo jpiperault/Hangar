@@ -12,7 +12,7 @@
 <section class="svcgrid" aria-label="Services">
   {% for x in svc %}
   <div class="svc"><span class="dotst {{ 'ok' if x.ok else ('off' if x.ok is none else 'bad') }}" aria-hidden="true"></span>
-    <span><span class="nm">{{ x.name }}</span><span class="hint">{{ '✓ ' if x.ok else ('' if x.ok is none else '✕ ') }}{{ x.state }}</span></span></div>
+    <span><span class="nm">{{ x.name | tr }}</span><span class="hint">{{ '✓ ' if x.ok else ('' if x.ok is none else '✕ ') }}{{ x.state | tr }}</span></span></div>
   {% endfor %}
 </section>
 

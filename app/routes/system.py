@@ -6,7 +6,7 @@ from fastapi import APIRouter, Request
 
 from .. import alerts, cache, db, images, report, runopts, services, system
 from .. import platform as P
-from .common import _int, flash, go, render, tpl
+from .common import _int, flash, go, render, tpl_for
 
 router = APIRouter()
 
@@ -121,7 +121,7 @@ async def system_images_run(request: Request):
 @router.get("/system/images/preview")
 async def system_images_preview(request: Request):
     pv = await asyncio.to_thread(images.preview)
-    return tpl.TemplateResponse(request, "_images_preview.html", {"pv": pv})
+    return tpl_for(request).TemplateResponse(request, "_images_preview.html", {"pv": pv})
 
 
 @router.post("/system/mail-relay")

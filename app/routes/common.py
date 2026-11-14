@@ -6,44 +6,79 @@ import time
 
 from argon2 import PasswordHasher
 from fastapi.responses import RedirectResponse
+import jinja2
 from fastapi.templating import Jinja2Templates
 
-from .. import access, backup, db, gameports, kinds, nodes, security, services, stats
+from .. import access, backup, db, gameports, i18n, kinds, nodes, security, services, stats
 from .. import domains as D
 from .. import platform as P
 
 
 HERE = os.path.dirname(os.path.dirname(__file__))   # dossier app/
 ph = PasswordHasher()
-tpl = Jinja2Templates(directory=f"{HERE}/templates")
-tpl.env.globals.update(LABELS=P.LABELS, mask_env=P.mask_env)
-tpl.env.globals["asset_v"] = int(max(os.path.getmtime(f"{HERE}/static/{f}") for f in ("app.js", "style.css")))
-tpl.env.filters["when"] = lambda ts: time.strftime("%d/%m %H:%M", time.localtime(ts)) if ts else "—"
-tpl.env.filters["clock"] = lambda ts: time.strftime("%d/%m %H:%M:%S", time.localtime(ts))
-tpl.env.filters["size"] = backup.human
-tpl.env.filters["ago"] = lambda ts: _ago(ts)
-tpl.env.filters["dur"] = lambda sec: _dur(sec)
+class _Loader(jinja2.FileSystemLoader):
+    """Gabarits français tels quels ; dans une autre langue, traduits à leur chargement (i18n.translate_source)."""
+
+    def __init__(self, path, lang):
+        super().__init__(path)
+        self.lang = lang
+
+    def get_source(self, environment, template):
+        src, filename, uptodate = super().get_source(environment, template)
+        return i18n.translate_source(src, self.lang), filename, uptodate
 
 
-def _dur(sec):
+def _size(n, lang="fr"):
+    s = backup.human(n)
+    if lang == "fr":
+        return s
+    return s.replace(",", ".").replace(" Ko", " KB").replace(" Mo", " MB").replace(" Go", " GB").replace(" To", " TB") \
+        .replace(" o", " B")
+
+
+def _make(lang):
+    t = Jinja2Templates(env=jinja2.Environment(loader=_Loader(f"{HERE}/templates", lang), autoescape=True))
+    t.env.globals.update(LABELS={k: i18n.tr(v, lang) for k, v in P.LABELS.items()}, mask_env=P.mask_env, lang=lang,
+                         LANGS=i18n.LANGS)
+    t.env.globals["asset_v"] = int(max(os.path.getmtime(f"{HERE}/static/{f}") for f in ("app.js", "style.css")))
+    t.env.filters["when"] = lambda ts: time.strftime("%d/%m %H:%M" if lang == "fr" else "%m/%d %H:%M", time.localtime(ts)) if ts else "—"
+    t.env.filters["clock"] = lambda ts: time.strftime("%d/%m %H:%M:%S" if lang == "fr" else "%m/%d %H:%M:%S", time.localtime(ts))
+    t.env.filters["size"] = lambda n: _size(n, lang)
+    t.env.filters["ago"] = lambda ts: _ago(ts, lang)
+    t.env.filters["dur"] = lambda sec: _dur(sec, lang)
+    t.env.filters["tr"] = lambda v: i18n.tr(v, lang)
+    return t
+
+
+TPLS = {lang: _make(lang) for lang in i18n.LANGS}
+tpl = TPLS["fr"]
+
+
+def tpl_for(request):
+    return TPLS.get(getattr(request.state, "lang", "fr"), tpl)
+
+
+def _dur(sec, lang="fr"):
     if sec is None:
         return "—"
     sec = int(sec)
     d, h, m = sec // 86400, sec % 86400 // 3600, sec % 3600 // 60
-    return f"{d} j {h} h" if d else f"{h} h {m:02d}" if h else f"{m} min"
+    day = "j" if lang == "fr" else "d"
+    return f"{d} {day} {h} h" if d else f"{h} h {m:02d}" if h else f"{m} min"
 
 
-def _ago(ts):
+def _ago(ts, lang="fr"):
+    en = lang != "fr"
     if not ts:
-        return "jamais"
+        return "never" if en else "jamais"
     d = time.time() - ts
     if d < 90:
-        return "à l'instant"
+        return "just now" if en else "à l'instant"
     if d < 3600:
-        return f"il y a {d // 60:.0f} min"
+        return f"{d // 60:.0f} min ago" if en else f"il y a {d // 60:.0f} min"
     if d < 86400 * 2:
-        return f"il y a {d // 3600:.0f} h"
-    return f"il y a {d // 86400:.0f} j"
+        return f"{d // 3600:.0f} h ago" if en else f"il y a {d // 3600:.0f} h"
+    return f"{d // 86400:.0f} days ago" if en else f"il y a {d // 86400:.0f} j"
 
 
 # ---------------------------------------------------------------- aides
@@ -76,7 +111,9 @@ def render(request, name, status_code=200, **ctx):
     ctx.setdefault("title", "Hangar")
     ctx.update(flash=request.session.pop("flash", None), s=db.settings(), csp_nonce=getattr(request.state, "nonce", ""),
                user=request.session.get("user"), role=getattr(request.state, "role", "admin"), app_count=_app_count(request), sec_alerts=_sec_alerts())
-    return tpl.TemplateResponse(request, name, ctx, status_code=status_code)
+    lang = getattr(request.state, "lang", "fr")
+    ctx["title"] = i18n.tr(ctx["title"], lang)
+    return tpl_for(request).TemplateResponse(request, name, ctx, status_code=status_code)
 
 
 def get_app_or_404(slug):

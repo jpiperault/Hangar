@@ -8,7 +8,7 @@ from fastapi import APIRouter, Request
 from .. import affinity, hooks, monitor, onboarding, perms, runopts, segment, applogs, backup, cache, catalog, cloudflare, crashes, db, dbadmin, gameports, ha, jobs, kinds, limits, nodes, preprod, remoteconfig, services, sites, smoke, stats
 from .. import domains as D
 from .. import platform as P
-from .common import RESERVED, SLUG, VERSION, _client_names, _public_addr, _rc_url, _redis_state, apply_registry, flash, get_app_or_404, go, node_choices, render, tpl, validate
+from .common import RESERVED, SLUG, VERSION, _client_names, _public_addr, _rc_url, _redis_state, apply_registry, flash, get_app_or_404, go, node_choices, render, tpl_for, validate
 
 router = APIRouter()
 
@@ -382,7 +382,7 @@ async def app_db_panel(request: Request, slug: str):
     """Bloc Base de données, chargé après la page quand le cache est vide (lecture sur le nœud)."""
     a = get_app_or_404(slug)
     dbi = await asyncio.to_thread(dbadmin.cached_info, slug, True) if a["db"] else None
-    return tpl.TemplateResponse(request, "_dbpanel.html", {"a": a, "dbi": dbi})
+    return tpl_for(request).TemplateResponse(request, "_dbpanel.html", {"a": a, "dbi": dbi})
 
 
 @router.get("/apps/{slug}/logs")

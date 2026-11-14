@@ -11,7 +11,7 @@ from fastapi.responses import PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import access, cache, crashes, db, monitor, perms
+from . import access, cache, crashes, db, i18n, monitor, perms
 from . import platform as P
 from .routes.common import HERE, SESSION_IDLE
 
@@ -53,7 +53,7 @@ def _readonly_refused(request, user):
     p = request.url.path
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return "Compte en lecture seule : téléchargement réservé aux administrateurs." if p.endswith(AUDIT_GET) else None
-    if p in READONLY_OK or p == f"/users/{user}/password" or p.startswith(f"/users/{user}/2fa/"):
+    if p in READONLY_OK or p in (f"/users/{user}/password", f"/users/{user}/lang") or p.startswith(f"/users/{user}/2fa/"):
         return None
     return "Compte en lecture seule : cette action est réservée aux administrateurs."
 
@@ -85,9 +85,11 @@ async def guard(request: Request, call_next):
                 not sfs and origin not in (None, "null", f"{request.url.scheme}://{request.url.netloc}")):
             return PlainTextResponse("Requête d'un autre site refusée.", status_code=403)
     request.state.nonce = secrets.token_urlsafe(16)
+    lang = request.cookies.get("hangar_lang")   # page de connexion : la langue du dernier compte connecté ici
+    request.state.lang = lang if lang in i18n.LANGS else i18n.DEFAULT
     if not request.url.path.startswith(("/login", "/static")):
         u, sid = request.session.get("user"), request.session.get("sid")
-        row = db.one("SELECT s.seen, u.role FROM sessions s JOIN users u ON u.username = s.username "
+        row = db.one("SELECT s.seen, u.role, u.lang FROM sessions s JOIN users u ON u.username = s.username "
                      "WHERE s.id = ? AND s.username = ?", (sid or "", u or "")) if u and sid else None
         now = time.time()
         if not row or now - row["seen"] > SESSION_IDLE:   # déconnectée, compte supprimé ou inactive trop longtemps
@@ -98,6 +100,7 @@ async def guard(request: Request, call_next):
         if now - row["seen"] > 60:
             db.x("UPDATE sessions SET seen = ? WHERE id = ?", (now, sid))
         request.state.role = row["role"]
+        request.state.lang = row["lang"] if row["lang"] in i18n.LANGS else i18n.DEFAULT
         refused = _readonly_refused(request, u)
         if refused:
             _audit(request, u, ip, 403, "refusé : compte en lecture seule")

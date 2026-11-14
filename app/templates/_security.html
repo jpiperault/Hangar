@@ -7,7 +7,7 @@
 {% macro statetable(cs, n, banned) %}
 <div class="sectable">
 {% for c in cs %}
-  <div class="secrow">{{ badge(c.level) }}<span class="sl">{{ c.label }}</span><span class="hint">{{ c.msg }}</span>
+  <div class="secrow">{{ badge(c.level) }}<span class="sl">{{ c.label | tr }}</span><span class="hint">{{ c.msg }}</span>
     <span class="sa">
     {%- if c.key == 'f2b' and banned -%}
       <details class="bans"><summary class="btn sm">Bannies ({{ banned | length }})</summary>
@@ -22,7 +22,7 @@
 {% endmacro %}
 
 {% macro summary(rows) %}
-<dl class="secsum">{% for k, v in rows %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl>
+<dl class="secsum">{% for k, v in rows %}<dt>{{ k | tr }}</dt><dd>{{ v | tr }}</dd>{% endfor %}</dl>
 {% endmacro %}
 
 {% macro secform(f, err, prefix, port_hint) %}{% set err = err or {} %}

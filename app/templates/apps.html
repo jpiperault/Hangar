@@ -6,7 +6,7 @@
 <section class="panel admin-only" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
   <div class="bar" style="margin:0"><h2 style="margin:0">Bien démarrer : {{ todo | length }} étape{{ 's' if todo | length > 1 }} essentielle{{ 's' if todo | length > 1 }}</h2>
     <a class="btn sm link" href="/bienvenue">Toute la liste</a></div>
-  {% for x in todo %}<a class="cert" href="{{ x.href }}" style="text-decoration:none;color:inherit"><span><strong>{{ x.title }}</strong> <span class="hint">· {{ x.text }}</span></span><span class="btn sm primary">Régler</span></a>{% endfor %}
+  {% for x in todo %}<a class="cert" href="{{ x.href }}" style="text-decoration:none;color:inherit"><span><strong>{{ x.title | tr }}</strong> <span class="hint">· {{ x.text | tr }}</span></span><span class="btn sm primary">Régler</span></a>{% endfor %}
 </section>
 {% endif %}
 <div class="kpis">
@@ -19,7 +19,7 @@
 {% if present | length > 1 %}
 <div class="chips seg" role="radiogroup" aria-label="Filtrer par type">
   <label><input type="radio" name="kf" value="" checked><span>Toutes <span class="hint">{{ apps | length }}</span></span></label>
-  {% for k in kind_list if k.id in present %}<label><input type="radio" name="kf" value="{{ k.id }}"><span>{{ k.short }} <span class="hint">{{ apps | selectattr('kind', 'equalto', k.id) | list | length }}</span></span></label>{% endfor %}
+  {% for k in kind_list if k.id in present %}<label><input type="radio" name="kf" value="{{ k.id }}"><span>{{ k.short | tr }} <span class="hint">{{ apps | selectattr('kind', 'equalto', k.id) | list | length }}</span></span></label>{% endfor %}
 </div>
 {% endif %}
 <div class="tablebox">
@@ -29,8 +29,8 @@
     {% for a in apps %}
       <tr data-k="{{ a.kind }}">
         <td><div class="nm"><a href="/apps/{{ a.slug }}">{{ a.name }}</a></div><div class="pk">{{ a.slug }}{% if a.node != 'local' %} · nœud {{ a.node }}{% endif %}</div></td>
-        <td><span class="pill s-stopped">{{ kind_names.get(a.kind, a.kind) }}</span>{% set cl = [a.pkg and 'Android', a.ios_bundle and 'iOS', a.web_client and 'web'] | select | list %}{% if cl %}<div class="pk">client{{ 's' if cl | length > 1 }} {{ cl | join(', ') }}</div>{% endif %}</td>
-        <td><div class="urls">{% for k, u in a.urls %}<span class="route"><i>{{ k }}</i><a href="{{ u }}" target="_blank" rel="noopener">{{ u }}</a></span>{% else %}<span class="hint">{{ ('ports publics : ' ~ ports[a.slug]) if ports.get(a.slug) else "pas d'adresse publique" }}</span>{% endfor %}</div></td>
+        <td><span class="pill s-stopped">{{ kind_names.get(a.kind, a.kind) | tr }}</span>{% set cl = [a.pkg and 'Android', a.ios_bundle and 'iOS', a.web_client and 'web'] | select | list %}{% if cl %}<div class="pk">client{{ 's' if cl | length > 1 }} {{ cl | join(', ') }}</div>{% endif %}</td>
+        <td><div class="urls">{% for k, u in a.urls %}<span class="route"><i>{{ k | tr }}</i><a href="{{ u }}" target="_blank" rel="noopener">{{ u }}</a></span>{% else %}<span class="hint">{{ ('ports publics : ' ~ ports[a.slug]) if ports.get(a.slug) else "pas d'adresse publique" }}</span>{% endfor %}</div></td>
         <td><span class="pill s-{{ a.status }}">{{ LABELS[a.status] }}</span></td>
         <td><div class="mono">{{ a.version }}</div>{% if a.latest_version %}<div><span class="pill s-deploying" title="Nouvelle version sur le registre">{{ a.latest_version }} disponible</span></div>{% elif img_updates[a.slug] %}<div><span class="pill s-deploying" title="Image plus récente publiée sous ce tag">nouvelle image</span></div>{% else %}<div class="pk">{{ a.deployed_at | when }}</div>{% endif %}</td>
         {% set rq = req24.get(a.slug) %}<td class="ram">{{ '{:,}'.format(rq.n).replace(',', ' ') if rq else '0' }}{% if rq and rq.e5 %} <span class="lv-error">· {{ rq.e5 }} err.</span>{% endif %}</td>

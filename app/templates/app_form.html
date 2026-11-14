@@ -10,7 +10,7 @@
   <div>
     <div class="crumb"><a href="/">Applications</a> /</div>
     <h1>{{ 'Nouvelle application' if new else a.name }}</h1>
-    {% if not new %}<span class="pill s-stopped" style="margin-top:4px">{{ kind.short }}{% for c in client_names %} · {{ c }}{% endfor %}</span>{% endif %}
+    {% if not new %}<span class="pill s-stopped" style="margin-top:4px">{{ kind.short | tr }}{% for c in client_names %} · {{ c }}{% endfor %}</span>{% endif %}
   </div>
   {% if not new %}<span class="pill s-{{ a.status }}">{{ LABELS[a.status] }}</span>{% endif %}
 </div>
@@ -26,13 +26,13 @@
     <div class="kindgrid" role="radiogroup" aria-label="Type d'application">
       {% for k in kinds if not k.catalog %}<label class="kindcard"><input type="radio" name="kind" value="{{ k.id }}" data-kind {{ 'checked' if k.id == a.kind }}
         data-port="{{ k.defaults.port }}" data-health="{{ k.defaults.health_path }}" data-db="{{ k.defaults.db }}" data-client="{{ 1 if k.client else 0 }}" data-client-open="{{ 1 if k.client_open else 0 }}">
-        <span><b>{{ k.name }}</b><small>{{ k.desc }}</small></span></label>{% endfor %}
+        <span><b>{{ k.name | tr }}</b><small>{{ k.desc | tr }}</small></span></label>{% endfor %}
       <a class="kindcard more" href="/catalogue"><span><b>Outil auto-hébergé</b><small>Une appli open source prête : statistiques, mots de passe, wiki, Git… depuis le catalogue.</small></span></a>
     </div>
     {% endif %}
     <div class="row2">
       <div class="field {{ 'bad' if errors.name }}"><label for="name">Nom</label><input id="name" name="name" value="{{ a.name }}" required>{{ err('name') }}</div>
-      {% if not new %}<div class="field"><label for="kind">Type</label><select id="kind" name="kind">{% for k in kinds %}<option value="{{ k.id }}" {{ 'selected' if k.id == a.kind }}>{{ k.name }}</option>{% endfor %}</select></div>{% endif %}
+      {% if not new %}<div class="field"><label for="kind">Type</label><select id="kind" name="kind">{% for k in kinds %}<option value="{{ k.id }}" {{ 'selected' if k.id == a.kind }}>{{ k.name | tr }}</option>{% endfor %}</select></div>{% endif %}
     </div>
   </div>
 
@@ -287,13 +287,13 @@
     <div class="kindgrid" role="radiogroup" aria-label="Type d'application">
       {% for k in kinds if not k.catalog %}<label class="kindcard"><input type="radio" name="kind" value="{{ k.id }}" data-kind {{ 'checked' if k.id == a.kind }}
         data-port="{{ k.defaults.port }}" data-health="{{ k.defaults.health_path }}" data-db="{{ k.defaults.db }}" data-client="{{ 1 if k.client else 0 }}" data-client-open="{{ 1 if k.client_open else 0 }}">
-        <span><b>{{ k.name }}</b><small>{{ k.desc }}</small></span></label>{% endfor %}
+        <span><b>{{ k.name | tr }}</b><small>{{ k.desc | tr }}</small></span></label>{% endfor %}
       <a class="kindcard more" href="/catalogue"><span><b>Outil auto-hébergé</b><small>Une appli open source prête : statistiques, mots de passe, wiki, Git… depuis le catalogue.</small></span></a>
     </div>
     {% endif %}
     <div class="row2">
       <div class="field {{ 'bad' if errors.name }}"><label for="name">Nom</label><input id="name" name="name" value="{{ a.name }}" required>{{ err('name') }}</div>
-      {% if not new %}<div class="field"><label for="kind">Type</label><select id="kind" name="kind">{% for k in kinds %}<option value="{{ k.id }}" {{ 'selected' if k.id == a.kind }}>{{ k.name }}</option>{% endfor %}</select></div>{% endif %}
+      {% if not new %}<div class="field"><label for="kind">Type</label><select id="kind" name="kind">{% for k in kinds %}<option value="{{ k.id }}" {{ 'selected' if k.id == a.kind }}>{{ k.name | tr }}</option>{% endfor %}</select></div>{% endif %}
     </div>
   </div>
 
@@ -404,8 +404,8 @@
     <div class="field"><label for="rhealth">Commande de santé</label><input id="rhealth" name="health_cmd" value="{{ run.health_cmd or '' }}" spellcheck="false" placeholder="par exemple : redis-cli ping, pg_isready, test -f /tmp/vivant">
       <span class="hint">Lancée dans le conteneur toutes les 15 s ; code de sortie 0 = en bonne santé, 3 échecs de suite = malade.{% if not kind.http %} Le déploiement attend qu'elle réussisse (sinon la version précédente revient) et la supervision t'alerte si elle échoue.{% else %} La santé de l'appli reste vérifiée par <code>{{ a.health_path }}</code> ; celle-ci s'ajoute dans l'état Docker.{% endif %}</span></div>
     {% if kind.http %}<div class="field"><label for="rhmode">Réponses acceptées par le contrôle de santé (<code>{{ a.health_path }}</code>)</label>
-      <select id="rhmode" name="health_mode"><option value="">comme le réglage général ({{ health_modes[health_default][0] }})</option>
-        {% for k, v in health_modes.items() %}<option value="{{ k }}" {{ 'selected' if run.health_mode == k }}>{{ v[0] }}</option>{% endfor %}</select>
+      <select id="rhmode" name="health_mode"><option value="">comme le réglage général ({{ health_modes[health_default][0] | tr }})</option>
+        {% for k, v in health_modes.items() %}<option value="{{ k }}" {{ 'selected' if run.health_mode == k }}>{{ v[0] | tr }}</option>{% endfor %}</select>
       <span class="hint">« Tout code sous 500 » : une appli qui répond 401 ou 404 est considérée en marche. Plus strict : une page d'erreur fait échouer le déploiement et déclenche l'alerte.</span></div>{% endif %}
     <div class="field"><label for="rmounts">Dossiers persistants ailleurs que /data</label><input id="rmounts" name="mounts" value="{{ run.mounts or '' }}" spellcheck="false" placeholder="par exemple : www:/var/www/html">
       <span class="hint">« www:/var/www/html » garde /var/www/html dans data/www : sauvegardé, restauré et déplacé avec data/. Pour les images qui ne rangent pas leurs données dans /data.</span></div>

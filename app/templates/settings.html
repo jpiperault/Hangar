@@ -32,15 +32,15 @@
     <h2>Comptes</h2>
     {% for u in users %}
     <details class="cert" style="display:block">
-      <summary style="display:flex;justify-content:space-between;align-items:center;cursor:pointer"><span><span class="mono">{{ u.username }}{{ ' (toi)' if u.username == user }}</span> <span class="pill {{ 's-running' if u.role == 'admin' else 's-stopped' }}">{{ roles[u.role] if u.role in roles else u.role }}{% if u.role == 'appli' %} ({{ scopes.get(u.username, {}) | length }}){% endif %}</span>{% if u.totp %} <span class="pill s-running" title="Double authentification activée">2FA</span>{% endif %}</span><span class="btn sm">Gérer</span></summary>
+      <summary style="display:flex;justify-content:space-between;align-items:center;cursor:pointer"><span><span class="mono">{{ u.username }}{{ ' (toi)' if u.username == user }}</span> <span class="pill {{ 's-running' if u.role == 'admin' else 's-stopped' }}">{{ (roles[u.role] if u.role in roles else u.role) | tr }}{% if u.role == 'appli' %} ({{ scopes.get(u.username, {}) | length }}){% endif %}</span>{% if u.totp %} <span class="pill s-running" title="Double authentification activée">2FA</span>{% endif %}</span><span class="btn sm">Gérer</span></summary>
       {% if u.username != user %}<form method="post" action="/users/{{ u.username }}/role" class="inlinefield" style="margin-top:10px">
-        <select name="role" aria-label="Droits de {{ u.username }}">{% for k, v in roles.items() %}<option value="{{ k }}" {{ 'selected' if u.role == k }}>{{ v | capitalize }}</option>{% endfor %}</select>
+        <select name="role" aria-label="Droits de {{ u.username }}">{% for k, v in roles.items() %}<option value="{{ k }}" {{ 'selected' if u.role == k }}>{{ v | tr | capitalize }}</option>{% endfor %}</select>
         <button class="btn sm">Changer les droits</button>
         {% set sc = scopes.get(u.username, {}) %}
         <details style="width:100%" {{ 'open' if u.role == 'appli' }}><summary class="hint">Applis données (pour « applis choisies »)</summary>
           <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:6px;margin-top:6px">
           {% for ap in all_apps %}<label class="inlinefield"><span style="min-width:8em">{{ ap.name }}</span><select name="app_{{ ap.slug }}" aria-label="Accès à {{ ap.name }}">
-            <option value="">aucun accès</option>{% for k, v in levels.items() %}<option value="{{ k }}" {{ 'selected' if sc.get(ap.slug) == k }}>{{ v }}</option>{% endfor %}</select></label>{% endfor %}
+            <option value="">aucun accès</option>{% for k, v in levels.items() %}<option value="{{ k }}" {{ 'selected' if sc.get(ap.slug) == k }}>{{ v | tr }}</option>{% endfor %}</select></label>{% endfor %}
           </div></details></form>{% endif %}
       <form {% if u.username == user %}class="ro-ok" {% endif %}method="post" action="/users/{{ u.username }}/password" autocomplete="off" style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
         {% if u.username == user %}<div class="field"><label for="cur-{{ loop.index }}">Mot de passe actuel</label><input id="cur-{{ loop.index }}" name="current" type="password" autocomplete="current-password" required></div>{% endif %}
@@ -60,7 +60,7 @@
       <h3 style="margin:0;font-size:.95rem">Ajouter un compte</h3>
       <div class="row2">
         <div class="field"><label for="nu">Identifiant</label><input id="nu" name="username" spellcheck="false" required></div>
-        <div class="field"><label for="nrole">Droits</label><select id="nrole" name="role">{% for k, v in roles.items() %}<option value="{{ k }}">{{ v | capitalize }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="nrole">Droits</label><select id="nrole" name="role">{% for k, v in roles.items() %}<option value="{{ k }}">{{ v | tr | capitalize }}</option>{% endfor %}</select></div>
       </div>
       <div class="row2">
         <div class="field"><label for="npw">Mot de passe</label><input id="npw" name="password" type="password" minlength="10" autocomplete="new-password" required></div>
@@ -72,6 +72,7 @@
   </section>
 
   {% include "_2fa_panel.html" %}
+  {% include "_lang_panel.html" %}
   <section class="panel" id="audit">
     <div class="bar"><h2>Journal des actions</h2><a class="btn sm link" href="/settings/audit">Tout voir</a></div>
     <p class="hint">Chaque action faite dans la console (et chaque téléchargement d'archive ou d'export de base) : qui, quand, depuis quelle adresse, et le résultat. Gardé 180 jours.</p>

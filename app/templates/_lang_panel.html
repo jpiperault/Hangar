@@ -1,0 +1,6 @@
+<form class="panel ro-ok" id="langue" method="post" action="/users/{{ user }}/lang" style="display:flex;flex-direction:column;gap:10px">
+  <h2 style="margin:0">Langue de la console</h2>
+  <p class="hint" style="margin:0">Pour ce compte seulement · <span lang="en">Console language, for this account only</span></p>
+  <div class="inlinefield"><select name="lang" aria-label="Langue">{% for k, v in LANGS.items() %}<option value="{{ k }}" {{ 'selected' if lang == k }}>{{ v }}</option>{% endfor %}</select>
+    <button class="btn sm primary">Enregistrer</button></div>
+</form>

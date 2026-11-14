@@ -174,6 +174,19 @@ def _setup_ctx(request):
     return {"secret": " ".join(sec[i:i + 4] for i in range(0, len(sec), 4)), "qr": totp.qr_svg(link), "uri": link}
 
 
+@router.post("/users/{name}/lang")
+async def users_lang(request: Request, name: str):
+    from .. import i18n
+    me = request.session.get("user")
+    lang = (await request.form()).get("lang")
+    if name != me or lang not in i18n.LANGS:
+        return go(_mine(request))
+    db.x("UPDATE users SET lang = ? WHERE username = ?", (lang, me))
+    r = go(_mine(request) + "#langue")
+    r.set_cookie("hangar_lang", lang, max_age=365 * 86400, secure=True, httponly=True, samesite="strict")
+    return r
+
+
 @router.post("/users/{name}/2fa/{op}")
 async def users_2fa(request: Request, name: str, op: str):
     me = request.session.get("user")
