@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 
 from .. import db, dbadmin, monitor, move
 from .. import platform as P
-from .common import _confirmed, flash, get_app_or_404, go, node_choices
+from .common import _confirmed, flash, get_app_or_404, go, node_choices, render
 
 router = APIRouter()
 
@@ -30,6 +30,32 @@ async def versions_check(request: Request, slug: str):
     else:
         flash(request, f"{a['version']} est la version la plus récente.")
     return go(f"/apps/{slug}")
+
+
+@router.get("/apps/{slug}/sql")
+async def sql_page(request: Request, slug: str):
+    from .. import sqlquery
+    a = get_app_or_404(slug)
+    eng = sqlquery.engines(slug)
+    return render(request, "sql.html", title=f"SQL · {a['name']}", nav="apps", a=a, engines=eng,
+                  engine=request.query_params.get("e") or (eng[0] if eng else ""), q="", res=None, err=None)
+
+
+@router.post("/apps/{slug}/sql")
+async def sql_run(request: Request, slug: str):
+    from .. import sqlquery
+    a = get_app_or_404(slug)
+    f = await request.form()
+    q, engine = (f.get("q") or "")[:20000], f.get("engine") or ""
+    res, err = None, None
+    try:
+        cols, rows, cut = await asyncio.to_thread(sqlquery.run, slug, engine, q)
+        res = {"cols": cols, "rows": rows, "cut": cut}
+        P.log("info", slug, f"requête SQL en lecture seule par {request.session.get('user')} : {' '.join(q.split())[:200]}")
+    except (ValueError, RuntimeError) as e:
+        err = str(e)[:1000]
+    return render(request, "sql.html", title=f"SQL · {a['name']}", nav="apps", a=a, engines=sqlquery.engines(slug),
+                  engine=engine, q=q, res=res, err=err)
 
 
 @router.post("/apps/{slug}/node/move")

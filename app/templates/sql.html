@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="bar"><div><div class="crumb"><a href="/">Applications</a> / <a href="/apps/{{ a.slug }}">{{ a.name }}</a> /</div><h1>Requête SQL</h1>
+  <span class="hint">En lecture seule : une instruction SELECT, WITH, SHOW, EXPLAIN, DESCRIBE ou TABLE, avec l'utilisateur de l'appli, 10 s et 500 lignes au plus. Notée au journal de l'appli.</span></div></div>
+{% if not engines %}<section class="panel"><p class="hint">Cette appli n'a pas de base.</p></section>{% else %}
+<form class="panel" method="post" action="/apps/{{ a.slug }}/sql" style="display:flex;flex-direction:column;gap:10px">
+  {% if engines | length > 1 %}<div class="field"><label for="engine">Base</label><select id="engine" name="engine">{% for e in engines %}<option value="{{ e }}" {{ 'selected' if e == engine }}>{{ 'PostgreSQL' if e == 'postgres' else 'MySQL / MariaDB' }}</option>{% endfor %}</select></div>
+  {% else %}<input type="hidden" name="engine" value="{{ engines[0] }}"><span class="hint">{{ 'PostgreSQL' if engines[0] == 'postgres' else 'MySQL / MariaDB' }}</span>{% endif %}
+  <textarea name="q" spellcheck="false" class="mono" style="min-height:120px" placeholder="SELECT * FROM users ORDER BY created_at DESC LIMIT 20" aria-label="Requête">{{ q }}</textarea>
+  <div><button class="btn sm primary">Exécuter</button></div>
+</form>
+{% if err %}<div class="flash error" role="status" style="margin-top:12px;white-space:pre-wrap">{{ err }}</div>{% endif %}
+{% if res %}
+<section class="panel" style="margin-top:16px">
+  <p class="hint" style="margin-top:0">{{ res.rows | length }} ligne{{ 's' if res.rows | length > 1 }}{% if res.cut %} (les 500 premières){% endif %}.</p>
+  <div class="tablebox"><table>
+    <thead><tr>{% for c in res.cols %}<th class="mono">{{ c }}</th>{% endfor %}</tr></thead>
+    <tbody>{% for r in res.rows %}<tr>{% for v in r %}<td class="mono" style="max-width:420px;overflow-wrap:anywhere">{{ v }}</td>{% endfor %}</tr>{% else %}<tr><td class="empty">Aucune ligne.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endif %}{% endif %}
+{% endblock %}
