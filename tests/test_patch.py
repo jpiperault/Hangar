@@ -59,3 +59,21 @@ def test_auto(app_row, monkeypatch):
     assert vulns.groups(res["items"])["os"][0]["pkg"] == "zlib"
     db.kv_set("vuln_fix_apps", None)
     db.x("DELETE FROM apps WHERE slug = 'mon-jeu'")
+
+
+def test_image_sur_le_secours(app_row, monkeypatch):
+    a = {**app_row, "source": "image"}
+    db.kv_set("image_patches", {"mon-jeu": {"version": "1.2.0", "ref": "hangar-patch/mon-jeu:x", "base": "b:1", "nodes": ["n1"]}})
+    calls = []
+
+    def dk(node, *args, timeout=0, input=None):
+        calls.append((node, args[0]))
+        if args[:2] == ("image", "inspect") and args[-1] == "hangar-patch/mon-jeu:x":
+            return (0, "") if node == "n1" else (1, "absente")
+        return 0, '"101"'
+    monkeypatch.setattr(P, "dk", dk)
+    monkeypatch.setattr(P, "log", lambda *x, **k: None)
+    assert patch.ensure_on(a, "n1") and not any(c == ("n1", "build") for c in calls)
+    assert patch.ensure_on(a, "n2") and ("n2", "build") in calls
+    assert patch.of("mon-jeu")["nodes"] == ["n1", "n2"]
+    db.kv_set("image_patches", None)

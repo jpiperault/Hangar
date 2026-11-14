@@ -133,6 +133,32 @@ def build(a):
     return ref, base, base_digests
 
 
+def ensure_on(a, node):
+    """Image corrigée présente sur cette machine (secours ou instance ajoutés après la correction) ; la construit sinon.
+    Retourne True si elle y est (ou s'il n'y a pas de correction en place)."""
+    p = active(a, a["version"])
+    if not p:
+        return True
+    if P.dk(node, "image", "inspect", p["ref"], timeout=30)[0] == 0:
+        return True
+    base = p.get("base") or P.base_ref(a, a["version"])
+    P.dk(node, "pull", "--quiet", base, timeout=900)
+    rc, out = P.dk(node, "image", "inspect", "-f", "{{json .Config.User}}", base, timeout=30)
+    user = json.loads(out or '""') if rc == 0 else ""
+    rc, out = P.dk(node, "build", "--label", f"fr.hangar.app={a['slug']}", "-t", p["ref"], "-",
+                   input=_dockerfile(base, user), timeout=1800)
+    if rc:
+        P.log("warn", a["slug"], f"image corrigée non construite sur {node} ({P.tail(out, 2)}) : une bascule y "
+              "repartirait de l'image d'origine")
+        return False
+    allv = db.kv_get("image_patches") or {}
+    if a["slug"] in allv:
+        allv[a["slug"]]["nodes"] = sorted(set(allv[a["slug"]].get("nodes") or []) | {node})
+        db.kv_set("image_patches", allv)
+    P.log("info", a["slug"], f"image corrigée construite aussi sur {node}")
+    return True
+
+
 def apply(slug, by="Hangar"):
     """Construit et déploie l'image corrigée ; revient à l'originale si l'appli ne répond plus. Retourne (ok, message)."""
     a = db.app(slug)

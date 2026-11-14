@@ -332,6 +332,10 @@ def sync_data(slug):
 
 def _prepull(a, node):
     """Image de l'appli présente d'avance sur un nœud (la bascule n'attend pas un téléchargement)."""
+    from . import patch
+    if patch.active(a, a["version"]):   # image corrigée : construite là aussi (elle n'est sur aucun registre)
+        patch.ensure_on(a, node)
+        return
     if a["source"] == "git":
         P.dk(node, "compose", "-f", P.compose_path(a["slug"]), "-p", f"app-{a['slug']}", "build", timeout=1800)
     else:
@@ -343,6 +347,8 @@ def _prepull(a, node):
 
 
 def _instance_up(a, node):
+    from . import patch
+    patch.ensure_on(a, node)   # image corrigée : construite sur l'instance si elle n'y est pas
     path = P.write_compose(a, a["version"], instance=node, role="instance")
     b = {**a, "node": node}
     proj = ["compose", "-f", path, "-p", f"app-{a['slug']}"]
