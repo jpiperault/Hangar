@@ -174,6 +174,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self):
+        path = self.path.split("?")[0]
+        if path.startswith("/.well-known/hangar/hook/"):   # webhooks de publication (hooks.py)
+            return self._hook(path)
         m = re.fullmatch(r"/\.well-known/hangar/crash/(web/)?([A-Za-z0-9_.-]{1,150})", self.path.split("?")[0])
         if not m:
             return self._out(404, "inconnu")
@@ -206,6 +209,23 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return self._out(400, "JSON attendu")
         record(a["slug"], pkg, data, platform=platform)
         return self._out(204)
+
+    def _hook(self, path):
+        from . import hooks
+        m = re.fullmatch(r"/\.well-known/hangar/hook/([a-z0-9-]{1,40})", path)
+        if not m:
+            return self._out(404, "inconnu")
+        ip = (self.headers.get("X-Real-IP") or self.client_address[0])[:64]
+        if _limited(f"hook-ip:{ip}", 30, 60) or _limited(f"hook:{m.group(1)}", 60, 3600):
+            return self._out(429, "trop d'envois")
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            n = 0
+        if not 0 <= n <= hooks.MAX_BODY:
+            return self._out(413, "trop gros")
+        code, text = hooks.handle(m.group(1), self.headers, self.rfile.read(n) if n else b"", ip)
+        return self._out(code, text)
 
     def log_message(self, *a):
         pass

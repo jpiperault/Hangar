@@ -5,7 +5,7 @@ import urllib.parse
 
 from fastapi import APIRouter, Request
 
-from .. import crashes, db, jobs, limits, runopts, preprod, remoteconfig, services, smoke
+from .. import crashes, db, hooks, jobs, limits, runopts, preprod, remoteconfig, services, smoke
 from .. import domains as D
 from .. import platform as P
 from .common import flash, get_app_or_404, go, render
@@ -142,6 +142,28 @@ async def app_crash_op(request: Request, slug: str, fp: str, op: str):
         flash(request, {"resolved": "Marqué corrigé : une alerte partira s'il revient dans une version plus récente.",
                         "open": "Rouvert.", "delete": "Groupe supprimé."}[op])
     return go(f"/apps/{slug}#mobile")
+
+
+@router.post("/apps/{slug}/hook/{op}")
+async def app_hook(request: Request, slug: str, op: str):
+    a = get_app_or_404(slug)
+    back = f"/apps/{slug}#{'site' if a['kind'] == 'static' else 'reglages'}"
+    if op in ("enable", "renew"):
+        if a["kind"] != "static" and a["source"] != "image":
+            flash(request, "Publication par webhook : applis en image et sites statiques seulement.", "error")
+            return go(back)
+        hooks.enable(slug)
+        P.log("info", slug, "webhook de publication " + ("activé" if op == "enable" else "renouvelé (nouveau secret)"))
+        flash(request, "Webhook activé : copie l'adresse et le secret dans GitHub." if op == "enable" else
+              "Nouveau secret : remplace-le dans GitHub (l'ancien est refusé dès maintenant).")
+    elif op == "disable":
+        hooks.disable(slug)
+        P.log("info", slug, "webhook de publication retiré")
+        flash(request, "Webhook retiré : les envois sont refusés.")
+    else:
+        return go(back)
+    await asyncio.to_thread(P.apply_routing)
+    return go(back)
 
 
 @router.post("/apps/{slug}/run")

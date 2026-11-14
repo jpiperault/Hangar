@@ -96,6 +96,7 @@ Rends ce projet déployable sur mon serveur d'applications « Hangar ». Commenc
   - la pousse sur `ghcr.io/<compte>/<app>:1.2.0`, c'est-à-dire **le tag sans le v** ;
   - utilise `GITHUB_TOKEN`, avec les permissions `packages: write` et `contents: read`.
 - Ne pousse jamais `latest` seul : chaque version publiée doit avoir son tag précis, pour que le retour arrière fonctionne.
+- Le déploiement peut ensuite être automatique : dans la fiche de l'appli, « Publication automatique » donne une adresse et un secret de webhook, à brancher sur l'événement GitHub **Workflow runs** (ou **Packages**). Rien à ajouter au workflow.
 
 ### 5. Appli Android
 

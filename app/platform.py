@@ -339,7 +339,7 @@ def render_caddyfile(s, apps, here=LOCAL):
           "# Sites servis par le tunnel : HTTP local seulement",
           f"(tunnel) {{", f"\tbind {bind_host}", "}"]
     by_slug = {a["slug"]: a for a in apps}
-    from . import statuspage
+    from . import hooks, statuspage
     sp = statuspage.settings()
     for name, d in sorted(live.items(), key=lambda x: (not x[1]["is_default"], x[0])):
         tunnel = d["mode"] == "tunnel"
@@ -362,6 +362,7 @@ def render_caddyfile(s, apps, here=LOCAL):
                   "\thandle /.well-known/hangar/crash/* {", "\t\trequest_body {", "\t\t\tmax_size 64KB", "\t\t}",
                   f"\t\treverse_proxy {'127.0.0.1' if here == LOCAL else node_wg(LOCAL)}:8099 {{",
                   "\t\t\theader_up X-Real-IP {client_ip}", "\t\t}", "\t}",
+                  *hooks.caddy_hub_lines(f"{'127.0.0.1' if here == LOCAL else node_wg(LOCAL)}:8099"),
                   "\thandle /.well-known/apps.json {",
                   f"\t\troot * {PUBLIC}/{name}",
                   '\t\theader Cache-Control "public, max-age=300"',
@@ -390,6 +391,7 @@ def render_caddyfile(s, apps, here=LOCAL):
             if tunnel:
                 L.append("\timport tunnel")
             L += ["\timport hangar_log", f"\tlog_append hangar_app {slug}", "\tencode zstd gzip"]
+            L += hooks.caddy_app_lines(slug, f"{'127.0.0.1' if here == LOCAL else node_wg(LOCAL)}:8099")
             if a["web_client"]:   # client web : script, configuration et envoi des erreurs, sur l'adresse de l'appli
                 coll = f"{'127.0.0.1' if here == LOCAL else node_wg(LOCAL)}:8099"
                 L += ["\thandle /.well-known/hangar/client.js {", f"\t\troot * {PUBLIC}/_clients",
@@ -1608,6 +1610,8 @@ def delete(slug):
                 shutil.move(f"{d}/site", f"{keep}/site")
             shutil.rmtree(d, ignore_errors=True)
             sites.remove(slug)
+            from . import hooks
+            hooks.forget(slug)
             db.x("DELETE FROM apps WHERE slug = ?", (slug,))
             D.set_routes(slug, [])
             preprod.forget(slug)
@@ -1620,6 +1624,8 @@ def delete(slug):
         limits.drop(slug)
         from . import runopts
         runopts.drop(slug)
+        from . import hooks
+        hooks.forget(slug)
         preprod.forget(slug)
         if ha.get(slug):   # haute dispo : base dédiée rapatriée dans le PostgreSQL partagé, secours et instances retirés
             ha.disable(slug, "suppression", locked=True)

@@ -1,0 +1,34 @@
+{# Publication automatique par webhook (hooks.py) : sites statiques depuis Git, applis en image. #}
+{% set st = kind.static %}
+<section class="panel" id="webhook" style="display:flex;flex-direction:column;gap:10px">
+  <h2 style="margin:0">Publication automatique</h2>
+  {% if st and not site_meta.git %}
+  <p class="hint" style="margin:0">Règle d'abord un dépôt Git (« Construire et publier ») : chaque push sur sa branche pourra ensuite republier le site.</p>
+  {% elif not hook %}
+  <p class="hint" style="margin:0">{% if st %}À chaque push sur la branche <code>{{ site_meta.git.branch }}</code>, Hangar reconstruit et publie le site.{% else %}Quand une nouvelle image est publiée (fin du workflow GitHub Actions, ou paquet publié), Hangar la déploie tout seul, avec le retour arrière habituel si elle ne démarre pas.{% endif %}</p>
+  <form method="post" action="/apps/{{ a.slug }}/hook/enable"><button class="btn sm primary" {{ 'disabled' if not hook_url }}>Activer le webhook</button>
+    {% if not hook_url %}<span class="hint">Il faut une adresse publique à l'appli (ou un hub sur un domaine).</span>{% endif %}</form>
+  {% else %}
+  <dl class="facts">
+    <dt>Adresse</dt><dd><input class="mono" readonly value="{{ hook_url }}" aria-label="Adresse du webhook" style="width:100%"></dd>
+    <dt>Secret</dt><dd>{% if role == 'lecture' %}<span class="hint">réservé aux administrateurs</span>{% else %}<input class="mono" readonly value="{{ hook.secret }}" aria-label="Secret du webhook" style="width:100%">{% endif %}</dd>
+    <dt>Dernier envoi</dt><dd>{% if hook.last %}<span class="{{ 'lv-ok' if hook.last.ok else 'lv-error' }}">{{ hook.last.event }}</span> · {{ hook.last.ts | ago }} · {{ hook.last.result }}{% else %}aucun pour l'instant{% endif %}</dd>
+  </dl>
+  <details><summary class="hint">Réglage dans GitHub</summary>
+    <ol class="hint" style="margin:6px 0 0;padding-left:18px">
+      <li>Dépôt → Settings → Webhooks → Add webhook.</li>
+      <li>Payload URL : l'adresse ci-dessus ; Content type : <code>application/json</code> ; Secret : le secret ci-dessus.</li>
+      {% if st %}<li>Événements : « Just the push event ».</li>
+      {% else %}<li>Événements : « Let me select… » puis <strong>Workflow runs</strong> (déploie la version la plus récente du registre quand le workflow réussit) ou <strong>Packages</strong> (déploie le tag publié).</li>{% endif %}
+      <li>GitHub envoie un « ping » : il doit apparaître ici en vert.</li>
+    </ol>
+    {% if not st %}<p class="hint" style="margin:8px 0 0">Depuis un autre outil de CI, après l'envoi de l'image :<br>
+    <code style="word-break:break-all">B='{"version":"1.4.0"}'; curl -fsS -X POST -H "Content-Type: application/json" -H "X-Hub-Signature-256: sha256=$(printf %s "$B" | openssl dgst -sha256 -hmac "$SECRET" -r | cut -d' ' -f1)" -d "$B" {{ hook_url }}</code></p>{% endif %}
+    <p class="hint" style="margin:8px 0 0">Gitea et Forgejo signent de la même façon ; GitLab : mets le secret dans « Secret token ».</p>
+  </details>
+  <div class="acts" style="justify-content:flex-start;gap:8px">
+    <form class="inline" method="post" action="/apps/{{ a.slug }}/hook/renew" data-confirm="Changer le secret ? L'ancien sera refusé tout de suite."><button class="btn sm">Nouveau secret</button></form>
+    <form class="inline" method="post" action="/apps/{{ a.slug }}/hook/disable" data-confirm="Retirer le webhook ?"><button class="btn sm danger">Retirer</button></form>
+  </div>
+  {% endif %}
+</section>

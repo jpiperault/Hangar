@@ -282,7 +282,7 @@ ADMIN_EMAIL : adresse de l'administrateur</textarea><span class="hint">Une par l
     P();P('### '+(n++)+'. Test local qui reproduit le serveur');P();
     P('- `docker-compose.local.yml` : le service construit depuis le Dockerfile'+(d.db?', un `postgres:17` avec `DATABASE_URL` au même format (hôte `postgres`)':'')+(d.redis?', un `valkey/valkey:8-alpine` avec `REDIS_URL` (hôte `redis`)':'')+', un volume `./.data:/data`, `mem_limit: '+d.mem+'m`'+(http?', le port publié sur `127.0.0.1:'+d.port+'` uniquement':(K==='game'?', les ports du jeu publiés sur `127.0.0.1`':''))+'. Ajoute `.data/` au `.gitignore`.');
     if(d.ci){P();P('### '+(n++)+'. Publication automatique');P();
-      P('- `.github/workflows/docker.yml` : sur un tag Git `v*`, construit pour `linux/amd64` et pousse `'+image+':1.2.0` (le tag sans le `v`), avec `GITHUB_TOKEN` (`packages: write`). Jamais `latest` seul.');}
+      P('- `.github/workflows/docker.yml` : sur un tag Git `v*`, construit pour `linux/amd64` et pousse `'+image+':1.2.0` (le tag sans le `v`), avec `GITHUB_TOKEN` (`packages: write`). Jamais `latest` seul. Le déploiement automatique se branche ensuite dans Hangar (webhook « Workflow runs ») : rien à ajouter au workflow.');}
     if(d.android){P();P('### '+(n++)+'. Appli Android');P();
       P('- Plus d\'URL de serveur en dur : `BuildConfig.DEFAULT_BASE_URL = "'+url+'"` en secours seulement ; au démarrage (en arrière-plan, 5 s), lire `'+manifest+'`, prendre l\'entrée `BuildConfig.APPLICATION_ID`, la mémoriser.');
       P('- **Configuration à distance** : `'+manifest.replace('apps.json','apps/')+(d.pkg||'<package>')+'.json` (`min_version_code`, `recommended_version_code`, `flags`, `message`), lue au démarrage, dernière valeur mémorisée sinon.');
