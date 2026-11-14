@@ -458,6 +458,8 @@
     </div>
   </section>
   {% endif %}
+  {% if role == 'admin' %}<section class="panel"><div class="bar" style="margin:0"><h2 style="margin:0">Terminal</h2><a class="btn sm" href="/apps/{{ a.slug }}/terminal">Ouvrir</a></div>
+    <p class="hint" style="margin:6px 0 0">Lancer une commande dans le conteneur (migration, vérification, lecture d'un fichier), notée au journal.</p></section>{% endif %}
   <section class="panel"><div class="bar" style="margin:0"><h2 style="margin:0">Fichiers de data/</h2><a class="btn sm" href="/apps/{{ a.slug }}/files">Parcourir</a></div>
     <p class="hint" style="margin:6px 0 0">Voir, télécharger ou remplacer un fichier du dossier persistant, ou en remettre un depuis une sauvegarde.</p></section>
   {% if (a.db or mysql) and role == 'admin' %}<section class="panel"><div class="bar" style="margin:0"><h2 style="margin:0">Requête en lecture seule</h2><a class="btn sm" href="/apps/{{ a.slug }}/sql">Ouvrir</a></div>

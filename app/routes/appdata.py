@@ -145,6 +145,28 @@ async def files_restore(request: Request, slug: str):
     return go(f"/apps/{slug}/files?p={urllib.parse.quote(folder)}")
 
 
+@router.get("/apps/{slug}/terminal")
+async def terminal_page(request: Request, slug: str):
+    from .. import terminal
+    a = get_app_or_404(slug)
+    return render(request, "terminal.html", title=f"Terminal · {a['name']}", nav="apps", a=a,
+                  containers=terminal.containers(slug))
+
+
+@router.post("/apps/{slug}/terminal/run")
+async def terminal_run(request: Request, slug: str):
+    from fastapi.responses import JSONResponse
+    from .. import terminal
+    get_app_or_404(slug)
+    f = await request.form()
+    try:
+        out, rc, cwd = await asyncio.to_thread(terminal.run, slug, f.get("which") or "app", f.get("cmd") or "",
+                                               f.get("cwd") or "", f.get("root") == "1", request.session.get("user"))
+        return JSONResponse({"out": out, "rc": rc, "cwd": cwd})
+    except ValueError as e:
+        return JSONResponse({"out": str(e), "rc": -1, "cwd": f.get("cwd") or ""}, status_code=400)
+
+
 @router.post("/apps/{slug}/node/move")
 async def app_move(request: Request, slug: str):
     a = get_app_or_404(slug)
