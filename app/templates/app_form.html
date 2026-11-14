@@ -133,10 +133,12 @@
   {% else %}
   <a href="#apercu" data-tab="apercu">Vue d'ensemble</a>
   <a href="#reglages" data-tab="reglages">Réglages</a>
+  <a href="#acces" data-tab="acces">Accès et publication{% if prot.users or prot.ips %} <span class="hint">🔒</span>{% endif %}</a>
   <a href="#base" data-tab="base">Base et services</a>
   <a href="#hautedispo" data-tab="hautedispo">Haute dispo et nœud</a>
   <a href="#taches" data-tab="taches">Tâches{% if jobs %} <span class="hint">{{ jobs | length }}</span>{% endif %}</a>
   {% if has_clients %}<a href="#mobile" data-tab="mobile">Clients{% if crash_groups | selectattr('status', 'equalto', 'open') | list %} <span class="pill s-error">{{ crash_groups | selectattr('status', 'equalto', 'open') | list | length }}</span>{% endif %}</a>{% endif %}
+  <a href="#avance" data-tab="avance">Avancé</a>
   <a href="#vulns" data-tab="vulns">Vulnérabilités{% if vul and vul.counts and vul.counts.CRITICAL %} <span class="pill s-error">{{ vul.counts.CRITICAL }}</span>{% elif vul and vul.counts and vul.counts.HIGH %} <span class="hint">{{ vul.counts.HIGH }}</span>{% endif %}</a>
   <a href="#restauration" data-tab="restauration">Revenir en arrière</a>
   {% endif %}
@@ -389,45 +391,10 @@
 </form>
 
 <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
-  {% if a.source in ('image', 'git') and not kind.static %}{% include "_hook_panel.html" %}{% endif %}
-  {% if kind.http and not kind.static %}{% include "_protect_panel.html" %}{% endif %}
-  {% if a.source == 'image' and not kind.static %}<form class="panel" id="modele" method="post" action="/apps/{{ a.slug }}/template" autocomplete="off" style="display:flex;flex-direction:column;gap:10px">
-    <h2 style="margin:0">Garder comme modèle</h2>
-    <p class="hint" style="margin:0">Ajoute cette appli au catalogue (« Mes modèles ») pour la réinstaller en un clic : image, version, port, santé, mémoire, base, MySQL, dossiers, démarrage et variables. Les variables qui ressemblent à des secrets (SECRET, TOKEN, PASSWORD, …_KEY) reçoivent une nouvelle valeur à chaque installation ; son adresse est remplacée par celle de la nouvelle appli. Les données ne sont pas copiées.</p>
-    <div class="row2"><div class="field"><label for="tname">Nom du modèle</label><input id="tname" name="name" value="{{ a.name }}"></div>
-      <div class="field"><label for="tdesc">Description</label><input id="tdesc" name="desc" placeholder="facultatif"></div></div>
-    <div><button class="btn sm">Enregistrer comme modèle</button></div>
-  </form>{% endif %}
-  {% if not kind.static %}<form class="panel" id="demarrage" method="post" action="/apps/{{ a.slug }}/run" autocomplete="off" style="display:flex;flex-direction:column;gap:10px">
-    <h2 style="margin:0">Démarrage et santé</h2>
-    <p class="hint" style="margin:0">Vide : ce que prévoit l'image. Une seule ligne, découpée comme dans un terminal (les guillemets regroupent) ; aucun shell n'interprète la commande : pour enchaîner, écris <code>sh -c "…"</code>.</p>
-    <div class="field"><label for="rentry">Point d'entrée</label><input id="rentry" name="entrypoint" value="{{ run.entrypoint or '' }}" spellcheck="false" placeholder="celui de l'image"></div>
-    <div class="field"><label for="rcmd">Commande</label><input id="rcmd" name="command" value="{{ run.command or '' }}" spellcheck="false" placeholder="celle de l'image, par exemple : python worker.py --queue emails"></div>
-    <div class="field"><label for="rhealth">Commande de santé</label><input id="rhealth" name="health_cmd" value="{{ run.health_cmd or '' }}" spellcheck="false" placeholder="par exemple : redis-cli ping, pg_isready, test -f /tmp/vivant">
-      <span class="hint">Lancée dans le conteneur toutes les 15 s ; code de sortie 0 = en bonne santé, 3 échecs de suite = malade.{% if not kind.http %} Le déploiement attend qu'elle réussisse (sinon la version précédente revient) et la supervision t'alerte si elle échoue.{% else %} La santé de l'appli reste vérifiée par <code>{{ a.health_path }}</code> ; celle-ci s'ajoute dans l'état Docker.{% endif %}</span></div>
-    {% if kind.http %}<div class="field"><label for="rhmode">Réponses acceptées par le contrôle de santé (<code>{{ a.health_path }}</code>)</label>
-      <select id="rhmode" name="health_mode"><option value="">comme le réglage général ({{ health_modes[health_default][0] | tr }})</option>
-        {% for k, v in health_modes.items() %}<option value="{{ k }}" {{ 'selected' if run.health_mode == k }}>{{ v[0] | tr }}</option>{% endfor %}</select>
-      <span class="hint">« Tout code sous 500 » : une appli qui répond 401 ou 404 est considérée en marche. Plus strict : une page d'erreur fait échouer le déploiement et déclenche l'alerte.</span></div>{% endif %}
-    <div class="field"><label for="rmounts">Dossiers persistants ailleurs que /data</label><input id="rmounts" name="mounts" value="{{ run.mounts or '' }}" spellcheck="false" placeholder="par exemple : www:/var/www/html">
-      <span class="hint">« www:/var/www/html » garde /var/www/html dans data/www : sauvegardé, restauré et déplacé avec data/. Pour les images qui ne rangent pas leurs données dans /data.</span></div>
-    <div><button class="btn sm primary" {{ 'disabled' if a.status == 'deploying' }}>Enregistrer et redéployer</button></div>
-  </form>
-  {% endif %}
   {% if not kind.static %}<form class="panel" id="limites" method="post" action="/apps/{{ a.slug }}/limits" style="display:flex;flex-direction:column;gap:10px">
     <h2 style="margin:0">Processeur max</h2>
     <p class="hint" style="margin:0">Sans limite, une appli qui s'emballe peut prendre tout le processeur du nœud et ralentir les autres. Nombre de cœurs (0,5 = la moitié d'un cœur) ; vide = sans limite. Alerte si elle reste à sa limite 10 minutes, si sa mémoire dépasse 90 % pendant 5 minutes, ou si elle redémarre toute seule (tuée faute de mémoire, plantée).</p>
     <div class="inlinefield"><input name="cpus" value="{{ cpus if cpus else '' }}" inputmode="decimal" placeholder="sans limite" aria-label="Processeur max en cœurs" style="max-width:9em"><span class="hint">cœur(s)</span><button class="btn sm primary" {{ 'disabled' if a.status == 'deploying' }}>Enregistrer</button></div>
-  </form>
-  {% endif %}
-  {% if kind.http %}<form class="panel" id="verifs" method="post" action="/apps/{{ a.slug }}/smoke" style="display:flex;flex-direction:column;gap:10px">
-    <h2 style="margin:0">Vérifications après déploiement</h2>
-    <p class="hint" style="margin:0">En plus de <code>{{ a.health_path }}</code>, ces adresses doivent répondre comme prévu pour qu'une nouvelle version soit gardée ; sinon la précédente revient. Une par ligne : <code>/chemin [code] [texte attendu]</code>, code 200 par défaut, <code>{version}</code> remplacé par la version déployée.</p>
-    <textarea name="checks" spellcheck="false" style="min-height:70px" placeholder="/&#10;/api/v1/version 200 {version}&#10;/admin 302">{{ smoke_text }}</textarea>
-    {% if smoke_last %}<div class="hint">Dernier passage ({{ smoke_last.version }}, {{ smoke_last.ts | ago }}{{ ', à la main' if smoke_last.manual }}) :
-      {% for r in smoke_last.results %}<div><span class="{{ 'lv-ok' if r.ok else 'lv-error' }}">{{ '✓' if r.ok else '✕' }}</span> <code>{{ r.path }}</code>{% if not r.ok %} · {{ r.why }}{% endif %}</div>{% endfor %}</div>{% endif %}
-    <div class="acts" style="justify-content:flex-start;gap:8px"><button class="btn sm primary">Enregistrer</button>
-      <button class="btn sm" formaction="/apps/{{ a.slug }}/smoke?test=1" {{ 'disabled' if a.status != 'running' }}>Enregistrer et tester sur la version en ligne</button></div>
   </form>
   {% endif %}
   <section class="panel" id="historique" style="display:flex;flex-direction:column;gap:8px">
@@ -450,6 +417,65 @@
 </div>
 
 {% if not kind.static %}
+<div data-pane="acces">
+<div class="cols" style="align-items:start">
+<div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+  {% if kind.http and not kind.static %}{% include "_protect_panel.html" %}{% endif %}
+</div>
+<div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+  {% if a.source in ('image', 'git') and not kind.static %}{% include "_hook_panel.html" %}{% endif %}
+</div>
+</div>
+</div>
+
+<div data-pane="avance">
+<div class="cols" style="align-items:start">
+<div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+  {% if not kind.static %}<form class="panel" id="demarrage" method="post" action="/apps/{{ a.slug }}/run" autocomplete="off" style="display:flex;flex-direction:column;gap:10px">
+    <h2 style="margin:0">Démarrage et santé</h2>
+    <p class="hint" style="margin:0">Vide : ce que prévoit l'image. Une seule ligne, découpée comme dans un terminal (les guillemets regroupent) ; aucun shell n'interprète la commande : pour enchaîner, écris <code>sh -c "…"</code>.</p>
+    <div class="field"><label for="rentry">Point d'entrée</label><input id="rentry" name="entrypoint" value="{{ run.entrypoint or '' }}" spellcheck="false" placeholder="celui de l'image"></div>
+    <div class="field"><label for="rcmd">Commande</label><input id="rcmd" name="command" value="{{ run.command or '' }}" spellcheck="false" placeholder="celle de l'image, par exemple : python worker.py --queue emails"></div>
+    <div class="field"><label for="rhealth">Commande de santé</label><input id="rhealth" name="health_cmd" value="{{ run.health_cmd or '' }}" spellcheck="false" placeholder="par exemple : redis-cli ping, pg_isready, test -f /tmp/vivant">
+      <span class="hint">Lancée dans le conteneur toutes les 15 s ; code de sortie 0 = en bonne santé, 3 échecs de suite = malade.{% if not kind.http %} Le déploiement attend qu'elle réussisse (sinon la version précédente revient) et la supervision t'alerte si elle échoue.{% else %} La santé de l'appli reste vérifiée par <code>{{ a.health_path }}</code> ; celle-ci s'ajoute dans l'état Docker.{% endif %}</span></div>
+    {% if kind.http %}<div class="field"><label for="rhmode">Réponses acceptées par le contrôle de santé (<code>{{ a.health_path }}</code>)</label>
+      <select id="rhmode" name="health_mode"><option value="">comme le réglage général ({{ health_modes[health_default][0] | tr }})</option>
+        {% for k, v in health_modes.items() %}<option value="{{ k }}" {{ 'selected' if run.health_mode == k }}>{{ v[0] | tr }}</option>{% endfor %}</select>
+      <span class="hint">« Tout code sous 500 » : une appli qui répond 401 ou 404 est considérée en marche. Plus strict : une page d'erreur fait échouer le déploiement et déclenche l'alerte.</span></div>{% endif %}
+    <div class="field"><label for="rmounts">Dossiers persistants ailleurs que /data</label><input id="rmounts" name="mounts" value="{{ run.mounts or '' }}" spellcheck="false" placeholder="par exemple : www:/var/www/html">
+      <span class="hint">« www:/var/www/html » garde /var/www/html dans data/www : sauvegardé, restauré et déplacé avec data/. Pour les images qui ne rangent pas leurs données dans /data.</span></div>
+    <div><button class="btn sm primary" {{ 'disabled' if a.status == 'deploying' }}>Enregistrer et redéployer</button></div>
+  </form>
+  {% endif %}
+  {% if kind.http %}<form class="panel" id="verifs" method="post" action="/apps/{{ a.slug }}/smoke" style="display:flex;flex-direction:column;gap:10px">
+    <h2 style="margin:0">Vérifications après déploiement</h2>
+    <p class="hint" style="margin:0">En plus de <code>{{ a.health_path }}</code>, ces adresses doivent répondre comme prévu pour qu'une nouvelle version soit gardée ; sinon la précédente revient. Une par ligne : <code>/chemin [code] [texte attendu]</code>, code 200 par défaut, <code>{version}</code> remplacé par la version déployée.</p>
+    <textarea name="checks" spellcheck="false" style="min-height:70px" placeholder="/&#10;/api/v1/version 200 {version}&#10;/admin 302">{{ smoke_text }}</textarea>
+    {% if smoke_last %}<div class="hint">Dernier passage ({{ smoke_last.version }}, {{ smoke_last.ts | ago }}{{ ', à la main' if smoke_last.manual }}) :
+      {% for r in smoke_last.results %}<div><span class="{{ 'lv-ok' if r.ok else 'lv-error' }}">{{ '✓' if r.ok else '✕' }}</span> <code>{{ r.path }}</code>{% if not r.ok %} · {{ r.why }}{% endif %}</div>{% endfor %}</div>{% endif %}
+    <div class="acts" style="justify-content:flex-start;gap:8px"><button class="btn sm primary">Enregistrer</button>
+      <button class="btn sm" formaction="/apps/{{ a.slug }}/smoke?test=1" {{ 'disabled' if a.status != 'running' }}>Enregistrer et tester sur la version en ligne</button></div>
+  </form>
+  {% endif %}
+</div>
+<div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+  {% if role == 'admin' %}<section class="panel"><div class="bar" style="margin:0"><h2 style="margin:0">Terminal</h2><a class="btn sm" href="/apps/{{ a.slug }}/terminal">Ouvrir</a></div>
+    <p class="hint" style="margin:6px 0 0">Lancer une commande dans le conteneur (migration, vérification, lecture d'un fichier), notée au journal.</p></section>{% endif %}
+  <section class="panel"><div class="bar" style="margin:0"><h2 style="margin:0">Fichiers de data/</h2><a class="btn sm" href="/apps/{{ a.slug }}/files">Parcourir</a></div>
+    <p class="hint" style="margin:6px 0 0">Voir, télécharger ou remplacer un fichier du dossier persistant, ou en remettre un depuis une sauvegarde.</p></section>
+  {% if (a.db or mysql) and role == 'admin' %}<section class="panel"><div class="bar" style="margin:0"><h2 style="margin:0">Requête en lecture seule</h2><a class="btn sm" href="/apps/{{ a.slug }}/sql">Ouvrir</a></div>
+    <p class="hint" style="margin:6px 0 0">Consulter les données de l'appli en SQL (SELECT, SHOW, EXPLAIN…), sans pouvoir rien modifier.</p></section>{% endif %}
+  {% if a.source == 'image' and not kind.static %}<form class="panel" id="modele" method="post" action="/apps/{{ a.slug }}/template" autocomplete="off" style="display:flex;flex-direction:column;gap:10px">
+    <h2 style="margin:0">Garder comme modèle</h2>
+    <p class="hint" style="margin:0">Ajoute cette appli au catalogue (« Mes modèles ») pour la réinstaller en un clic : image, version, port, santé, mémoire, base, MySQL, dossiers, démarrage et variables. Les variables qui ressemblent à des secrets (SECRET, TOKEN, PASSWORD, …_KEY) reçoivent une nouvelle valeur à chaque installation ; son adresse est remplacée par celle de la nouvelle appli. Les données ne sont pas copiées.</p>
+    <div class="row2"><div class="field"><label for="tname">Nom du modèle</label><input id="tname" name="name" value="{{ a.name }}"></div>
+      <div class="field"><label for="tdesc">Description</label><input id="tdesc" name="desc" placeholder="facultatif"></div></div>
+    <div><button class="btn sm">Enregistrer comme modèle</button></div>
+  </form>{% endif %}
+</div>
+</div>
+</div>
+
 <div data-pane="base" style="display:flex;flex-direction:column;gap:20px">
   {% if a.db %}
   <section class="panel" id="base">
@@ -459,12 +485,6 @@
     </div>
   </section>
   {% endif %}
-  {% if role == 'admin' %}<section class="panel"><div class="bar" style="margin:0"><h2 style="margin:0">Terminal</h2><a class="btn sm" href="/apps/{{ a.slug }}/terminal">Ouvrir</a></div>
-    <p class="hint" style="margin:6px 0 0">Lancer une commande dans le conteneur (migration, vérification, lecture d'un fichier), notée au journal.</p></section>{% endif %}
-  <section class="panel"><div class="bar" style="margin:0"><h2 style="margin:0">Fichiers de data/</h2><a class="btn sm" href="/apps/{{ a.slug }}/files">Parcourir</a></div>
-    <p class="hint" style="margin:6px 0 0">Voir, télécharger ou remplacer un fichier du dossier persistant, ou en remettre un depuis une sauvegarde.</p></section>
-  {% if (a.db or mysql) and role == 'admin' %}<section class="panel"><div class="bar" style="margin:0"><h2 style="margin:0">Requête en lecture seule</h2><a class="btn sm" href="/apps/{{ a.slug }}/sql">Ouvrir</a></div>
-    <p class="hint" style="margin:6px 0 0">Consulter les données de l'appli en SQL (SELECT, SHOW, EXPLAIN…), sans pouvoir rien modifier.</p></section>{% endif %}
   {% if not a.db %}<section class="panel"><h2>Base de données</h2><p class="hint">Pas de base PostgreSQL pour cette appli. Pour en ajouter une, coche « Base PostgreSQL » dans l'onglet Réglages.</p></section>{% endif %}
   <form class="panel" id="redis" method="post" action="/apps/{{ a.slug }}/services/redis" style="display:flex;flex-direction:column;gap:10px">
     <h2 style="margin:0">Redis {% if redis %}<span class="pill {{ 's-running' if redis_st and redis_st.state == 'running' else 's-error' }}">{{ {'running': 'en marche', 'absent': 'pas encore créé'}.get(redis_st.state, redis_st.state) if redis_st else '?' }}</span>{% endif %}</h2>
