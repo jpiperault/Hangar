@@ -49,9 +49,12 @@ def _dbports():
         out = [(r["slug"], int(r["db_port"])) for r in db.q("SELECT slug, db_port FROM ha WHERE db_port IS NOT NULL")]
     except Exception:
         return []
-    from . import services
+    from . import mysqlrepl, services
     for slug in {s for s, _ in out} | {r["slug"] for r in db.q("SELECT slug FROM ha")}:
         p = services.shared_port(slug)
+        if p:
+            out.append((slug, p))
+        p = mysqlrepl.ports(slug)   # base MySQL/MariaDB principale, pour sa réplique sur le secours
         if p:
             out.append((slug, p))
     return out

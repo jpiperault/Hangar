@@ -489,6 +489,7 @@ def _enable(a, mode, nodes_, auto, delay, sync_min, by):
         if mode == "standby":
             _prepull(a, nodes_[0])
             sync_data(slug)
+            _mysql_replica(slug, nodes_[0])
         else:
             for n in nodes_:
                 ok, detail = _instance_up(a, n)
@@ -560,6 +561,8 @@ def _disable(slug, by):
         os.chmod(dump, 0o600)
         P.ensure_db(a, node, P.PG)
         _pg_restore(node, P.PG, slug, dump)
+    from . import mysqlrepl
+    mysqlrepl.remove(slug)   # réplique MySQL/MariaDB retirée ; la base principale repart sans journal binaire
     db.x("DELETE FROM ha WHERE slug = ?", (slug,))
     _seg_push()
     for n in set(h["nodes"]) | {node}:
@@ -631,8 +634,11 @@ def _failover(slug, dead, reason):
         b = db.app(slug)
         if h["mode"] == "replicas":
             _instance_down_file(slug, target)
-        from . import services
-        services.reset_mysql(b, target)   # MySQL/MariaDB : repart de l'export de la dernière copie de data/
+        from . import mysqlrepl, services
+        if mysqlrepl.active(slug) == target:
+            mysqlrepl.promote(slug)          # MySQL/MariaDB : la réplique devient la base (dernières secondes perdues)
+        else:
+            services.reset_mysql(b, target)   # sinon : repart de l'export de la dernière copie de data/
         ok, detail = P._up(b, b["version"])
         if not ok and b["desired"] == "running":
             raise RuntimeError(detail)
@@ -688,10 +694,14 @@ def _switchover(slug, by):
     P.log("info", slug, f"bascule programmée de {old} vers {target} ({by})")
     t0 = time.time()
     db.update_app(slug, state="deploying")   # la supervision ne signale pas la courte coupure voulue
-    from . import services
-    if services.mysql(slug):   # l'appli d'abord, puis l'export de sa base à l'arrêt des écritures
+    from . import mysqlrepl, services
+    replicated = False
+    if services.mysql(slug):   # l'appli d'abord ; puis la réplique rattrape, ou à défaut l'export de la base
         P.dk(old, "compose", "stop", "app", cwd=d, timeout=120)
-        services.fresh_dump(a)
+        st = mysqlrepl.status(slug) if mysqlrepl.active(slug) == target else None
+        replicated = bool(st and st.get("running") and mysqlrepl.caught_up(slug))
+        if not replicated:
+            services.fresh_dump(a)
     P.dk(old, "compose", "stop", cwd=d, timeout=120)   # plus aucune écriture
     try:
         if h["mode"] == "standby":
@@ -718,10 +728,14 @@ def _switchover(slug, by):
         if h["mode"] == "replicas":
             _instance_down_file(slug, target)
             P.dk(old, "compose", "-p", f"app-{slug}", "down", timeout=120)
-        services.reset_mysql(b, target)
+        if replicated:
+            mysqlrepl.promote(slug)          # la réplique, à jour, devient la base : pas de rechargement
+        else:
+            services.reset_mysql(b, target)
         ok, detail = P._up(b, b["version"])
         if not ok:
             raise RuntimeError(f"l'appli ne répond pas sur {target} : {detail}")
+        t_up = time.time() - t0   # coupure réelle : la suite (secours refait) se fait appli en ligne
     except Exception as e:
         P.log("error", slug, f"bascule programmée en échec : {e} ; retour sur {old}")
         h2 = get(slug)
@@ -754,10 +768,26 @@ def _switchover(slug, by):
         P.dk(old, "compose", "-p", f"app-{slug}", "down", timeout=120)
         _prepull(db.app(slug), old)
         sync_data(slug)
+        _mysql_replica(slug, old)   # l'ancien principal devient la réplique
     db.update_app(slug, state="ok")
-    P.log("ok", slug, f"basculée sur {target} en {time.time() - t0:.0f} s ; " + (
+    P.log("ok", slug, f"basculée sur {target} : appli de nouveau en ligne en {t_up:.0f} s, secours prêt en "
+          f"{time.time() - t0:.0f} s ; " + (
         f"{old} est maintenant le secours" if h["mode"] == "standby" else
         f"base principale sur {target}, {old} reste une instance" + (" avec la réplique" if a["db"] else "")))
+
+
+def _mysql_replica(slug, node):
+    """Réplique MySQL/MariaDB sur le secours (si l'appli en a une base). Un échec n'empêche rien : la bascule
+    reviendrait à l'export copié avec data/."""
+    from . import mysqlrepl, services
+    if not services.mysql(slug):
+        return
+    try:
+        mysqlrepl.build(slug, node)
+        _info(slug, mysql_repl_error=None)
+    except Exception as e:
+        _info(slug, mysql_repl_error=str(e)[:300])
+        P.log("warn", slug, f"réplique MySQL/MariaDB sur {node} impossible ({e}) : la bascule repartira de l'export")
 
 
 def _rebuild_standby(slug, node):
@@ -798,6 +828,7 @@ def _rebuild(slug, h, a, targets):
     if h["mode"] == "standby":
         _prepull(a, h["nodes"][0])
         sync_data(slug)
+        _mysql_replica(slug, h["nodes"][0])
     else:
         for n in targets:
             if _ok(n) and n != a["node"]:
@@ -987,6 +1018,8 @@ def tick():
         # 3. réplication de la base : reconstruite si elle ne suit plus
         if a["db"] and h["state"] == "ok" and _every(f"repl-{slug}", 300):
             P.spawn(_guarded, slug, _check_replication)
+        if h["mode"] == "standby" and h["state"] == "ok" and _every(f"myrepl-{slug}", 300):
+            P.spawn(_guarded, slug, _check_mysql_replication)
     # 4. nœuds en arrêt de sécurité alors que la console les joint (console revenue, coupure courte…)
     if _every("fence-scan", 300):
         P.spawn(_scan_fenced)
@@ -1019,6 +1052,26 @@ def _check_replication(slug):
             _db_standby_build(slug, sb, h["db_node"], h)
         except Exception as e:
             P.log("error", slug, f"réplique sur {sb} : {e}")
+
+
+def _check_mysql_replication(slug):
+    """Réplique MySQL/MariaDB : retard noté ; reconstruite si elle ne suit plus depuis 10 minutes."""
+    from . import mysqlrepl, services
+    h, a = get(slug), db.app(slug)
+    if not services.mysql(slug) or not h or not a or a["state"] != "ok" or h["state"] != "ok":
+        return   # opération en cours (bascule, déploiement…) : on regarde plus tard
+    node = mysqlrepl.active(slug) or next((n for n in h["nodes"] if n != a["node"]), None)
+    if not node or node == a["node"] or not _ok(node) or not _ok(a["node"]):
+        return
+    st = mysqlrepl.status(slug)
+    if st and st.get("running"):
+        _info(slug, mysql_lag=st.get("lag"), mysql_ok=time.time(), mysql_repl_error=None)
+        return
+    since = h["info"].get("mysql_ok") or h["info"].get("mysql_rebuilt") or 0
+    if time.time() - since > 600 and time.time() - h["info"].get("mysql_rebuilt", 0) > 1800:
+        P.log("warn", slug, f"la réplique MySQL/MariaDB ne suit plus ({(st or {}).get('error') or 'absente'}) : reconstruction")
+        _info(slug, mysql_rebuilt=time.time())
+        _mysql_replica(slug, node)
 
 
 def _scan_fenced():

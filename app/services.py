@@ -16,9 +16,9 @@ MySQL / MariaDB (au choix) : une base propre à l'appli, hôte « mysql », port
   déplacement (fresh_dump).
 - Ce dossier est aussi le dossier d'initialisation de l'image : quand data/ est remplacé (restauration, import,
   déplacement), les fichiers bruts sont effacés (reset) et la base repart de l'export, toute seule, au démarrage.
-- Haute dispo en secours à chaud : l'export est refait avant chaque copie de data/ vers le secours ; à la bascule,
-  le secours repart de lui (on perd au plus les écritures depuis la dernière copie, comme pour Redis). Bascule
-  programmée : l'appli s'arrête, l'export est fait, puis la base s'arrête (rien n'est perdu). Pas d'instances multiples.
+- Haute dispo en secours à chaud : réplication en continu vers le secours (mysqlrepl.py) ; à la bascule, la réplique
+  est promue (quelques secondes). Si elle n'est pas là, repli sur l'export refait avant chaque copie de data/ (le
+  secours repart de lui). Pas d'instances multiples.
 Réglage kv « app_services » : {slug: {"redis": {"mem": Mo, "password": "..."},
                                        "mysql": {"engine": "mariadb"|"mysql", "mem": Mo, "password", "root"}}}.
 """
@@ -135,7 +135,7 @@ def _redis_extra(a, net, data_dir, instance=None):
 # ---------------------------------------------------------------- MySQL / MariaDB
 
 ENGINES = {"mariadb": {"name": "MariaDB 11.4", "image": "mariadb:11.4", "dump": "mariadb-dump",
-                       "health": ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]},
+                       "health": ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_ROOT_PASSWORD\" mariadb-admin ping -h 127.0.0.1 -uroot --silent"]},
            "mysql": {"name": "MySQL 8.4", "image": "mysql:8.4", "dump": "mysqldump",
                      "health": ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]}}
 MYSQL_DIR = ".hangar-mysql"     # dans data/ : l'export, et le dossier d'initialisation de l'image
@@ -185,6 +185,7 @@ def mysql_env(slug):
 
 
 def _mysql_service(a, net, data_dir):
+    from . import mysqlrepl
     m = mysql(a["slug"])
     e = ENGINES[m["engine"]]
     mem = int(m["mem"])
@@ -193,7 +194,8 @@ def _mysql_service(a, net, data_dir):
         "image": e["image"],
         "restart": "unless-stopped",
         "command": [f"--innodb-buffer-pool-size={pool}M", "--skip-name-resolve", "--character-set-server=utf8mb4",
-                    "--collation-server=utf8mb4_unicode_ci", "--max-connections=100"],
+                    "--collation-server=utf8mb4_unicode_ci", "--max-connections=100"]
+        + mysqlrepl.primary_args(a["slug"], m["engine"]),   # secours à chaud : journal binaire (réplication)
         "environment": {"MYSQL_ROOT_PASSWORD": m["root"], "MYSQL_DATABASE": "app", "MYSQL_USER": "app",
                         "MYSQL_PASSWORD": m["password"]},
         "networks": [net],
@@ -206,7 +208,13 @@ def _mysql_service(a, net, data_dir):
         "healthcheck": {"test": e["health"], "interval": "5s", "timeout": "5s", "retries": 6, "start_period": "1500s",
                         "start_interval": "3s"},
         "labels": {"fr.hangar.service": "mysql", "fr.hangar.of": a["slug"]},
+        **({"ports": [f"{_wg(a['node'])}:{mysqlrepl.port(a)}:3306"]} if mysqlrepl.wanted(a["slug"]) else {}),
     }
+
+
+def _wg(node):
+    from . import platform as P
+    return P.node_wg(node)
 
 
 def fresh_dump(a, quiet=False):

@@ -23,6 +23,8 @@ db.init()
 # fils tournent pendant les essais, touchent le Docker de la machine et modifient les applis d'essai au mauvais moment
 if os.environ.get("HANGAR_NO_BACKGROUND") != "1":
     P.recover()
+    from . import security as _sec
+    _sec.upgrade_console_firewall()
     monitor.start()
     crashes.start()   # point d'envoi des rapports de plantage (Caddy → 127.0.0.1:8099 / 10.88.0.1:8099)
     # mesures lentes gardées au chaud : les pages ne font jamais attendre un nœud

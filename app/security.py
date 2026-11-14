@@ -335,7 +335,7 @@ def render_nft(p, web):
           "\t\t# entre réseaux d'applis : table hangarapps",
           "\t\tiifname \"hg-*\" oifname \"hg-*\" accept",
           "\t\tiifname { \"docker0\", \"br-*\", \"hg-*\" } meta l4proto { tcp, udp } th dport 53 accept",
-          f"\t\tiifname {{ \"docker0\", \"br-*\", \"hg-*\" }} ip daddr {N.WG_NET} tcp dport {P.HOST_PORT_MIN + 10000}-48000 accept",
+          f"\t\tiifname {{ \"docker0\", \"br-*\", \"hg-*\" }} ip daddr {N.WG_NET} tcp dport {P.HOST_PORT_MIN + 10000}-58000 accept",
           f"\t\tiifname {{ \"docker0\", \"br-*\", \"hg-*\" }} ct state new ip daddr {{ {PRIVATE4} }} counter drop",
           "\t\tiifname { \"docker0\", \"br-*\", \"hg-*\" } ct state new ip6 daddr { fc00::/7, fe80::/10 } counter drop",
           "\t}", "}"]
@@ -441,6 +441,27 @@ def _fresh_ssh(n, cmd, timeout=15):
         return p.returncode, p.stdout + p.stderr
     except subprocess.TimeoutExpired:
         return 124, "délai dépassé"
+
+
+def upgrade_console_firewall():
+    """Mise à jour d'une installation existante : les conteneurs joignent les ports privés jusqu'à 58000 (bases
+    MySQL/MariaDB répliquées : port de l'appli + 30000), et plus seulement 48000."""
+    path = "/etc/nftables.d/platform.nft"
+    try:
+        txt = open(path).read()
+    except OSError:
+        return
+    if "tcp dport 28001-48000 accept" not in txt:
+        return
+    new = txt.replace("tcp dport 28001-48000 accept", "tcp dport 28001-58000 accept")
+    rc, out = P.run(["nft", "-c", "-f", "-"], input=new, timeout=30)
+    if rc:
+        P.log("warn", "console", f"pare-feu de la console non mis à jour : {P.tail(out, 2)}")
+        return
+    P.write_private(path, new)
+    os.chmod(path, 0o644)
+    P.run(["nft", "-f", path], timeout=30)
+    P.log("info", "console", "pare-feu de la console : ports privés des conteneurs ouverts jusqu'à 58000")
 
 
 def apply(node_id, by="console"):

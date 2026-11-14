@@ -419,6 +419,7 @@
 "bascule programmée en échec : {} ; retour sur {}": "planned switchover failed: {}; back on {}",
 "bascule suspendue : {}": "failover suspended: {}",
 "bascule vers {} en échec : {}": "failover to {} failed: {}",
+"basculée sur {} : appli de nouveau en ligne en {} s, secours prêt en {} s ; {}": "switched over to {}: app back online in {} s, standby ready in {} s; {}",
 "basculée sur {} en {} s": "failed over to {} in {} s",
 "basculée sur {} en {} s ; base principale sur {}, {} reste une instance": "failed over to {} in {} s; primary database on {}, {} remains an instance",
 "basculée sur {} en {} s ; base principale sur {}, {} reste une instance avec la réplique": "failed over to {} in {} s; primary database on {}, {} remains an instance with the replica",

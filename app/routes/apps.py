@@ -5,7 +5,7 @@ import time
 
 from fastapi import APIRouter, Request
 
-from .. import affinity, history, patch, vulns, hooks, monitor, onboarding, perms, protect, runopts, segment, applogs, backup, cache, catalog, cloudflare, crashes, db, dbadmin, gameports, ha, jobs, kinds, limits, nodes, preprod, remoteconfig, services, sites, smoke, stats
+from .. import affinity, history, mysqlrepl, patch, vulns, hooks, monitor, onboarding, perms, protect, runopts, segment, applogs, backup, cache, catalog, cloudflare, crashes, db, dbadmin, gameports, ha, jobs, kinds, limits, nodes, preprod, remoteconfig, services, sites, smoke, stats
 from .. import domains as D
 from .. import platform as P
 from .common import RESERVED, SLUG, VERSION, _client_names, _public_addr, _rc_url, _redis_state, apply_registry, flash, get_app_or_404, go, node_choices, render, tpl_for, validate
@@ -194,7 +194,7 @@ async def _app_ctx(request, slug):
                 rc_urls={"android": _rc_url(a, a["pkg"]), "ios": _rc_url(a, a["ios_bundle"])},
                 has_clients=bool(a["pkg"] or a["ios_bundle"] or a["web_client"]), client_names=_client_names(a),
                 crash_groups=crashes.groups(slug) if (a["pkg"] or a["ios_bundle"] or a["web_client"]) else [], aff=affinity.of(slug), aff_modes=affinity.MODES,
-                aff_default=affinity.DEFAULT_NAME, smoke_text=smoke.text_of(slug), smoke_last=db.kv_get(f"smoke_last:{slug}"), redis=services.redis(slug), mysql=services.mysql(slug), mail=services.mail(slug), relay=services.relay(), mysql_engines=services.ENGINES, img_update=monitor.image_update(slug), pre=db.app(preprod.of(slug) or ""),
+                aff_default=affinity.DEFAULT_NAME, smoke_text=smoke.text_of(slug), smoke_last=db.kv_get(f"smoke_last:{slug}"), redis=services.redis(slug), mysql=services.mysql(slug), mysql_repl=(cache.get(f'myrepl:{slug}', 30, mysqlrepl.status, slug, wait=False) if services.mysql(slug) and ha.get(slug) else None), mail=services.mail(slug), relay=services.relay(), mysql_engines=services.ENGINES, img_update=monitor.image_update(slug), pre=db.app(preprod.of(slug) or ""),
                 prod=db.app(preprod.prod_of(slug) or ""),
                 redis_st=(cache.get(f"redis:{slug}", 20, _redis_state, a, wait=False) or {"state": "…"})
                 if services.redis(slug) else None,
