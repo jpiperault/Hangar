@@ -9,6 +9,7 @@ os.environ["HANGAR_SECRET_FILE"] = os.path.join(_tmp, "hangar.secret")
 os.environ["HANGAR_IMPORTS"] = os.path.join(_tmp, "imports")
 os.environ["HANGAR_IMPORTS_TMP"] = os.path.join(_tmp, "restore-tmp")
 os.environ["HANGAR_BACKUPS"] = os.path.join(_tmp, "backups")
+os.environ["HANGAR_NO_BACKGROUND"] = "1"   # pas de supervision ni de mesures en arrière-plan pendant les essais
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import shutil  # noqa: E402

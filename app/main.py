@@ -19,12 +19,15 @@ from .routes.common import HERE, SESSION_IDLE
 LAN = access.parse_nets(os.environ.get("LAN_CIDR", "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"))
 
 db.init()
-P.recover()
-monitor.start()
-crashes.start()   # point d'envoi des rapports de plantage (Caddy → 127.0.0.1:8099 / 10.88.0.1:8099)
-# mesures lentes gardées au chaud : les pages ne font jamais attendre un nœud
-cache.keep_warm("states", 20, P.container_states)
-cache.keep_warm("mem", 20, P.mem_usage)
+# HANGAR_NO_BACKGROUND=1 (essais) : ni reprise, ni supervision, ni serveur interne, ni mesures en arrière-plan ; sinon ces
+# fils tournent pendant les essais, touchent le Docker de la machine et modifient les applis d'essai au mauvais moment
+if os.environ.get("HANGAR_NO_BACKGROUND") != "1":
+    P.recover()
+    monitor.start()
+    crashes.start()   # point d'envoi des rapports de plantage (Caddy → 127.0.0.1:8099 / 10.88.0.1:8099)
+    # mesures lentes gardées au chaud : les pages ne font jamais attendre un nœud
+    cache.keep_warm("states", 20, P.container_states)
+    cache.keep_warm("mem", 20, P.mem_usage)
 
 
 def _secret():
