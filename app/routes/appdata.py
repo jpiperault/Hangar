@@ -3,6 +3,7 @@ import asyncio
 import os
 import secrets
 import time
+import urllib.parse
 
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
@@ -56,6 +57,92 @@ async def sql_run(request: Request, slug: str):
         err = str(e)[:1000]
     return render(request, "sql.html", title=f"SQL · {a['name']}", nav="apps", a=a, engines=sqlquery.engines(slug),
                   engine=engine, q=q, res=res, err=err)
+
+
+@router.get("/apps/{slug}/files")
+async def files_page(request: Request, slug: str):
+    from .. import backup, datafiles
+    a = get_app_or_404(slug)
+    try:
+        rel = datafiles.clean(request.query_params.get("p") or "")
+        items, cut = await asyncio.to_thread(datafiles.listdir, slug, rel)
+        err = None
+    except ValueError as e:
+        rel, items, cut, err = datafiles.clean(request.query_params.get("p") or ""), [], False, str(e)
+    crumbs, acc = [], []
+    for part in [x for x in rel.split("/") if x]:
+        acc.append(part)
+        crumbs.append((part, "/".join(acc)))
+    return render(request, "files.html", title=f"data/ · {a['name']}", nav="apps", a=a, rel=rel, items=items, cut=cut,
+                  err=err, crumbs=crumbs, internal=datafiles.internal(rel), dests=backup.dests())
+
+
+@router.get("/apps/{slug}/files/download")
+async def files_download(request: Request, slug: str):
+    from .. import datafiles
+    get_app_or_404(slug)
+    rel = request.query_params.get("p") or ""
+    try:
+        gen = await asyncio.to_thread(datafiles.stream, slug, rel)
+    except ValueError as e:
+        flash(request, str(e), "error")
+        return go(f"/apps/{slug}/files")
+    name = os.path.basename(datafiles.clean(rel)) or "fichier"
+    P.log("info", slug, f"data/{datafiles.clean(rel)} téléchargé par {request.session.get('user')}")
+    return StreamingResponse(gen, media_type="application/octet-stream",
+                             headers={"Content-Disposition": f"attachment; filename*=UTF-8''{urllib.parse.quote(name)}"})
+
+
+@router.post("/apps/{slug}/files/upload")
+async def files_upload(request: Request, slug: str):
+    from .. import datafiles
+    get_app_or_404(slug)
+    f = await request.form()
+    up = f.get("file")
+    folder = datafiles.clean(f.get("p") or "")
+    back = go(f"/apps/{slug}/files?p={urllib.parse.quote(folder)}")
+    if not up or not getattr(up, "filename", ""):
+        flash(request, "Choisis un fichier.", "error")
+        return back
+    name = datafiles.clean(f.get("name") or os.path.basename(up.filename))
+    rel = f"{folder}/{name}" if folder else name
+    os.makedirs(P.WORK_TMP, mode=0o700, exist_ok=True)
+    tmp = f"{P.WORK_TMP}/envoi-{slug}-{secrets.token_hex(6)}"
+    size = 0
+    try:
+        with open(tmp, "wb") as out:
+            while chunk := await up.read(1024 * 1024):
+                size += len(chunk)
+                if size > datafiles.MAX_UPLOAD:
+                    raise ValueError("fichier trop gros (200 Mo au plus)")
+                out.write(chunk)
+        prev = await asyncio.to_thread(datafiles.write, slug, rel, tmp)
+        P.log("info", slug, f"data/{rel} remplacé par {request.session.get('user')}"
+              + (f" (ancienne version : {prev})" if prev else " (nouveau fichier)"))
+        flash(request, f"data/{rel} enregistré." + (f" L'ancienne version est gardée dans {prev}." if prev else ""))
+    except (ValueError, RuntimeError) as e:
+        flash(request, str(e), "error")
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    return back
+
+
+@router.post("/apps/{slug}/files/restore")
+async def files_restore(request: Request, slug: str):
+    from .. import datafiles
+    get_app_or_404(slug)
+    f = await request.form()
+    rel = datafiles.clean(f.get("p") or "")
+    folder = os.path.dirname(rel)
+    try:
+        snap, prev = await asyncio.to_thread(datafiles.restore_file, slug, rel, f.get("dest") or "gdrive")
+        when = time.strftime("%d/%m %H:%M", time.localtime(snap["ts"]))
+        P.log("ok", slug, f"data/{rel} remis depuis la sauvegarde du {when} par {request.session.get('user')}")
+        flash(request, f"data/{rel} remis tel qu'il était le {when}." + (f" La version d'avant est gardée dans {prev}." if prev else ""))
+    except (ValueError, RuntimeError) as e:
+        flash(request, str(e), "error")
+    return go(f"/apps/{slug}/files?p={urllib.parse.quote(folder)}")
 
 
 @router.post("/apps/{slug}/node/move")

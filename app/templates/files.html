@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="bar"><div><div class="crumb"><a href="/">Applications</a> / <a href="/apps/{{ a.slug }}">{{ a.name }}</a> /</div>
+  <h1 class="mono" style="font-size:1.2rem"><a href="/apps/{{ a.slug }}/files">data</a>{% for name, path in crumbs %} / <a href="/apps/{{ a.slug }}/files?p={{ path | urlencode }}">{{ name }}</a>{% endfor %}</h1>
+  <span class="hint">Dossier persistant de l'appli, sur {{ 'la console' if a.node == 'local' else 'le nœud ' ~ a.node }}. Un fichier remplacé est d'abord copié sur la console.{% if internal %} <strong>Dossier interne de Hangar : en lecture seulement.</strong>{% endif %}</span></div></div>
+{% if err %}<div class="flash error" role="status">{{ err }}</div>{% endif %}
+<section class="panel">
+  <div class="tablebox"><table>
+    <thead><tr><th>Nom</th><th>Taille</th><th>Modifié</th><th></th></tr></thead>
+    <tbody>
+    {% if rel %}<tr><td colspan="4"><a href="/apps/{{ a.slug }}/files?p={{ (rel.rsplit('/', 1)[0] if '/' in rel else '') | urlencode }}">⬑ dossier parent</a></td></tr>{% endif %}
+    {% for it in items %}{% set path = (rel ~ '/' ~ it.name) if rel else it.name %}<tr>
+      <td class="mono">{% if it.type == 'd' %}📁 <a href="/apps/{{ a.slug }}/files?p={{ path | urlencode }}">{{ it.name }}/</a>{% elif it.type == 'l' %}↪ {{ it.name }} <span class="hint">(lien)</span>{% else %}{{ it.name }}{% endif %}</td>
+      <td class="mono">{{ '' if it.type == 'd' else it.size | size }}</td><td class="hint">{{ it.mtime | when }}</td>
+      <td style="white-space:nowrap">{% if it.type == 'f' %}<a class="btn sm" href="/apps/{{ a.slug }}/files/download?p={{ path | urlencode }}">Télécharger</a>
+        {% if dests and not internal %}<form class="inline" method="post" action="/apps/{{ a.slug }}/files/restore" data-confirm="Remettre {{ it.name }} tel qu'il était dans la dernière sauvegarde ? La version actuelle est gardée."><input type="hidden" name="p" value="{{ path }}"><input type="hidden" name="dest" value="{{ dests[0].id }}"><button class="btn sm">Depuis la sauvegarde</button></form>{% endif %}{% endif %}</td></tr>
+    {% else %}<tr><td colspan="4" class="empty">Dossier vide.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+  {% if cut %}<p class="hint">Les 1000 premiers éléments seulement.</p>{% endif %}
+</section>
+{% if not internal and not err %}
+<form class="panel" method="post" action="/apps/{{ a.slug }}/files/upload" enctype="multipart/form-data" style="margin-top:16px;display:flex;flex-direction:column;gap:10px">
+  <h2 style="margin:0">Ajouter ou remplacer un fichier ici</h2>
+  <input type="hidden" name="p" value="{{ rel }}">
+  <div class="inlinefield" style="flex-wrap:wrap"><input type="file" name="file" required aria-label="Fichier">
+    <input name="name" placeholder="nom (facultatif : celui du fichier)" spellcheck="false" aria-label="Nom" style="max-width:18em">
+    <button class="btn sm primary" data-confirm="Écrire ce fichier dans data/{{ rel }} ? S'il existe, l'ancien est gardé sur la console.">Envoyer</button></div>
+  <span class="hint">200 Mo au plus. Le fichier prend le propriétaire et les droits de l'ancien (ou du dossier). L'appli n'est pas redémarrée : redémarre-la si elle ne relit pas ses fichiers.</span>
+</form>
+{% endif %}
+{% if dests %}<form class="panel" method="post" action="/apps/{{ a.slug }}/files/restore" style="margin-top:16px;display:flex;flex-direction:column;gap:10px">
+  <h2 style="margin:0">Remettre un fichier supprimé</h2>
+  <div class="inlinefield" style="flex-wrap:wrap"><span class="mono">data/</span><input name="p" value="{{ (rel ~ '/') if rel else '' }}" spellcheck="false" aria-label="Chemin dans data/" style="min-width:18em">
+    <select name="dest" aria-label="Sauvegarde">{% for d in dests %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}</select>
+    <button class="btn sm">Remettre depuis la dernière sauvegarde</button></div>
+</form>{% endif %}
+{% endblock %}
