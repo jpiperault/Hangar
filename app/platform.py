@@ -1585,6 +1585,8 @@ def deploy(slug, version, kind, previous=None):
             alerts.send_async(f"{a['name']} : {verb} de {version} en échec",
                               detail + ("" if state == "error" else f"\n{old} est resté en ligne."),
                               priority=4 if state == "ok" else 5, tags=["x"])
+        from . import history
+        history.record(slug, "Hangar (déploiement)")   # réglage remis par un retour automatique, ou première prise
         if ok:
             from . import ha
             ha.after_deploy(slug)
@@ -1666,6 +1668,8 @@ def delete(slug):
             hooks.forget(slug)
             perms.forget_app(slug)
             protect.drop(slug)
+            from . import history
+            history.drop(slug)
             db.x("DELETE FROM apps WHERE slug = ?", (slug,))
             D.set_routes(slug, [])
             preprod.forget(slug)
@@ -1686,6 +1690,8 @@ def delete(slug):
         hooks.forget(slug)
         perms.forget_app(slug)
         protect.drop(slug)
+        from . import history
+        history.drop(slug)
         preprod.forget(slug)
         if ha.get(slug):   # haute dispo : base dédiée rapatriée dans le PostgreSQL partagé, secours et instances retirés
             ha.disable(slug, "suppression", locked=True)

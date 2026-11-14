@@ -195,6 +195,28 @@ async def app_crash_op(request: Request, slug: str, fp: str, op: str):
     return go(f"/apps/{slug}#mobile")
 
 
+@router.post("/apps/{slug}/history/{hid}/restore")
+async def app_history_restore(request: Request, slug: str, hid: int):
+    from .. import history
+    a = get_app_or_404(slug)
+    snap = history.get(slug, hid)
+    if not snap:
+        return go(f"/apps/{slug}#historique")
+    if a["state"] == "deploying":
+        flash(request, "Un déploiement est en cours : réessaie dans un instant.", "error")
+        return go(f"/apps/{slug}#historique")
+    when = time.strftime("%d/%m %H:%M", time.localtime(db.one("SELECT ts FROM app_history WHERE id = ?", (hid,))["ts"]))
+    previous = {**dict(a), "_run": runopts.of(slug)}
+    history.restore(slug, snap)
+    P.log("info", slug, f"réglages du {when} remis")
+    if a["version"]:
+        P.spawn(P.deploy, slug, a["version"], "config", previous)
+        flash(request, f"Réglages du {when} remis : l'appli est redéployée (si elle ne démarre pas, les réglages d'avant reviennent).")
+    else:
+        flash(request, f"Réglages du {when} remis.")
+    return go(f"/apps/{slug}#historique")
+
+
 @router.post("/apps/{slug}/protect/{op}")
 async def app_protect(request: Request, slug: str, op: str):
     from .. import protect

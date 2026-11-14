@@ -1,5 +1,5 @@
 """Console Hangar : application web (démarrage, protections communes). Les routes sont dans app/routes/."""
-import asyncio  # noqa: F401  (utilisé par les essais : main.asyncio.sleep)
+import asyncio
 import ipaddress
 import os
 import secrets
@@ -11,7 +11,7 @@ from fastapi.responses import PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import access, cache, crashes, db, i18n, monitor, perms
+from . import access, cache, crashes, db, history, i18n, monitor, perms
 from . import platform as P
 from .routes.common import HERE, SESSION_IDLE
 
@@ -109,6 +109,10 @@ async def guard(request: Request, call_next):
             path = urllib.parse.urlsplit(back).path if back.startswith(("http", "/")) else "/"
             return RedirectResponse(path if path.startswith("/") and not path.startswith("//") else "/", status_code=303)
     response = await call_next(request)
+    if request.method == "POST" and response.status_code < 400:   # réglages d'une appli : historique (history.py)
+        m = perms.APP_RE.match(request.url.path)
+        if m and m.group(1) != "new" and request.session.get("user"):
+            await asyncio.to_thread(history.record, m.group(1), request.session.get("user"))
     if request.method not in ("GET", "HEAD", "OPTIONS") or request.url.path.endswith(AUDIT_GET):
         _audit(request, request.session.get("user") or (request.url.path == "/login" and "(connexion)") or None, ip,
                response.status_code)

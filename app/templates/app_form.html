@@ -429,6 +429,15 @@
       <button class="btn sm" formaction="/apps/{{ a.slug }}/smoke?test=1" {{ 'disabled' if a.status != 'running' }}>Enregistrer et tester sur la version en ligne</button></div>
   </form>
   {% endif %}
+  <section class="panel" id="historique" style="display:flex;flex-direction:column;gap:8px">
+    <h2 style="margin:0">Historique des réglages</h2>
+    <p class="hint" style="margin:0">Chaque changement de réglage (image, variables, mémoire, port, démarrage…), qui l'a fait et quand. « Revenir » remet ces réglages et redéploie ; si l'appli ne démarre pas, ceux d'avant reviennent. Les valeurs des variables ne sont pas affichées.</p>
+    {% for h in hist %}
+    <div class="cert" style="align-items:flex-start"><span><strong>{{ h.ts | when }}</strong> <span class="hint">· {{ h.user or '?' }}</span>
+      {% for lbl, before, after in h.changes %}<br><span class="hint">{{ lbl }}{% if before or after %} : {% if before %}<span class="mono">{{ before }}</span> → {% endif %}<span class="mono">{{ after }}</span>{% endif %}</span>{% endfor %}</span>
+      {% if h.current %}<span class="pill s-running">en place</span>{% else %}<form class="inline" method="post" action="/apps/{{ a.slug }}/history/{{ h.id }}/restore" data-confirm="Remettre les réglages du {{ h.ts | when }} et redéployer ?"><button class="btn sm" {{ 'disabled' if a.status == 'deploying' }}>Revenir</button></form>{% endif %}</div>
+    {% else %}<p class="hint" style="margin:0">Rien pour l'instant : le premier changement de réglage sera noté ici.</p>{% endfor %}
+  </section>
   <form class="panel danger" id="supprimer" method="post" action="/apps/{{ a.slug }}/delete">
     <h2>Supprimer l'application</h2>
     <p class="hint">Le conteneur et les adresses sont supprimés. Le dossier data/ et un dump de la base sont gardés dans /srv/backups/deleted.</p>
