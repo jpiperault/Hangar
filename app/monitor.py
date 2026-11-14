@@ -352,6 +352,8 @@ def _loop():
         _every("backup_age", 3600, check_backup_age)
         _every("weekly_report", 600, report.maybe_send)
         _every("purge_uptime", 86400, report.purge)
+        from . import images
+        _every("image_cleanup", 3600, images.tick)   # sans effet si l'option est coupée ou hors du jour choisi
         time.sleep(max(5, 60 - (time.time() - t0)))
 
 

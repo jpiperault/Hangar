@@ -1,0 +1,6 @@
+{% set total = pv.values() | selectattr('bytes', 'defined') | map(attribute='bytes') | sum %}
+<p class="hint" style="margin:0"><strong>Maintenant : {{ total | size }} récupérables</strong> en supprimant les anciennes versions.</p>
+<ul class="hint" style="margin:4px 0 0;padding-left:18px">
+{% for n, r in pv.items() %}<li>{{ n }} : {% if r.error %}<span class="lv-warn">illisible ({{ r.error }})</span>{% elif r.images %}{{ r.images | length }} image{{ 's' if r.images | length > 1 }}, {{ r.bytes | size }}
+  <span class="mono">({% for i in r.images[:4] %}{{ i.ref }}{{ ', ' if not loop.last }}{% endfor %}{{ '…' if r.images | length > 4 }})</span>{% else %}rien{% endif %}</li>{% endfor %}
+</ul>

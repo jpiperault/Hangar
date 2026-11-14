@@ -4,9 +4,9 @@ import re
 
 from fastapi import APIRouter, Request
 
-from .. import alerts, cache, db, report, runopts, system
+from .. import alerts, cache, db, images, report, runopts, system
 from .. import platform as P
-from .common import _int, flash, go, render
+from .common import _int, flash, go, render, tpl
 
 router = APIRouter()
 
@@ -26,6 +26,7 @@ async def system_page(request: Request):
                   since=db.kv_get("sys_pending_since") or {}, auto=system.auto_settings(),
                   tzs=system.tz_settings(), tz_common=system.TZ_COMMON, tz_all=system.timezones(),
                   tz_now=await asyncio.to_thread(cache.get, "tz_now", 600, _tz_now), chans=alerts.channels(),
+                  img=images.settings(), img_last=db.kv_get("image_cleanup_last"),
                   health_modes=runopts.HEALTH_MODES, health_default=db.kv_get("health_mode") or "lenient",
                   levels=[(1, "toutes, même discrètes"), (3, "normales et plus"), (4, "importantes et urgentes"), (5, "urgentes seulement")])
 
@@ -97,6 +98,29 @@ async def system_report(request: Request):
     sent, err = await asyncio.to_thread(report.send, None, True)
     flash(request, "Rapport envoyé sur ntfy." if sent else f"Rapport non envoyé : {err}", "ok" if sent else "error")
     return go("/system#alertes")
+
+
+@router.post("/system/images")
+async def system_images(request: Request):
+    f = await request.form()
+    images.save(f.get("on") == "on", _int(f.get("keep"), 1, 20, 3), _int(f.get("day"), 0, 6, 6), f.get("build_cache") == "on")
+    s = images.settings()
+    P.log("info", "console", "nettoyage des images " + (f"activé (garde {s['keep']} versions)" if s["on"] else "désactivé"))
+    flash(request, "Nettoyage des images enregistré.")
+    return go("/system#images")
+
+
+@router.post("/system/images/run")
+async def system_images_run(request: Request):
+    P.spawn(images.run, "à la main")
+    flash(request, "Nettoyage des images lancé : le résultat arrive dans le journal dans un instant.")
+    return go("/system#images")
+
+
+@router.get("/system/images/preview")
+async def system_images_preview(request: Request):
+    pv = await asyncio.to_thread(images.preview)
+    return tpl.TemplateResponse(request, "_images_preview.html", {"pv": pv})
 
 
 @router.post("/system/health")

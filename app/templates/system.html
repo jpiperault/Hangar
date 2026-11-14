@@ -63,6 +63,18 @@
     {% else %}<p class="hint">Pas encore vérifié : clique sur « Rechercher les mises à jour ».</p>{% endif %}
   </section>
 
+  <form class="panel" id="images" method="post" action="/system/images" style="display:flex;flex-direction:column;gap:10px">
+    <h2 style="margin:0">Nettoyage des images Docker</h2>
+    <p class="hint" style="margin:0">Les anciennes versions des applis s'accumulent sur chaque machine. Sont toujours gardées : la version en ligne, la précédente (retour arrière), les plus récentes, et toute image utilisée par un conteneur. Les images de PostgreSQL, Valkey, MySQL… ne sont jamais touchées.</p>
+    <label class="check"><input type="checkbox" name="on" {{ 'checked' if img.on }}><span>Nettoyer chaque semaine, la nuit du</span>
+      <select name="day" aria-label="Jour">{% for d in ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"] %}<option value="{{ loop.index0 }}" {{ 'selected' if img.day == loop.index0 }}>{{ d }}</option>{% endfor %}</select></label>
+    <div class="inlinefield"><span>Garder</span><input name="keep" type="number" min="1" max="20" value="{{ img.keep }}" style="max-width:5em" aria-label="Versions gardées"><span class="hint">versions de chaque appli (en plus de celle en ligne et de la précédente)</span></div>
+    <label class="check"><input type="checkbox" name="build_cache" {{ 'checked' if img.build_cache }}><span>Vider aussi le cache de construction de plus de 7 jours (applis et sites construits depuis Git)</span></label>
+    <div data-lazy="/system/images/preview"><p class="hint" style="margin:0">Calcul de la place récupérable…</p></div>
+    {% if img_last %}<p class="hint" style="margin:0">Dernier passage {{ img_last.ts | ago }} ({{ img_last.trigger }}) : {{ img_last.removed }} image(s), {{ img_last.freed | size }} libérés{% if img_last.errors %} · <span class="lv-warn">{{ img_last.errors | length }} erreur(s)</span>{% endif %}.</p>{% endif %}
+    <div class="acts" style="justify-content:flex-start;gap:8px"><button class="btn sm primary">Enregistrer</button>
+      <button class="btn sm" formaction="/system/images/run" data-confirm="Supprimer maintenant les anciennes images sur toutes les machines ?">Nettoyer maintenant</button></div>
+  </form>
   <form class="panel" id="sante" method="post" action="/system/health" style="display:flex;flex-direction:column;gap:10px">
     <h2 style="margin:0">Contrôle de santé des applis</h2>
     <p class="hint" style="margin:0">Réponses de l'adresse de santé qui valident un déploiement et que la supervision accepte. Chaque appli peut choisir autrement (fiche → Réglages → Démarrage et santé).</p>
