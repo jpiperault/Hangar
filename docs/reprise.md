@@ -1,5 +1,7 @@
 # Installer Hangar sur un nouveau serveur et tout restaurer
 
+*English version : [en/recovery.md](en/recovery.md).*
+
 Ce guide sert dans trois cas :
 - le serveur actuel est perdu ;
 - tu passes sur une autre machine (un autre conteneur, ou un serveur dédié chez un hébergeur) ;
@@ -138,7 +140,18 @@ Ces éléments sont à refaire à la main :
 - le jeton du tunnel ;
 - les accès Drive et NAS ;
 - la clé SSH de la console pour les nœuds (une nouvelle est créée : recolle sa ligne d'autorisation sur chaque nœud) ;
-- le compte administrateur de la console.
+- le compte administrateur de la console, et la double authentification des comptes ;
+- les webhooks de publication (secret à recréer dans la fiche de l'appli, puis dans GitHub) ;
+- les images corrigées (paquets système) : refaites par « Corriger maintenant », ou toutes seules en mode automatique ;
+- les répliques MySQL/MariaDB des secours : reconstruites quand la haute dispo est remise en place.
+
+## Bloqué hors de la console
+
+- **Mot de passe perdu** : en root sur la console, `hangar passwd <compte>` (liste : `hangar users`).
+- **Téléphone de double authentification perdu** (et codes de secours aussi) : un autre administrateur peut la
+  retirer depuis Accès et comptes ; sinon, en root sur la console, `hangar 2fa-reset <compte>`.
+- **Adresse ou réseau de la console changés par erreur** : sans confirmation dans les 3 minutes, l'ancien réglage
+  revient tout seul ; à la main, `hangar access-revert`.
 
 ## Ajouter un VPS ou un serveur dédié comme nœud
 

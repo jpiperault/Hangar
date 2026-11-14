@@ -1,5 +1,7 @@
 # Hangar
 
+*English version: [README.en.md](README.en.md).*
+
 Hébergeur d'applications auto-hébergé : sites, API, applis web, jeux, outils open source et services, sur une ou plusieurs machines, avec une console d'administration web accessible uniquement depuis le réseau local. Les backends d'applis mobiles (Android, iOS) y ont en plus leurs outils : découverte du serveur, configuration à distance, rapports de plantage.
 
 - Chaque appli a un **type** (appli web, API, backend mobile…) qui adapte le formulaire et ses réglages par défaut, et tourne dans **un conteneur Docker** (un projet Compose par appli dans `/srv/apps/<id>`).
