@@ -100,19 +100,21 @@
 
 <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
   <form class="panel" id="alertes" method="post" action="/system/alerts">
-    <h2>Alertes sur ton téléphone</h2>
+    <h2>Alertes</h2>
+    <p class="hint" style="margin:0">Par ntfy (ci-dessous), par e-mail, Discord ou Telegram (panneau suivant), ou plusieurs à la fois.</p>
     <ol class="steps">
       <li>Installe l'appli <strong>ntfy</strong> (Play Store ou F-Droid).</li>
       <li>Appuie sur « + », puis abonne-toi au sujet <code>{{ s.ntfy_topic }}</code>{% if s.ntfy_server != 'https://ntfy.sh' %} sur le serveur <code>{{ s.ntfy_server }}</code>{% endif %}.</li>
       <li>Envoie une notification de test.</li>
     </ol>
     <label class="check"><input type="checkbox" name="alerts_on" {{ 'checked' if s.alerts_on == '1' }}><span>Alertes activées</span></label>
-    <div class="field"><label for="ntfy_topic">Sujet</label><input id="ntfy_topic" name="ntfy_topic" value="{{ s.ntfy_topic }}" spellcheck="false">
+    <div class="field"><label for="ntfy_topic">Sujet ntfy</label><input id="ntfy_topic" name="ntfy_topic" value="{{ s.ntfy_topic }}" spellcheck="false" placeholder="vide : pas de ntfy">
       <span class="hint">Garde-le secret : sur ntfy.sh, quiconque connaît le sujet peut lire les alertes. Elles contiennent les noms de tes applis et les erreurs, jamais de mot de passe.</span></div>
     <div class="row2">
       <div class="field"><label for="ntfy_server">Serveur</label><input id="ntfy_server" name="ntfy_server" value="{{ s.ntfy_server }}" spellcheck="false"></div>
       <div class="field"><label for="ntfy_token">Jeton (optionnel)</label><input id="ntfy_token" name="ntfy_token" type="password" value="{{ '••••••' if s.ntfy_token }}" autocomplete="new-password" spellcheck="false"></div>
     </div>
+    <div class="field"><label for="ntfy_min">Sur ntfy</label><select id="ntfy_min" name="ntfy_min">{% for v, l in levels %}<option value="{{ v }}" {{ 'selected' if (s.ntfy_min or '1') | int == v }}>{{ l }}</option>{% endfor %}</select></div>
     <span class="hint">Tu reçois une alerte quand :
       <ul>
         <li>une appli ne répond plus depuis 2 minutes, puis quand elle revient ;</li>
@@ -127,10 +129,51 @@
       Une alerte plus discrète signale aussi une nouvelle version d'appli ou de composant (console ou nœud), et rappelle une mise à jour qui attend depuis plus de 14 jours.</span>
     <div class="bar" style="justify-content:flex-start">
       <button class="btn primary sm">Enregistrer</button>
-      <button class="btn sm" formaction="/system/alerts/test">Envoyer un test</button>
+      <button class="btn sm" formaction="/system/alerts/test">Tester tous les canaux</button>
       <button class="btn sm" formaction="/system/report">Envoyer le rapport de la semaine</button>
     </div>
   </form>
+
+  <section class="panel" id="canaux" style="display:flex;flex-direction:column;gap:12px">
+    <h2 style="margin:0">Autres canaux d'alerte</h2>
+    {% set em = chans.email or {} %}{% set dc = chans.discord or {} %}{% set tg = chans.telegram or {} %}
+    <details id="canal-email" {{ 'open' if em.on }}><summary><strong>E-mail</strong> <span class="pill {{ 's-running' if em.on else 's-stopped' }}">{{ 'activé' if em.on else 'désactivé' }}</span></summary>
+      <form method="post" action="/system/alerts/channel/email" autocomplete="off" style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+        <div class="row2">
+          <div class="field"><label for="em_host">Serveur SMTP</label><input id="em_host" name="host" value="{{ em.host or '' }}" spellcheck="false" placeholder="smtp.exemple.com"></div>
+          <div class="field"><label for="em_port">Port</label><input id="em_port" name="port" inputmode="numeric" value="{{ em.port or 587 }}"></div>
+          <div class="field"><label for="em_sec">Chiffrement</label><select id="em_sec" name="security">{% for k, l in [('starttls', 'STARTTLS (587)'), ('ssl', 'SSL/TLS (465)'), ('none', 'aucun (relais local)')] %}<option value="{{ k }}" {{ 'selected' if (em.security or 'starttls') == k }}>{{ l }}</option>{% endfor %}</select></div>
+          <div class="field"><label for="em_user">Identifiant</label><input id="em_user" name="user" value="{{ em.user or '' }}" spellcheck="false" autocomplete="off"></div>
+          <div class="field"><label for="em_pw">Mot de passe</label><input id="em_pw" name="password" type="password" value="{{ '••••••' if em.password }}" autocomplete="new-password"></div>
+          <div class="field"><label for="em_from">Expéditeur</label><input id="em_from" name="from" value="{{ em['from'] or '' }}" spellcheck="false" placeholder="vide : l'identifiant"></div>
+        </div>
+        <div class="field"><label for="em_to">Destinataires</label><input id="em_to" name="to" value="{{ (em.to or []) | join(', ') }}" spellcheck="false" placeholder="moi@exemple.com, equipe@exemple.com"></div>
+        <div class="field"><label for="em_min">Envoyer</label><select id="em_min" name="min">{% for v, l in levels %}<option value="{{ v }}" {{ 'selected' if (em.min or 4) == v }}>{{ l }}</option>{% endfor %}</select></div>
+        <label class="check"><input type="checkbox" name="on" {{ 'checked' if em.on }}><span>Activé</span></label>
+        <div class="acts" style="justify-content:flex-start;gap:8px"><button class="btn sm primary">Enregistrer</button><button class="btn sm" formaction="/system/alerts/channel/email/test">Envoyer un test</button></div>
+        <span class="hint">Un compte d'envoi de ton fournisseur (ou un service comme Brevo, Mailjet, Fastmail). « Envoyer un test » enregistre d'abord ce qui est saisi.</span>
+      </form></details>
+    <details id="canal-discord" {{ 'open' if dc.on }}><summary><strong>Discord</strong> <span class="pill {{ 's-running' if dc.on else 's-stopped' }}">{{ 'activé' if dc.on else 'désactivé' }}</span></summary>
+      <form method="post" action="/system/alerts/channel/discord" autocomplete="off" style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+        <div class="field"><label for="dc_url">Adresse du webhook</label><input id="dc_url" name="url" type="password" value="{{ '••••••' if dc.url }}" spellcheck="false" autocomplete="new-password" placeholder="https://discord.com/api/webhooks/…">
+          <span class="hint">Sur le salon : Modifier le salon → Intégrations → Webhooks → Nouveau webhook → Copier l'URL.</span></div>
+        <div class="field"><label for="dc_min">Envoyer</label><select id="dc_min" name="min">{% for v, l in levels %}<option value="{{ v }}" {{ 'selected' if (dc.min or 3) == v }}>{{ l }}</option>{% endfor %}</select></div>
+        <label class="check"><input type="checkbox" name="on" {{ 'checked' if dc.on }}><span>Activé</span></label>
+        <div class="acts" style="justify-content:flex-start;gap:8px"><button class="btn sm primary">Enregistrer</button><button class="btn sm" formaction="/system/alerts/channel/discord/test">Envoyer un test</button></div>
+      </form></details>
+    <details id="canal-telegram" {{ 'open' if tg.on }}><summary><strong>Telegram</strong> <span class="pill {{ 's-running' if tg.on else 's-stopped' }}">{{ 'activé' if tg.on else 'désactivé' }}</span></summary>
+      <form method="post" action="/system/alerts/channel/telegram" autocomplete="off" style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+        <ol class="steps"><li>Écris à <strong>@BotFather</strong> : /newbot, et copie le jeton qu'il donne.</li><li>Envoie un message à ton bot (ou ajoute-le à un groupe et écris-y).</li><li>« Trouver ma conversation », puis « Envoyer un test ».</li></ol>
+        <div class="row2">
+          <div class="field"><label for="tg_token">Jeton du bot</label><input id="tg_token" name="token" type="password" value="{{ '••••••' if tg.token }}" spellcheck="false" autocomplete="new-password"></div>
+          <div class="field"><label for="tg_chat">Conversation (chat_id)</label><input id="tg_chat" name="chat_id" value="{{ tg.chat_id or '' }}" spellcheck="false"></div>
+        </div>
+        <div class="field"><label for="tg_min">Envoyer</label><select id="tg_min" name="min">{% for v, l in levels %}<option value="{{ v }}" {{ 'selected' if (tg.min or 3) == v }}>{{ l }}</option>{% endfor %}</select></div>
+        <label class="check"><input type="checkbox" name="on" {{ 'checked' if tg.on }}><span>Activé</span></label>
+        <div class="acts" style="justify-content:flex-start;gap:8px"><button class="btn sm primary">Enregistrer</button><button class="btn sm" formaction="/system/alerts/channel/telegram?detect=1">Trouver ma conversation</button><button class="btn sm" formaction="/system/alerts/channel/telegram/test">Envoyer un test</button></div>
+      </form></details>
+    <p class="hint" style="margin:0">Les alertes contiennent les noms de tes applis et les erreurs, jamais de mot de passe. Un canal en panne n'empêche pas les autres ; l'échec est noté dans le journal.</p>
+  </section>
 
   <section class="panel">
     <h2>Machine</h2>

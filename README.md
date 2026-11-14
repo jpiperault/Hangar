@@ -37,7 +37,7 @@ FastAPI + Jinja, sans build front. Elle écoute en HTTPS (certificat auto-signé
 - Les **sauvegardes** couvrent tous les nœuds : le `data/` des applis distantes est recopié chaque nuit sur la console avant l'envoi chiffré ; restauration et archives fonctionnent quel que soit le nœud.
 - **Archives manuelles** à télécharger (fiche, base et `data/` de chaque appli), **chiffrées** (gpg AES-256, mot de passe des sauvegardes), restaurables ici ou sur un autre serveur Hangar : les applis absentes sont recréées.
 - **Supervision** de toutes les machines (console et nœuds) : processeur, mémoire, disque, Docker, PostgreSQL, Caddy, pare-feu.
-- **Alertes ntfy** sur le téléphone : appli qui ne répond plus, échec de déploiement, de sauvegarde ou de mise à jour, disque, mémoire, PostgreSQL, tunnel ; pour chaque nœud : injoignable, disque, mémoire, Docker, PostgreSQL, pare-feu, Caddy s'il reçoit le web en direct.
+- **Alertes** par ntfy, e-mail, Discord ou Telegram (seuil de priorité par canal) : appli qui ne répond plus, échec de déploiement, de sauvegarde ou de mise à jour, disque, mémoire, PostgreSQL, tunnel ; pour chaque nœud : injoignable, disque, mémoire, Docker, PostgreSQL, pare-feu, Caddy s'il reçoit le web en direct.
 - **Nouvelles versions** : les tags x.y.z des images sont vérifiés toutes les 6 h, avec un bouton pour déployer la nouvelle version.
 - **Base de données** de chaque appli : taille, tables, export `.sql.gz`, import (`.sql`, `.sql.gz`, `.dump`) et remise à zéro, avec copie de sécurité.
 - **Mises à jour système** (Debian, Docker, Caddy, cloudflared, PostgreSQL) de la console et de chaque nœud, depuis la page Système, avec retour à la version précédente si le service ne repart pas, rappel si une mise à jour attend depuis plus de 14 jours, et option de mises à jour automatiques la nuit.
@@ -48,7 +48,7 @@ FastAPI + Jinja, sans build front. Elle écoute en HTTPS (certificat auto-signé
 - **Redis (Valkey)** à la demande pour une appli : sur son réseau cloisonné, persistant dans `data/`, `REDIS_URL` injectée.
 - **MySQL 8.4 ou MariaDB 11.4** à la demande : base propre à l'appli, exportée de façon cohérente avant chaque sauvegarde, archive ou déplacement, et rechargée depuis cet export après une restauration (`MYSQL_HOST`, `MYSQL_URL`…).
 - **Logs** consultables (période, recherche, erreurs seulement) et **alertes sur motif** (`Exception`, `OutOfMemory`…).
-- **Rapport hebdomadaire** sur ntfy le lundi : disponibilité, trafic, sauvegardes, mises à jour, machines, incidents.
+- **Rapport hebdomadaire** le lundi sur les canaux d'alerte : disponibilité, trafic, sauvegardes, mises à jour, machines, incidents.
 - **Vérifications après déploiement** : adresses qui doivent répondre comme prévu (code, texte, `{version}`) pour garder une nouvelle version.
 - **Processeur max** par appli, et alertes quand une appli frôle sa mémoire, reste bridée ou redémarre toute seule.
 - **Affinité par partie** en instances multiples : même partie (en-tête, paramètre, cookie ou adresse) → même instance.
@@ -64,7 +64,7 @@ FastAPI + Jinja, sans build front. Elle écoute en HTTPS (certificat auto-signé
 
 ```
 app/                 code de la console : main.py (démarrage), routes/ (pages par thème), platform.py (déploiements, Caddy), db.py (registre SQLite),
-                     backup.py, monitor.py (surveillance), alerts.py (ntfy), stats.py, system.py (mises à jour),
+                     backup.py, monitor.py (surveillance), alerts.py (ntfy, e-mail, Discord, Telegram), stats.py, system.py (mises à jour),
                      dbadmin.py (bases), registry.py (API des registres Docker)
 deploy/              fichiers système installés sur le serveur (copies de référence)
   systemd/           hangar, platform-backup (+timer), platform-firewall, drop-in caddy
