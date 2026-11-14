@@ -7,7 +7,7 @@ import time
 from . import db
 from . import platform as P
 
-SAFETY = "/srv/backups/avant-import"
+SAFETY = f"{P.BACKUPS}/avant-import"
 
 
 INFO_SQL = ("SELECT 'size', pg_database_size(current_database()), 0 "

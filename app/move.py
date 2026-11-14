@@ -14,7 +14,7 @@ import time
 from . import alerts, db
 from . import platform as P
 
-SAFE = "/srv/backups/avant-deplacement"
+SAFE = f"{P.BACKUPS}/avant-deplacement"
 
 
 def _dump(slug, node, path):

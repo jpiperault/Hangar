@@ -151,7 +151,7 @@ def test_caddy_client_web(app_row, monkeypatch):
     assert "rewrite * /.well-known/hangar/crash/web/mon-jeu" in conf and "rewrite * /mon-jeu.json" in conf
     import tempfile
     with tempfile.NamedTemporaryFile("w", suffix=".caddy", delete=False) as fh:
-        fh.write(conf)
+        fh.write(conf.replace(P.ACCESS_LOG, fh.name + ".log"))   # sans root : journal dans un fichier à soi
     r = subprocess.run(["caddy", "validate", "--config", fh.name, "--adapter", "caddyfile"], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr[-400:]
     db.update_app("mon-jeu", web_client=0)

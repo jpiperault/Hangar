@@ -21,7 +21,8 @@ from . import domains as D
 
 PLATFORM = "/srv/platform"
 APPS_DIR = "/srv/apps"
-BACKUPS = "/srv/backups"
+BACKUPS = os.environ.get("HANGAR_BACKUPS", "/srv/backups")   # essais : dossier jetable
+WORK_TMP = os.environ.get("HANGAR_IMPORTS_TMP", f"{BACKUPS}/restore-tmp")   # extractions et builds temporaires
 CADDYFILE = f"{PLATFORM}/Caddyfile"
 PUBLIC = f"{PLATFORM}/public"
 ENV_FILE = f"{PLATFORM}/.env"

@@ -155,7 +155,7 @@ def activate(slug, n):
 
 
 def publish_zip(slug, path, label):
-    work = f"/srv/backups/restore-tmp/site-{slug}-{time.time_ns()}"
+    work = f"{P.WORK_TMP}/site-{slug}-{time.time_ns()}"
     try:
         root = extract_zip(path, work)
         n = _new_release(slug, root, f"zip · {label}")
@@ -196,7 +196,7 @@ def build_git(slug):
         return
     _busy.add(slug)
     g = meta(slug)["git"]
-    work = f"/srv/backups/restore-tmp/build-{slug}-{time.time_ns()}"
+    work = f"{P.WORK_TMP}/build-{slug}-{time.time_ns()}"
     try:
         os.makedirs(work, mode=0o755)
         P.log("info", slug, f"construction du site depuis {g['repo']} ({g['branch']})")

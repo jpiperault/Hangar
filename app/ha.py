@@ -35,7 +35,7 @@ from . import platform as P
 
 PG_IMAGE = "postgres:17"          # même version que le PostgreSQL partagé
 DB_PORT_OFFSET = 10000            # port privé de la base dédiée : port de l'appli + 10000
-SAFE = "/srv/backups/avant-haute-dispo"
+SAFE = f"{P.BACKUPS}/avant-haute-dispo"
 FENCE_MARK = "/var/lib/hangar/fenced"
 SRC = "/opt/hangar/deploy/node"
 

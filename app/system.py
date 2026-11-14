@@ -265,7 +265,7 @@ def _pg_dump_before(node):
         from . import backup
         backup._dump_all_local()
         return
-    f = f"/srv/backups/avant-maj-postgres-{time.strftime('%Y%m%d-%H%M%S')}.sql.gz"
+    f = f"{P.BACKUPS}/avant-maj-postgres-{time.strftime('%Y%m%d-%H%M%S')}.sql.gz"
     rc, out = P.nsh(node, f"set -o pipefail; umask 077; install -d -m 0700 /srv/backups; "
                           f"docker exec {P.PG} pg_dumpall -U platform | gzip > {f}.tmp && mv {f}.tmp {f}; "
                           f"ls -1t /srv/backups/avant-maj-postgres-*.sql.gz | tail -n +4 | xargs -r rm -f", timeout=3600)

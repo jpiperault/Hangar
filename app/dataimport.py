@@ -18,8 +18,8 @@ import time
 from . import backup, db
 from . import platform as P
 
-IMPORTS = os.environ.get("HANGAR_IMPORTS", "/srv/backups/imports")
-TMP = os.environ.get("HANGAR_IMPORTS_TMP", "/srv/backups/restore-tmp")
+IMPORTS = os.environ.get("HANGAR_IMPORTS", f"{P.BACKUPS}/imports")
+TMP = P.WORK_TMP
 MAX = 20 * 1024 ** 3
 NAME_RE = re.compile(r"^import-[0-9]{8}-[0-9]{6}\.tar\.gz$")
 SLUG = r"[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?"

@@ -20,7 +20,7 @@ from . import platform as P
 
 SUFFIX = "-preprod"
 COPY_KEYS = ["source", "image", "port", "health_path", "mem_mb", "env", "db", "data_user", "expose", "sub"]
-TMP = "/srv/backups/restore-tmp"
+TMP = P.WORK_TMP
 
 
 def links():

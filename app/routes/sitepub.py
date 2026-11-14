@@ -23,8 +23,8 @@ async def site_upload(request: Request, slug: str):
     if not up or not getattr(up, "filename", ""):
         flash(request, "Choisis le zip du dossier construit.", "error")
         return go(f"/apps/{slug}#site")
-    os.makedirs("/srv/backups/restore-tmp", mode=0o700, exist_ok=True)
-    part = f"/srv/backups/restore-tmp/site-{slug}-{secrets.token_hex(6)}.zip"
+    os.makedirs(P.WORK_TMP, mode=0o700, exist_ok=True)
+    part = f"{P.WORK_TMP}/site-{slug}-{secrets.token_hex(6)}.zip"
     size = 0
     try:
         with open(part, "wb") as out:

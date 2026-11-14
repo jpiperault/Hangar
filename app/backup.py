@@ -33,11 +33,11 @@ FOLDER = "Hangar-sauvegardes"
 REPO = f"rclone:{REMOTE}:{FOLDER}"
 NAS_CONF = f"{BK}/nas.rclone.conf"
 NAS_REMOTE = "hangar-nas"
-ARCHIVES = "/srv/backups/archives"
-STAGING = "/srv/backups/staging"
-LOCAL_PG = "/srv/backups/postgres"
+ARCHIVES = f"{P.BACKUPS}/archives"
+STAGING = f"{P.BACKUPS}/staging"
+LOCAL_PG = f"{P.BACKUPS}/postgres"
 LOCK = "/run/hangar-backup.lock"
-SAFETY = "/srv/backups/avant-restauration"
+SAFETY = f"{P.BACKUPS}/avant-restauration"
 
 
 # ---------------------------------------------------------------- état
@@ -833,7 +833,7 @@ def revert(slug, name, parts, prev="ok"):
     """Remet l'appli dans l'état d'une copie de sécurité (thread de la console ; l'appelant l'a mise en « deploying »).
     L'état actuel est lui-même mis de côté avant : un retour arrière s'annule de la même façon."""
     c, started = safety_copy(name), False
-    work = f"/srv/backups/restore-tmp/revert-{time.strftime('%Y%m%d-%H%M%S')}"
+    work = f"{P.WORK_TMP}/revert-{time.strftime('%Y%m%d-%H%M%S')}"
     try:
         if not c or c["slug"] != slug:
             raise RuntimeError("copie de sécurité introuvable")
@@ -864,7 +864,7 @@ def restore_app(slug, dest_id, snap, parts):
         d = dest(dest_id)
         if not a or not d:
             return
-        tmp = f"/srv/backups/restore-tmp/{slug}-{time.strftime('%Y%m%d-%H%M%S')}"
+        tmp = f"{P.WORK_TMP}/{slug}-{time.strftime('%Y%m%d-%H%M%S')}"
         db.update_app(slug, state="deploying")
         P.log("info", slug, f"restauration de {', '.join(parts)} depuis {d['name']}, sauvegarde {snap}")
         try:
@@ -1063,7 +1063,7 @@ def restore_archive(name, choices):
         return
     manifest = read_manifest(path)
     entries = {a["slug"]: a for a in manifest["apps"]}
-    tmp = f"/srv/backups/restore-tmp/archive-{time.strftime('%Y%m%d-%H%M%S')}"
+    tmp = f"{P.WORK_TMP}/archive-{time.strftime('%Y%m%d-%H%M%S')}"
     os.makedirs(tmp, mode=0o700, exist_ok=True)
     try:
         P.log("info", "sauvegarde", f"restauration depuis l'archive {name} : {', '.join(choices)}")
@@ -1147,7 +1147,7 @@ def snapshot_to_archive(dest_id, snap):
     d = dest(dest_id)
     if not d:
         return
-    tmp = f"/srv/backups/restore-tmp/instantane-{time.strftime('%Y%m%d-%H%M%S')}"
+    tmp = f"{P.WORK_TMP}/instantane-{time.strftime('%Y%m%d-%H%M%S')}"
     os.makedirs(tmp, mode=0o700, exist_ok=True)
     P.log("info", "sauvegarde", f"préparation de la reprise complète depuis {d['name']}, sauvegarde {snap}")
     try:
@@ -1242,7 +1242,7 @@ def save_upload_name():
 
 # ---------------------------------------------------------------- test de restauration
 
-VERIFY = "/srv/backups/verif-restauration"   # hors des chemins sauvegardés
+VERIFY = f"{P.BACKUPS}/verif-restauration"   # hors des chemins sauvegardés
 VERIFY_EVERY = 7 * 86400
 
 

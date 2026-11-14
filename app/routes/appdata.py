@@ -58,7 +58,7 @@ async def db_export(request: Request, slug: str):
                              headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
-IMPORT_DIR = "/srv/backups/import-tmp"
+IMPORT_DIR = f"{P.BACKUPS}/import-tmp"
 IMPORT_MAX = 2 * 1024 ** 3
 
 
