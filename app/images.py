@@ -78,6 +78,7 @@ def plan(node, keep=None):
     for a in apps:
         if a["source"] in ("image", "git"):
             by_repo.setdefault(_repo(a), []).append(a)
+            by_repo.setdefault(f"hangar-patch/{a['slug']}", []).append(a)   # images corrigées (patch.py)
     out = []
     for repo, owners in by_repo.items():
         imgs = sorted([i for i in named if i["repo"] == repo], key=lambda i: i["created"], reverse=True)
@@ -90,6 +91,7 @@ def plan(node, keep=None):
             for v in (a["version"], a["prev_version"]):
                 if v:
                     protect.add(P.image_ref(a, v))
+                    protect.add(P.base_ref(a, v))   # l'originale reste : base de la correction, et repli
         recent = [i["ref"] for i in imgs][:keep]
         for i in imgs:
             if i["id"] in used or i["ref"] in protect or i["ref"] in recent:

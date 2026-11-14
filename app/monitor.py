@@ -207,7 +207,12 @@ def check_usage(now=None):
 
 
 def _running_digests(a):
-    """Empreintes (RepoDigests) de l'image du conteneur en marche ; None si inconnu."""
+    """Empreintes (RepoDigests) de l'image du conteneur en marche ; None si inconnu. Image corrigée (patch.py) : celles
+    de l'image d'origine dont elle est tirée."""
+    from . import patch
+    p = patch.active(a, a["version"])
+    if p:
+        return set(p.get("base_digests") or []) or None
     rc, img = P.dk(a["node"], "inspect", "-f", "{{.Image}}", f"app-{a['slug']}-app-1", timeout=20)
     if rc or not img.strip():
         return None

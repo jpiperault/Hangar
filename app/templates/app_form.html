@@ -137,6 +137,7 @@
   <a href="#hautedispo" data-tab="hautedispo">Haute dispo et nœud</a>
   <a href="#taches" data-tab="taches">Tâches{% if jobs %} <span class="hint">{{ jobs | length }}</span>{% endif %}</a>
   {% if has_clients %}<a href="#mobile" data-tab="mobile">Clients{% if crash_groups | selectattr('status', 'equalto', 'open') | list %} <span class="pill s-error">{{ crash_groups | selectattr('status', 'equalto', 'open') | list | length }}</span>{% endif %}</a>{% endif %}
+  <a href="#vulns" data-tab="vulns">Vulnérabilités{% if vul and vul.counts and vul.counts.CRITICAL %} <span class="pill s-error">{{ vul.counts.CRITICAL }}</span>{% elif vul and vul.counts and vul.counts.HIGH %} <span class="hint">{{ vul.counts.HIGH }}</span>{% endif %}</a>
   <a href="#restauration" data-tab="restauration">Revenir en arrière</a>
   {% endif %}
 </nav>
@@ -429,20 +430,6 @@
       <button class="btn sm" formaction="/apps/{{ a.slug }}/smoke?test=1" {{ 'disabled' if a.status != 'running' }}>Enregistrer et tester sur la version en ligne</button></div>
   </form>
   {% endif %}
-  {% if not kind.static %}<form class="panel" id="vulns" method="post" action="/apps/{{ a.slug }}/vulns/scan" style="display:flex;flex-direction:column;gap:8px">
-    <h2 style="margin:0">Vulnérabilités de l'image {% if vul and vul.counts %}{% if vul.counts.CRITICAL %}<span class="pill s-error">{{ vul.counts.CRITICAL }} critique{{ 's' if vul.counts.CRITICAL > 1 }}</span>{% endif %}{% if vul.counts.HIGH %} <span class="pill s-deploying">{{ vul.counts.HIGH }} élevée{{ 's' if vul.counts.HIGH > 1 }}</span>{% endif %}{% if not vul.counts.CRITICAL and not vul.counts.HIGH %}<span class="pill s-running">aucune grave</span>{% endif %}{% endif %}</h2>
-    {% if vul_busy %}<p class="hint" style="margin:0"><span class="pill s-deploying">analyse en cours</span></p>
-    {% elif not vul %}<p class="hint" style="margin:0">Pas encore analysée : Trivy liste les failles connues (élevées et critiques) des paquets de l'image, et la version qui les corrige.</p>
-    {% elif vul.error %}<p class="lv-warn" style="margin:0">Analyse impossible ({{ vul.ts | ago }}) : {{ vul.error }}</p>
-    {% else %}<p class="hint" style="margin:0">{{ vul.image }}, analysée {{ vul.ts | ago }}. Une faille « corrigée en » disparaît en reconstruisant l'image avec des paquets à jour (ou en passant à une version plus récente).</p>
-      {% if vul["items"] %}<details {{ 'open' if vul.counts.CRITICAL }}><summary class="hint">Détail ({{ vul["items"] | length }})</summary><div class="tablebox"><table>
-        <thead><tr><th>Faille</th><th>Gravité</th><th>Paquet</th><th>Installé</th><th>Corrigée en</th></tr></thead>
-        <tbody>{% for v in vul["items"][:60] %}<tr><td class="mono"><a href="https://avd.aquasec.com/nvd/{{ v.id | lower }}" target="_blank" rel="noopener">{{ v.id }}</a><div class="hint">{{ v.title }}</div></td>
-          <td><span class="pill {{ 's-error' if v.sev == 'CRITICAL' else 's-deploying' }}">{{ 'critique' if v.sev == 'CRITICAL' else 'élevée' }}</span></td>
-          <td class="mono">{{ v.pkg }}</td><td class="mono">{{ v.installed }}</td><td class="mono">{{ v.fixed or '—' }}</td></tr>{% endfor %}</tbody>
-      </table></div></details>{% endif %}{% endif %}
-    <div><button class="btn sm" {{ 'disabled' if vul_busy }}>Analyser maintenant</button></div>
-  </form>{% endif %}
   <section class="panel" id="historique" style="display:flex;flex-direction:column;gap:8px">
     <h2 style="margin:0">Historique des réglages</h2>
     <p class="hint" style="margin:0">Chaque changement de réglage (image, variables, mémoire, port, démarrage…), qui l'a fait et quand. « Revenir » remet ces réglages et redéploie ; si l'appli ne démarre pas, ceux d'avant reviennent. Les valeurs des variables ne sont pas affichées.</p>
@@ -748,6 +735,8 @@ try { /* … */ } catch (e) { hangar.report(e); }</pre>{% endif %}
   </script>
 </div>
 {% endif %}
+
+<div data-pane="vulns" style="display:flex;flex-direction:column;gap:20px">{% include "_vulns_pane.html" %}</div>
 
 <div data-pane="restauration">
   {% if safety %}

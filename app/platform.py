@@ -916,10 +916,18 @@ def safe_tag(ref):
     return re.sub(r"[^A-Za-z0-9_.-]", "-", ref)[:120]
 
 
-def image_ref(a, version):
+def base_ref(a, version):
+    """Image d'origine de l'appli pour cette version (sans correction des paquets système)."""
     if a["source"] == "git":
         return f"hangar/{a['slug']}:{safe_tag(version)}"
     return f"{a['image']}:{version}"
+
+
+def image_ref(a, version):
+    """Image déployée : l'image corrigée (patch.py) si elle existe pour cette version, sinon l'originale."""
+    from . import patch
+    p = patch.active(a, version) if a.get("slug") else None
+    return p["ref"] if p else base_ref(a, version)
 
 
 # ---------------------------------------------------------------- registres privés
@@ -1478,6 +1486,12 @@ def request_rebuild(slug):
     _rebuild.add(slug)
 
 
+def patched(a, version):
+    """Image corrigée (patch.py) en place pour cette version, ou None."""
+    from . import patch
+    return patch.active(a, version)
+
+
 def up_timeout(slug):
     """Délai d'un « compose up » : long avec une base MySQL/MariaDB, que l'appli attend (rechargement d'un export)."""
     from . import services
@@ -1486,8 +1500,16 @@ def up_timeout(slug):
 
 def _up(a, version):
     d, node = app_dir(a["slug"]), a.get("node")
+    pa = patched(a, version)
+    if pa and (a["slug"] in _rebuild or dk(node, "image", "inspect", pa["ref"], timeout=30)[0]):
+        # nouvelle construction demandée, ou image corrigée absente de cette machine (appli déplacée…) : l'originale
+        from . import patch
+        patch.forget(a["slug"])
+        log("warn", a["slug"], "image corrigée abandonnée : " + ("nouvelle construction" if a["slug"] in _rebuild
+                                                                else "absente de cette machine") + ", image d'origine utilisée")
+        pa = None
     write_compose(a, version)
-    if a["source"] == "git":
+    if a["source"] == "git" and not pa:
         rc, _ = dk(node, "image", "inspect", image_ref(a, version), timeout=30)
         if rc or a["slug"] in _rebuild:   # absente, ou reconstruction demandée (webhook : nouveaux commits)
             _rebuild.discard(a["slug"])
@@ -1495,7 +1517,7 @@ def _up(a, version):
             rc, out = dk(node, "compose", "build", "--pull", cwd=d, timeout=1800)
             if rc:
                 return False, "build impossible : " + tail(out)
-    else:
+    if a["source"] != "git" and not pa:
         rc, out = dk(node, "compose", "pull", "--quiet", cwd=d, timeout=900)
         if rc:
             rc2, _ = dk(node, "image", "inspect", image_ref(a, version), timeout=30)
@@ -1691,9 +1713,10 @@ def delete(slug):
         hooks.forget(slug)
         perms.forget_app(slug)
         protect.drop(slug)
-        from . import history, vulns
+        from . import history, patch, vulns
         history.drop(slug)
         vulns.drop(slug)
+        patch.forget(slug)
         preprod.forget(slug)
         if ha.get(slug):   # haute dispo : base dédiée rapatriée dans le PostgreSQL partagé, secours et instances retirés
             ha.disable(slug, "suppression", locked=True)

@@ -48,7 +48,8 @@ def parse(report):
             counts[sev] += 1
             items.append({"id": v.get("VulnerabilityID"), "sev": sev, "pkg": v.get("PkgName"),
                           "installed": v.get("InstalledVersion"), "fixed": v.get("FixedVersion") or "",
-                          "title": (v.get("Title") or "")[:160], "target": res.get("Target", "")[:80]})
+                          "title": (v.get("Title") or "")[:160], "target": res.get("Target", "")[:120],
+                          "class": "os" if res.get("Class") == "os-pkgs" else "lang", "type": res.get("Type") or ""})
     seen, uniq = set(), []
     for it in sorted(items, key=lambda x: (x["sev"] != "CRITICAL", not x["fixed"], x["id"] or "")):
         k = (it["id"], it["pkg"], it["installed"])
@@ -93,6 +94,8 @@ def scan(slug):
                         priority=4, tags=["warning", "lock"], key=f"vuln:{slug}", cooldown=86400)
         P.log("warn" if counts["CRITICAL"] else "info", slug,
               f"analyse de {ref} : {counts['CRITICAL']} critique(s), {counts['HIGH']} élevée(s)")
+        from . import patch
+        patch.maybe_auto(slug, res)   # correction automatique des paquets système, si réglée
         return res
     except Exception as e:
         return _store(slug, {"ts": time.time(), "error": str(e)[:300]})
@@ -136,3 +139,49 @@ def tick(now=None):
     for a in db.apps():
         if a["kind"] != "static" and a["desired"] == "running":
             scan(a["slug"])
+
+
+def groups(items):
+    """Failles regroupées par paquet, en trois familles : système corrigeable, dépendances de l'appli, sans correctif.
+    Chaque groupe : {pkg, installed, fixed, sev (la pire), ids, titles, type, target}."""
+    fam = {"os": {}, "lang": {}, "nofix": {}}
+    for i in items:
+        key = "nofix" if not i["fixed"] else i.get("class") or ("os" if "(" in i.get("target", "") else "lang")
+        g = fam[key].setdefault((i["pkg"], i["installed"]), {"pkg": i["pkg"], "installed": i["installed"], "fixed": set(),
+                                                              "sev": "HIGH", "ids": [], "titles": [], "type": i.get("type", ""),
+                                                              "target": i.get("target", "")})
+        if i["fixed"]:
+            g["fixed"] |= {x.strip() for x in i["fixed"].split(",") if x.strip()}
+        if i["sev"] == "CRITICAL":
+            g["sev"] = "CRITICAL"
+        g["ids"].append(i["id"])
+        if i["title"] and len(g["titles"]) < 3:
+            g["titles"].append(i["title"])
+    out = {}
+    for k, d in fam.items():
+        lst = [{**g, "fixed": ", ".join(sorted(g["fixed"]))} for g in d.values()]
+        out[k] = sorted(lst, key=lambda g: (g["sev"] != "CRITICAL", -len(g["ids"]), g["pkg"] or ""))
+    return out
+
+
+def prompt(a, res):
+    """Prompt à donner à l'assistant de code du projet pour corriger les dépendances vulnérables de l'appli."""
+    g = groups(res.get("items") or [])["lang"]
+    if not g:
+        return ""
+    lines = [f"# Corriger les dépendances vulnérables de {a['name']}", "",
+             f"L'image en ligne ({res.get('image')}) contient des dépendances avec des failles connues, déjà corrigées "
+             "dans des versions plus récentes. Mets-les à jour dans le projet (fichier de dépendances, verrou), "
+             "reconstruis, et vérifie que tout marche encore.", "",
+             "| Paquet | Installé | Corrigé en | Gravité | Failles |", "|---|---|---|---|---|"]
+    for x in g:
+        lines.append(f"| {x['pkg']} | {x['installed']} | {x['fixed']} | {'critique' if x['sev'] == 'CRITICAL' else 'élevée'} | "
+                     f"{', '.join(x['ids'][:6])}{'…' if len(x['ids']) > 6 else ''} |")
+    lines += ["", "À faire :",
+              "1. Monte chaque paquet au moins à la version « Corrigé en » (la plus basse qui corrige, si plusieurs : "
+              "reste dans la même version majeure quand c'est possible).",
+              "2. Si un paquet n'est qu'une dépendance indirecte, monte le paquet qui l'amène, ou fixe sa version.",
+              "3. Lis les notes de version des montées de version majeures et adapte le code si besoin.",
+              "4. Lance les tests, puis construis l'image et vérifie qu'elle démarre et que /health répond.",
+              "5. Publie une nouvelle version (tag) : Hangar la déploie et la réanalyse."]
+    return "\n".join(lines)

@@ -67,6 +67,10 @@ def move(slug, target):
         t0 = time.time()
         stopped = False
         P.log("info", slug, f"déplacement de {src} vers {target}")
+        from . import patch
+        if patch.of(slug):   # l'image corrigée n'existe que sur l'ancienne machine : l'originale part sur la cible
+            patch.forget(slug)
+            P.log("info", slug, "image corrigée laissée : la cible part de l'image d'origine (à corriger de nouveau)")
         db.update_app(slug, state="deploying")
         try:
             # 1. sans coupure : image sur la cible, première copie de data/

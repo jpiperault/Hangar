@@ -4,7 +4,7 @@ import re
 
 from fastapi import APIRouter, Request
 
-from .. import alerts, cache, db, images, report, runopts, services, system, vulns
+from .. import alerts, cache, db, images, patch, report, runopts, services, system, vulns
 from .. import platform as P
 from .common import _int, flash, go, render, tpl_for
 
@@ -27,7 +27,7 @@ async def system_page(request: Request):
                   tzs=system.tz_settings(), tz_common=system.TZ_COMMON, tz_all=system.timezones(),
                   tz_now=await asyncio.to_thread(cache.get, "tz_now", 600, _tz_now), chans=alerts.channels(),
                   img=images.settings(), img_last=db.kv_get("image_cleanup_last"), rep=report.options(),
-                  vs=vulns.settings(), vres=vulns.results(),
+                  vs=vulns.settings(), vres=vulns.results(), auto_fix=patch.auto_default(),
                   app_names={a["slug"]: a["name"] for a in db.apps()},
                   relay=services.relay() or {}, relay_users=services.mail_users(),
                   health_modes=runopts.HEALTH_MODES, health_default=db.kv_get("health_mode") or "lenient",
@@ -173,6 +173,7 @@ async def system_mail_relay(request: Request):
 async def system_vulns(request: Request):
     f = await request.form()
     vulns.save(f.get("on") == "on", _int(f.get("day"), 0, 6, 0), f.get("after_deploy") == "on")
+    patch.set_auto_default(f.get("auto_fix") == "on")
     flash(request, "Analyse des vulnérabilités enregistrée.")
     return go("/system#vulns")
 

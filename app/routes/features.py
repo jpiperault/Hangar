@@ -195,6 +195,42 @@ async def app_crash_op(request: Request, slug: str, fp: str, op: str):
     return go(f"/apps/{slug}#mobile")
 
 
+@router.post("/apps/{slug}/vulns/fix")
+async def app_vuln_fix(request: Request, slug: str):
+    from .. import patch
+    a = get_app_or_404(slug)
+    if patch.busy(slug) or a["state"] == "deploying":
+        flash(request, "Une opération est déjà en cours sur cette appli.", "error")
+    else:
+        P.spawn(patch.apply, slug, request.session.get("user") or "?")
+        flash(request, "Correction lancée : construction de l'image corrigée, déploiement, puis nouvelle analyse "
+              "(quelques minutes). Si l'appli ne répond plus, l'image d'avant revient toute seule.")
+    return go(f"/apps/{slug}#vulns")
+
+
+@router.post("/apps/{slug}/vulns/undo")
+async def app_vuln_undo(request: Request, slug: str):
+    from .. import patch
+    a = get_app_or_404(slug)
+    if patch.of(slug) and a["state"] != "deploying":
+        patch.forget(slug)
+        P.log("info", slug, f"image corrigée retirée par {request.session.get('user')} : retour à l'image d'origine")
+        P.spawn(P.deploy, slug, a["version"], "update")
+        flash(request, "Retour à l'image d'origine : l'appli est redéployée.")
+    return go(f"/apps/{slug}#vulns")
+
+
+@router.post("/apps/{slug}/vulns/mode")
+async def app_vuln_mode(request: Request, slug: str):
+    from .. import patch
+    get_app_or_404(slug)
+    m = (await request.form()).get("mode") or ""
+    patch.set_mode(slug, m)
+    flash(request, {"auto": "Correction automatique des paquets système activée pour cette appli.",
+                    "manuel": "Correction à la main seulement pour cette appli."}.get(m, "Correction : comme le réglage général."))
+    return go(f"/apps/{slug}#vulns")
+
+
 @router.post("/apps/{slug}/vulns/scan")
 async def app_vuln_scan(request: Request, slug: str):
     from .. import vulns
