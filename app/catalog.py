@@ -12,7 +12,9 @@ dossiers de data/ montés ailleurs : « mounts »), PostgreSQL, MySQL/MariaDB (�
 import re
 import secrets
 
-CATS = {"site": "Sites et blogs", "stats": "Statistiques et surveillance", "secu": "Sécurité",
+from . import db
+
+CATS = {"perso": "Mes modèles", "site": "Sites et blogs", "stats": "Statistiques et surveillance", "secu": "Sécurité",
         "dev": "Développement", "auto": "Automatisation", "doc": "Documentation", "tools": "Outils"}
 
 CATALOG = [
@@ -78,6 +80,54 @@ CATALOG = [
      "env": "DB_TYPE=postgres\nDB_HOST={db_host}\nDB_PORT={db_port}\nDB_NAME={db_name}\nDB_USER={db_user}\nDB_PASS={db_password}",
      "after": "Un assistant crée le compte administrateur à la première visite.",
      "site": "https://js.wiki"},
+    {"id": "nextcloud", "name": "Nextcloud", "cat": "doc", "color": "#0082c9",
+     "desc": "Fichiers, agenda, contacts et partage, synchronisés sur tous tes appareils.",
+     "image": "nextcloud", "version": "32-apache", "port": 80, "health": "/status.php", "mem": 768, "db": True,
+     "mounts": "www:/var/www/html",
+     "env": ("POSTGRES_HOST={db_host}\nPOSTGRES_DB={db_name}\nPOSTGRES_USER={db_user}\nPOSTGRES_PASSWORD={db_password}\n"
+             "NEXTCLOUD_ADMIN_USER=admin\nNEXTCLOUD_ADMIN_PASSWORD={secret}\nNEXTCLOUD_TRUSTED_DOMAINS={host}\n"
+             "OVERWRITEPROTOCOL=https\nOVERWRITEHOST={host}\nTRUSTED_PROXIES=10.0.0.0/8 172.16.0.0/12 192.168.0.0/16\n"
+             "PHP_UPLOAD_LIMIT=2G"),
+     "after": "Connexion avec admin ; son mot de passe est dans les variables de l'appli (NEXTCLOUD_ADMIN_PASSWORD). "
+              "La première installation prend une à deux minutes. Fichiers gardés dans data/www.",
+     "site": "https://nextcloud.com"},
+    {"id": "freshrss", "name": "FreshRSS", "cat": "doc", "color": "#0062be",
+     "desc": "Lecteur de flux RSS : suis blogs, journaux et chaînes au même endroit.",
+     "image": "freshrss/freshrss", "version": "1", "port": 80, "health": "/", "mem": 128, "db": True,
+     "mounts": "data:/var/www/FreshRSS/data, extensions:/var/www/FreshRSS/extensions",
+     "env": ("CRON_MIN=*/20\nTRUSTED_PROXY=10.0.0.0/8 172.16.0.0/12 192.168.0.0/16\n"
+             "FRESHRSS_INSTALL=--api-enabled --base-url {url_noslash} --default-user admin --language fr --db-type pgsql "
+             "--db-host {db_host}:{db_port} --db-user {db_user} --db-password {db_password} --db-base {db_name}\n"
+             "FRESHRSS_USER=--user admin --password {secret} --language fr"),
+     "after": "Connexion avec admin ; son mot de passe est dans les variables de l'appli (FRESHRSS_USER). "
+              "Flux rafraîchis toutes les 20 minutes.",
+     "site": "https://freshrss.org"},
+    {"id": "linkding", "name": "Linkding", "cat": "tools", "color": "#5856e0",
+     "desc": "Marque-pages partagés entre tes navigateurs, avec étiquettes et archive.",
+     "image": "sissbruecker/linkding", "version": "1.42.0", "port": 9090, "health": "/health", "mem": 192, "db": True,
+     "mounts": "data:/etc/linkding/data",
+     "env": ("LD_DB_ENGINE=postgres\nLD_DB_HOST={db_host}\nLD_DB_PORT={db_port}\nLD_DB_DATABASE={db_name}\n"
+             "LD_DB_USER={db_user}\nLD_DB_PASSWORD={db_password}\nLD_SUPERUSER_NAME=admin\nLD_SUPERUSER_PASSWORD={secret}\n"
+             "LD_CSRF_TRUSTED_ORIGINS={url_noslash}"),
+     "after": "Connexion avec admin ; son mot de passe est dans les variables (LD_SUPERUSER_PASSWORD).",
+     "site": "https://linkding.link"},
+    {"id": "vikunja", "name": "Vikunja", "cat": "tools", "color": "#1973ff",
+     "desc": "Listes de tâches et projets, en liste, tableau Kanban, Gantt ou agenda.",
+     "image": "vikunja/vikunja", "version": "latest", "port": 3456, "health": "/api/v1/info", "mem": 192, "db": True,
+     "mounts": "files:/app/vikunja/files",
+     "env": ("VIKUNJA_SERVICE_PUBLICURL={url}\nVIKUNJA_SERVICE_SECRET={secret}\nVIKUNJA_DATABASE_TYPE=postgres\n"
+             "VIKUNJA_DATABASE_HOST={db_host}\nVIKUNJA_DATABASE_DATABASE={db_name}\nVIKUNJA_DATABASE_USER={db_user}\n"
+             "VIKUNJA_DATABASE_PASSWORD={db_password}"),
+     "after": "Crée ton compte à la première visite, puis coupe les inscriptions (VIKUNJA_SERVICE_ENABLEREGISTRATION=false).",
+     "site": "https://vikunja.io"},
+    {"id": "mealie", "name": "Mealie", "cat": "tools", "color": "#e58325",
+     "desc": "Recettes, listes de courses et menus de la semaine, importés depuis n'importe quel site.",
+     "image": "ghcr.io/mealie-recipes/mealie", "version": "latest", "port": 9000, "health": "/api/app/about", "mem": 512,
+     "db": True, "mounts": "data:/app/data",
+     "env": ("BASE_URL={url_noslash}\nDB_ENGINE=postgres\nPOSTGRES_SERVER={db_host}\nPOSTGRES_PORT={db_port}\n"
+             "POSTGRES_DB={db_name}\nPOSTGRES_USER={db_user}\nPOSTGRES_PASSWORD={db_password}\nALLOW_SIGNUP=false"),
+     "after": "Connexion avec changeme@example.com / MyPassword : change-les tout de suite (Profil).",
+     "site": "https://mealie.io"},
     {"id": "it-tools", "name": "IT-Tools", "cat": "tools", "color": "#18a058",
      "desc": "Une centaine de petits outils pour développeurs : encodages, hachages, conversions, générateurs.",
      "image": "corentinth/it-tools", "version": "latest", "port": 80, "health": "/", "mem": 64, "db": False,
@@ -91,8 +141,60 @@ CATALOG = [
 ]
 
 
+def custom():
+    """Modèles enregistrés depuis une appli existante (kv « custom_catalog »)."""
+    return db.kv_get("custom_catalog") or []
+
+
+def items():
+    return custom() + CATALOG
+
+
 def get(cid):
-    return next((c for c in CATALOG if c["id"] == cid), None)
+    return next((c for c in items() if c["id"] == cid), None)
+
+
+SECRET_KEY = re.compile(r"(SECRET|TOKEN|PASSWORD|PASSWD|PASS$|_KEY$|^KEY$|APIKEY|SALT)", re.I)
+
+
+def from_app(a, name, desc):
+    """Modèle tiré d'une appli : image, port, santé, mémoire, base, services, dossiers et variables. Les valeurs des
+    variables qui ressemblent à des secrets deviennent {secret} (une nouvelle valeur à chaque installation) ; son adresse
+    devient {url} / {host}."""
+    from . import domains as D
+    from . import platform as P
+    from . import runopts, services
+    url = (D.primary_url(a["slug"]) or "").rstrip("/")
+    host = url.split("://", 1)[-1].split("/", 1)[0] if url else ""
+    env, _ = P.parse_env(a["env"])
+    lines = []
+    for k, v in env.items():
+        if SECRET_KEY.search(k):
+            v = "{secret}"
+        elif url and url in v:
+            v = v.replace(url + "/", "{url}").replace(url, "{url_noslash}")
+        elif host and host in v:
+            v = v.replace(host, "{host}")
+        lines.append(f"{k}={v}")
+    my = services.mysql(a["slug"])
+    cid = "perso-" + a["slug"]
+    return {"id": cid, "name": name[:60] or a["name"], "cat": "perso", "color": "#5f6b7a", "custom": True,
+            "desc": desc[:200] or f"Modèle tiré de l'appli {a['name']}.", "image": a["image"], "version": a["version"],
+            "port": a["port"], "health": a["health_path"], "mem": a["mem_mb"], "db": bool(a["db"]),
+            "mysql": my["engine"] if my else None, "mysql_mem": my["mem"] if my else None,
+            "mounts": runopts.of(a["slug"]).get("mounts") or "", "env": "\n".join(lines), "data_user": a["data_user"] or "",
+            "kind": a["kind"] if a["kind"] in ("web", "api", "worker", "tool") else "tool",
+            "run": {k: v for k, v in runopts.of(a["slug"]).items() if k in ("entrypoint", "command", "health_cmd", "health_mode")},
+            "after": "Modèle personnel : vérifie ses variables dans sa fiche après l'installation.", "site": url or ""}
+
+
+def save_custom(t):
+    lst = [c for c in custom() if c["id"] != t["id"]]
+    db.kv_set("custom_catalog", [t] + lst)
+
+
+def delete_custom(cid):
+    db.kv_set("custom_catalog", [c for c in custom() if c["id"] != cid])
 
 
 def render_env(tpl, vals):

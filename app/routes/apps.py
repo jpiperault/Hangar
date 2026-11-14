@@ -34,11 +34,33 @@ async def catalogue_page(request: Request):
     if not ch:
         flash(request, "Aucune machine ne peut héberger d'appli : ajoute un nœud.", "error")
         return go("/nodes")
-    cur = catalog.get(request.query_params.get("app") or "") or catalog.CATALOG[0]
+    cur = catalog.get(request.query_params.get("app") or "") or catalog.items()[0]
     used = {a["image"] for a in db.apps()}
-    return render(request, "catalogue.html", title="Installer une appli prête", nav="apps", items=catalog.CATALOG,
+    return render(request, "catalogue.html", title="Installer une appli prête", nav="apps", items=catalog.items(),
                   cats=catalog.CATS, cur=cur, used=used, domains=D.all_domains(), dft=D.default(), node_choices=ch,
                   best=max(ch, key=lambda c: c["free"])["id"], form=request.session.pop("cform", None))
+
+
+@router.post("/apps/{slug}/template")
+async def app_template(request: Request, slug: str):
+    a = get_app_or_404(slug)
+    f = await request.form()
+    if a["source"] != "image":
+        flash(request, "Seules les applis en image peuvent devenir un modèle.", "error")
+        return go(f"/apps/{slug}#modele")
+    t = catalog.from_app(a, (f.get("name") or "").strip(), (f.get("desc") or "").strip())
+    catalog.save_custom(t)
+    P.log("info", slug, f"enregistrée comme modèle « {t['name']} » dans le catalogue")
+    flash(request, f"Modèle « {t['name']} » ajouté au catalogue (Mes modèles).")
+    return go(f"/catalogue?app={t['id']}")
+
+
+@router.post("/catalogue/{cid}/delete")
+async def catalogue_delete(request: Request, cid: str):
+    if any(c["id"] == cid for c in catalog.custom()):
+        catalog.delete_custom(cid)
+        flash(request, "Modèle retiré du catalogue (les applis déjà installées ne changent pas).")
+    return go("/catalogue")
 
 
 @router.post("/catalogue/install")
@@ -78,14 +100,14 @@ async def catalogue_install(request: Request):
             "mysql_password": my_pw or ""}
     if c["db"]:
         vals["db_url"] = P.db_url({**a, "db": 1}, node)
-    d = {"name": name, "kind": "tool", "pkg": "", "source": "image", "image": c["image"], "version": c["version"],
+    d = {"name": name, "kind": c.get("kind", "tool"), "pkg": "", "source": "image", "image": c["image"], "version": c["version"],
          "port": c["port"], "health_path": c["health"], "mem_mb": c["mem"], "env": catalog.render_env(c["env"], vals),
          "db": 1 if c["db"] else 0, "db_password": pw, "data_user": c.get("data_user", ""), "node": node,
          "host_port": P.next_host_port(), "state": "deploying", "desired": "running", "created_at": time.time()}
     db.insert_app(slug, d)
     D.set_routes(slug, rts)
-    if c.get("mounts"):
-        runopts.save(slug, {"mounts": c["mounts"]})
+    if c.get("mounts") or c.get("run"):
+        runopts.save(slug, {**(c.get("run") or {}), "mounts": c.get("mounts") or ""})
     P.log("info", slug, f"installée depuis le catalogue ({c['name']}, {c['image']}:{c['version']})")
     P.spawn(P.deploy, slug, c["version"], "create")
     flash(request, f"{c['name']} en cours d'installation sur https://{host}/. {c['after']}")

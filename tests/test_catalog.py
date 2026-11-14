@@ -59,3 +59,28 @@ def test_installation(cid, monkeypatch):
     assert "catalogue" in r.headers["location"]                     # identifiant déjà pris : refusé
     db.x("DELETE FROM apps WHERE slug = ?", (cid,))
     db.x("DELETE FROM routes WHERE slug = ?", (cid,))
+
+
+def test_modele_perso(app_row, monkeypatch):
+    from app import domains as D
+    from app import runopts
+    db.kv_set("custom_catalog", None)
+    a = {**app_row, "env": "JWT_SECRET=abc\nAPI_TOKEN=xyz\nPUBLIC_URL=https://jeu.exemple.fr/\nHOST=jeu.exemple.fr\nPRIX=10",
+         "kind": "api", "data_user": ""}
+    monkeypatch.setattr(D, "primary_url", lambda slug, *x, **k: "https://jeu.exemple.fr/")
+    monkeypatch.setattr(runopts, "of", lambda slug: {"mounts": "www:/var/www/html", "command": "serve --port 8080"})
+    t = catalog.from_app(a, "Mon modèle", "")
+    assert t["env"] == "JWT_SECRET={secret}\nAPI_TOKEN={secret}\nPUBLIC_URL={url}\nHOST={host}\nPRIX=10"
+    assert t["kind"] == "api" and t["run"] == {"command": "serve --port 8080"} and t["mounts"] == "www:/var/www/html"
+    catalog.save_custom(t)
+    assert catalog.get("perso-mon-jeu")["name"] == "Mon modèle" and catalog.items()[0]["custom"]
+    out = catalog.render_env(t["env"], {"url": "https://autre.exemple.fr/", "host": "autre.exemple.fr"})
+    assert "abc" not in out and "PUBLIC_URL=https://autre.exemple.fr/" in out
+    catalog.delete_custom("perso-mon-jeu")
+    assert catalog.get("perso-mon-jeu") is None
+
+
+def test_dossiers_du_catalogue():
+    from app import runopts
+    for c in catalog.CATALOG:
+        runopts.parse_mounts(c.get("mounts", ""))

@@ -14,7 +14,7 @@
     {% for c in items %}
     <a class="catcard {{ 'on' if c.id == cur.id }}" href="/catalogue?app={{ c.id }}" data-cat="{{ c.cat }}">
       <span style="display:flex;align-items:center;gap:10px"><span class="catlogo" style="background:{{ c.color }}">{{ c.name[0] }}</span><b>{{ c.name }}</b>
-        {% if c.image in used %}<span class="pill s-running" style="margin-left:auto">installée</span>{% endif %}</span>
+        {% if c.custom %}<span class="pill s-stopped" style="margin-left:auto">mon modèle</span>{% elif c.image in used %}<span class="pill s-running" style="margin-left:auto">installée</span>{% endif %}</span>
       <small>{{ c.desc }}</small>
       <small class="hint">{{ 'PostgreSQL' if c.db else ({'mariadb': 'MariaDB', 'mysql': 'MySQL'}[c.mysql] if c.mysql else 'sans base') }} · {{ c.mem + (c.mysql_mem or 0) }} Mo</small>
     </a>
@@ -24,7 +24,7 @@
   <form class="panel" method="post" action="/catalogue/install" autocomplete="off" style="display:flex;flex-direction:column;gap:12px">
     <input type="hidden" name="app" value="{{ cur.id }}">
     <h2 style="margin:0">{{ cur.name }}</h2>
-    <p class="hint" style="margin:0">{{ cur.desc }} <a href="{{ cur.site }}" target="_blank" rel="noopener">Site du projet</a></p>
+    <p class="hint" style="margin:0">{{ cur.desc }} {% if cur.site and not cur.custom %}<a href="{{ cur.site }}" target="_blank" rel="noopener">Site du projet</a>{% endif %}</p>
     <div class="row2">
       <div class="field"><label for="cname">Nom</label><input id="cname" name="name" value="{{ fm.name or cur.name }}"></div>
       <div class="field"><label for="cslug">Identifiant</label><input id="cslug" name="slug" value="{{ fm.slug or cur.id }}" spellcheck="false"></div>
@@ -42,7 +42,8 @@
     </dl>
     <p class="hint" style="margin:0"><strong>Ensuite :</strong> {{ cur.after }}</p>
     <div><button class="btn primary">Installer {{ cur.name }}</button></div>
-    <span class="hint">L'appli devient une appli comme les autres (type « Outil ») : tout se règle ensuite dans sa fiche.</span>
+    <span class="hint">L'appli devient une appli comme les autres : tout se règle ensuite dans sa fiche.</span>
+    {% if cur.custom %}<button class="btn sm link" formaction="/catalogue/{{ cur.id }}/delete" formnovalidate data-confirm="Retirer le modèle « {{ cur.name }} » du catalogue ?">Retirer ce modèle</button>{% endif %}
   </form>
 </div>
 <script nonce="{{ csp_nonce }}">

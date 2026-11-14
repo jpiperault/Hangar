@@ -1456,6 +1456,14 @@ def prepare_data(a, version):
         if rc:
             raise RuntimeError(f"impossible d'attribuer /data à {uid}:{gid} : {tail(out, 2)}")
         log("info", a["slug"], f"/data attribué à {uid}:{gid} ({src})")
+    from . import runopts
+    subs = [sub for sub, _ in runopts.parse_mounts(runopts.of(a["slug"]).get("mounts") or "")]
+    if subs:   # dossiers montés ailleurs (www:/var/www/html…) : créés avant Docker, au même propriétaire que /data
+        cmd = " && ".join(f"install -d -o {uid} -g {gid} {d}/{x} && "
+                          f"if [ \"$(stat -c %u {d}/{x})\" != {uid} ]; then chown -R {uid}:{gid} {d}/{x}; fi" for x in subs)
+        rc, out = nsh(node, cmd, timeout=600)
+        if rc:
+            raise RuntimeError(f"dossiers de data/ ({', '.join(subs)}) : {tail(out, 2)}")
     db.update_app(a["slug"], data_owner=f"{uid}:{gid}")
 
 
