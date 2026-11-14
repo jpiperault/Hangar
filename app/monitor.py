@@ -28,7 +28,11 @@ def _probe(a):
         st = P._container_state(f"app-{a['slug']}-app-1", a["node"])
         if not st:
             return False, "conteneur absent"
-        return (st["status"] == "running"), ("" if st["status"] == "running" else f"conteneur {st['status']}")
+        if st["status"] != "running":
+            return False, f"conteneur {st['status']}"
+        if st["health"] == "unhealthy":   # commande de santé réglée dans la fiche (runopts)
+            return False, "commande de santé en échec : " + (P._health_log(f"app-{a['slug']}-app-1", a["node"]) or "?")
+        return True, ""
     url = f"http://{P.app_host(a)}:{a['host_port']}{a['health_path']}"
     try:
         with urllib.request.urlopen(url, timeout=5):

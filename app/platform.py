@@ -1045,6 +1045,8 @@ def write_compose(a, version, instance=None, role=None):
     from . import limits
     if limits.cpus(a["slug"]):        # processeur borné : une appli qui s'emballe ne ralentit pas ses voisines
         svc["cpus"] = limits.cpus(a["slug"])
+    from . import runopts
+    runopts.apply(a["slug"], svc)      # point d'entrée, commande, santé par commande
     if role is None:
         from . import ha
         role = ha.role_of(a["slug"], instance)
@@ -1269,11 +1271,13 @@ LOG_TS = re.compile(r"^\s*\[?\d{4}-\d{2}-\d{2}[T ][\d:.,]+(?:Z|[+-]\d{2}:?\d{2})
 
 def _container_state(name, node=None):
     rc, st = dk(node, "inspect", "-f",
-                "{{.State.Status}} {{.State.ExitCode}} {{.RestartCount}} {{.State.OOMKilled}}", name, timeout=15)
+                "{{.State.Status}} {{.State.ExitCode}} {{.RestartCount}} {{.State.OOMKilled}} "
+                "{{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}}", name, timeout=15)
     if rc:
         return None
-    status, code, restarts, oom = (st.split() + ["", "0", "0", "false"])[:4]
-    return {"status": status, "code": code, "restarts": int(restarts or 0), "oom": oom == "true"}
+    status, code, restarts, oom, health = (st.split() + ["", "0", "0", "false", "-"])[:5]
+    return {"status": status, "code": code, "restarts": int(restarts or 0), "oom": oom == "true",
+            "health": "" if health == "-" else health}
 
 
 def container_report(name, lines=6, node=None):
@@ -1320,9 +1324,43 @@ def _wait_running(a, settle=30, timeout=90):
     return True, f"conteneur en marche depuis {settle} s"
 
 
+def _wait_healthy(a, timeout=150):
+    """Appli avec une commande de santé : attend que Docker la déclare « healthy »."""
+    node, name = a.get("node"), f"app-{a['slug']}-app-1"
+    deadline, st = time.time() + timeout, None
+    while time.time() < deadline:
+        time.sleep(3)
+        st = _container_state(name, node)
+        if not st or st["status"] in ("exited", "dead"):
+            why = "absent" if not st else "s'est arrêté"
+            return False, f"le conteneur {why} (code {st['code'] if st else '?'}).\n{container_report(name, node=node)}"
+        if st["health"] == "healthy":
+            return True, "commande de santé réussie"
+        if st["health"] == "unhealthy":
+            break
+    last = _health_log(name, node)
+    return False, (f"commande de santé en échec ({st['health'] or 'pas de réponse'} après {timeout} s)"
+                   + (f" : {last}" if last else "") + f"\n{container_report(name, node=node)}")
+
+
+def _health_log(name, node):
+    """Sortie du dernier passage de la commande de santé (pour comprendre un échec)."""
+    rc, out = dk(node, "inspect", "-f", "{{if .State.Health}}{{json .State.Health.Log}}{{end}}", name, timeout=15)
+    try:
+        last = json.loads(out)[-1] if rc == 0 and out.strip() else None
+    except (ValueError, IndexError, TypeError):
+        last = None
+    if not last:
+        return ""
+    msg = (last.get("Output") or "").strip()
+    return f"code de sortie {last.get('ExitCode')}" + (f", « {msg[-300:]} »" if msg else "")
+
+
 def wait_health(a, timeout=90):
-    from . import kinds
+    from . import kinds, runopts
     if not kinds.http(a.get("kind")):
+        if runopts.has_health(a["slug"]):
+            return _wait_healthy(a)
         return _wait_running(a, timeout=timeout)
     node = a.get("node")
     url = f"http://{app_host(a)}:{a['host_port']}{a['health_path']}"
@@ -1428,7 +1466,9 @@ def _up(a, version):
         return False, "démarrage impossible : " + tail(out)
     ok, detail = wait_health(a)
     if not ok:
-        return False, f"healthcheck {a['health_path']} en échec : {detail}"
+        from . import kinds
+        what = f"healthcheck {a['health_path']}" if kinds.http(a.get("kind")) else "vérification de santé"
+        return False, f"{what} en échec : {detail}"
     return True, detail
 
 
@@ -1472,6 +1512,9 @@ def deploy(slug, version, kind, previous=None):
                 restore = (a, old, f"retour automatique à {old}")
             elif kind == "config" and previous:
                 db.update_app(slug, **{k: previous[k] for k in ("port", "health_path", "mem_mb", "source", "image", "env", "db", "data_user")})
+                if "_run" in previous:   # démarrage du conteneur (runopts) d'avant
+                    from . import runopts
+                    runopts.restore(slug, previous["_run"])
                 restore = (db.app(slug), old, "configuration précédente restaurée")
             if restore:
                 b, v, msg = restore
@@ -1574,6 +1617,8 @@ def delete(slug):
         services.drop(slug)
         gameports.save(slug, [])
         limits.drop(slug)
+        from . import runopts
+        runopts.drop(slug)
         preprod.forget(slug)
         if ha.get(slug):   # haute dispo : base dédiée rapatriée dans le PostgreSQL partagé, secours et instances retirés
             ha.disable(slug, "suppression", locked=True)

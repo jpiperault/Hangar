@@ -5,7 +5,7 @@ import urllib.parse
 
 from fastapi import APIRouter, Request
 
-from .. import crashes, db, jobs, limits, preprod, remoteconfig, services, smoke
+from .. import crashes, db, jobs, limits, runopts, preprod, remoteconfig, services, smoke
 from .. import domains as D
 from .. import platform as P
 from .common import flash, get_app_or_404, go, render
@@ -142,6 +142,29 @@ async def app_crash_op(request: Request, slug: str, fp: str, op: str):
         flash(request, {"resolved": "Marqué corrigé : une alerte partira s'il revient dans une version plus récente.",
                         "open": "Rouvert.", "delete": "Groupe supprimé."}[op])
     return go(f"/apps/{slug}#mobile")
+
+
+@router.post("/apps/{slug}/run")
+async def app_run(request: Request, slug: str):
+    a = get_app_or_404(slug)
+    f = await request.form()
+    before = runopts.of(slug)
+    try:
+        changed = runopts.save(slug, f)
+    except ValueError as e:
+        flash(request, str(e), "error")
+        return go(f"/apps/{slug}#demarrage")
+    if changed:
+        o = runopts.of(slug)
+        P.log("info", slug, "démarrage du conteneur : " + (", ".join(
+            f"{n} « {o[k]} »" for k, n in (("entrypoint", "point d'entrée"), ("command", "commande")) if o.get(k)) or "celui de l'image")
+              + (" ; santé par commande" if o.get("health_cmd") else ""))
+        if a["state"] != "deploying" and a["version"]:
+            P.spawn(P.deploy, slug, a["version"], "config", {**dict(a), "_run": before})
+            flash(request, "Démarrage enregistré : l'appli est redéployée (en cas d'échec, l'ancien réglage revient).")
+        else:
+            flash(request, "Démarrage enregistré : pris en compte au prochain déploiement.")
+    return go(f"/apps/{slug}#demarrage")
 
 
 @router.post("/apps/{slug}/limits")

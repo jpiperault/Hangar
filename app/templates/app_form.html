@@ -378,6 +378,16 @@
 </form>
 
 <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+  {% if not kind.static %}<form class="panel" id="demarrage" method="post" action="/apps/{{ a.slug }}/run" autocomplete="off" style="display:flex;flex-direction:column;gap:10px">
+    <h2 style="margin:0">Démarrage du conteneur</h2>
+    <p class="hint" style="margin:0">Vide : ce que prévoit l'image. Une seule ligne, découpée comme dans un terminal (les guillemets regroupent) ; aucun shell n'interprète la commande : pour enchaîner, écris <code>sh -c "…"</code>.</p>
+    <div class="field"><label for="rentry">Point d'entrée</label><input id="rentry" name="entrypoint" value="{{ run.entrypoint or '' }}" spellcheck="false" placeholder="celui de l'image"></div>
+    <div class="field"><label for="rcmd">Commande</label><input id="rcmd" name="command" value="{{ run.command or '' }}" spellcheck="false" placeholder="celle de l'image, par exemple : python worker.py --queue emails"></div>
+    <div class="field"><label for="rhealth">Commande de santé</label><input id="rhealth" name="health_cmd" value="{{ run.health_cmd or '' }}" spellcheck="false" placeholder="par exemple : redis-cli ping, pg_isready, test -f /tmp/vivant">
+      <span class="hint">Lancée dans le conteneur toutes les 15 s ; code de sortie 0 = en bonne santé, 3 échecs de suite = malade.{% if not kind.http %} Le déploiement attend qu'elle réussisse (sinon la version précédente revient) et la supervision t'alerte si elle échoue.{% else %} La santé de l'appli reste vérifiée par <code>{{ a.health_path }}</code> ; celle-ci s'ajoute dans l'état Docker.{% endif %}</span></div>
+    <div><button class="btn sm primary" {{ 'disabled' if a.status == 'deploying' }}>Enregistrer et redéployer</button></div>
+  </form>
+  {% endif %}
   {% if not kind.static %}<form class="panel" id="limites" method="post" action="/apps/{{ a.slug }}/limits" style="display:flex;flex-direction:column;gap:10px">
     <h2 style="margin:0">Processeur max</h2>
     <p class="hint" style="margin:0">Sans limite, une appli qui s'emballe peut prendre tout le processeur du nœud et ralentir les autres. Nombre de cœurs (0,5 = la moitié d'un cœur) ; vide = sans limite. Alerte si elle reste à sa limite 10 minutes, si sa mémoire dépasse 90 % pendant 5 minutes, ou si elle redémarre toute seule (tuée faute de mémoire, plantée).</p>
