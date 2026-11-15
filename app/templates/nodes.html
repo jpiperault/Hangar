@@ -87,4 +87,35 @@
   </fieldset>
   <div><button class="btn sm primary">Enregistrer et envoyer aux nœuds</button></div>
 </form>
+
+<section class="panel" id="transfert" style="margin-top:20px;display:flex;flex-direction:column;gap:12px">
+  <h2 style="margin:0">Transfert entre consoles</h2>
+  <p class="hint" style="margin:0">Un nœud et ses applis passent d'une console Hangar à une autre sans copie de données : conteneurs, data/ et bases restent en place. Pour <strong>céder</strong> un nœud d'ici, ouvre sa page, onglet Maintenance. Pour <strong>reprendre</strong> ici un nœud d'une autre console :</p>
+  <ol class="steps">
+    <li>Prépare une demande de reprise ici, et copie-la.</li>
+    <li>Sur l'autre console : page du nœud, onglet Maintenance, « Céder à une autre console » avec cette demande. Elle donne un paquet chiffré et un code.</li>
+    <li>Ici : envoie le paquet avec son code. Le nœud rejoint ce réseau privé, ses applis sont recréées et redéployées sur place.</li>
+  </ol>
+  {% if treq %}
+  <div class="cert" style="align-items:flex-start"><code class="mono" id="treq" style="word-break:break-all;max-height:7em;overflow:auto">{{ treq.text }}</code>
+    <button type="button" class="btn sm" data-copy="treq">Copier</button></div>
+  <span class="hint">Demande préparée {{ treq.created | ago }}, valable 7 jours. Elle ne contient aucun secret : les clés publiques de cette console et ce qu'elle utilise déjà (adresses privées, ports, identifiants, domaines).</span>
+  <form method="post" action="/nodes/transfer/takeover" enctype="multipart/form-data" class="inlinefield" style="flex-wrap:wrap;gap:8px" autocomplete="off">
+    <label class="sr" for="tpkg">Paquet du nœud</label><input id="tpkg" name="file" type="file" accept=".hangar-noeud" required>
+    <label class="sr" for="tcode">Code</label><input id="tcode" name="code" placeholder="Code (XXXXX-XXXXX-XXXXX-XXXXX)" spellcheck="false" autocomplete="off" required style="min-width:18em">
+    <button class="btn sm primary">Reprendre le nœud</button></form>
+  <form method="post" action="/nodes/transfer/cancel"><button class="btn sm">Annuler la demande</button></form>
+  {% else %}
+  <form method="post" action="/nodes/transfer/request"><button class="btn sm">Préparer une demande de reprise</button></form>
+  {% endif %}
+  {% for t in tin %}<div class="cert"><span><a href="/nodes/{{ t }}">{{ t }}</a> <span class="hint">reprise en cours ou en échec : voir sa page</span></span></div>{% endfor %}
+  {% if tout %}
+  <h3 style="margin:8px 0 0;font-size:.95rem">Nœuds cédés d'ici (7 derniers jours)</h3>
+  {% for t in tout %}
+  <div class="cert" style="align-items:flex-start"><span><strong>{{ t.node }}</strong> <span class="hint">cédé à {{ t.to }} {{ t.created | ago }} · {{ t.apps | length }} appli(s) : {{ t.apps | join(', ') or '—' }}</span><br>
+    {% if role == 'admin' %}Code : <code class="mono">{{ t.code }}</code>{% else %}<span class="hint">code et paquet visibles par les administrateurs</span>{% endif %}</span>
+    {% if role == 'admin' %}<a class="btn sm" href="/nodes/transfer/package/{{ t.node }}/download">Télécharger le paquet</a>{% endif %}</div>
+  {% endfor %}
+  {% endif %}
+</section>
 {% endblock %}

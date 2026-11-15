@@ -3,9 +3,9 @@ import asyncio
 import time
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
-from .. import access, db, diskuse, ha, nodes, security, stats
+from .. import access, db, diskuse, ha, nodes, security, stats, transfer
 from .. import platform as P
 from .common import flash, go, render
 
@@ -41,6 +41,7 @@ async def nodes_page(request: Request):
     return render(request, "nodes.html", title="Nœuds", nav="nodes", rows=rows, key=key, now=time.time(),
                   has=ha.settings(), hrows=hrows, crole=nodes.console_role(), on_console=apps_by.get(nodes.LOCAL, []),
                   fence_auto=len([n for n in nodes.all_nodes() if n["id"] != nodes.LOCAL]) >= 2,
+                  treq=transfer.pending_request(), tin=transfer.pending_takeovers(), tout=transfer.ceded(),
                   refresh=busy, auto_refresh=None if busy else 60)
 
 
@@ -79,6 +80,109 @@ async def nodes_remove(request: Request, node_id: str):
         flash(request, str(e), "error")
         return go(f"/nodes/{node_id}")
     return go("/nodes")
+
+
+# ---------------------------------------------------------------- transfert entre consoles
+
+@router.post("/nodes/transfer/request")
+async def transfer_request(request: Request):
+    await asyncio.to_thread(transfer.make_request)
+    flash(request, "Demande de reprise prête : copie-la dans l'autre console.")
+    return go("/nodes#transfert")
+
+
+@router.post("/nodes/transfer/cancel")
+async def transfer_cancel(request: Request):
+    transfer.cancel_request()
+    flash(request, "Demande de reprise annulée.")
+    return go("/nodes#transfert")
+
+
+@router.post("/nodes/transfer/takeover")
+async def transfer_takeover(request: Request):
+    import os
+    import tempfile
+    f = await request.form()
+    up = f.get("file")
+    if not up or not getattr(up, "filename", ""):
+        flash(request, "Choisis le paquet .hangar-noeud donné par l'autre console.", "error")
+        return go("/nodes#transfert")
+    fd, part = tempfile.mkstemp(prefix="hangar-noeud-recu-")
+    size = 0
+    try:
+        with os.fdopen(fd, "wb") as out:
+            while chunk := await up.read(1024 * 1024):
+                size += len(chunk)
+                if size > 50 * 1024 * 1024:
+                    raise ValueError("Paquet trop gros.")
+                out.write(chunk)
+        nid = await asyncio.to_thread(transfer.takeover, part, f.get("code") or "", request.session.get("user"))
+    except (ValueError, RuntimeError) as e:
+        flash(request, str(e), "error")
+        return go("/nodes#transfert")
+    finally:
+        os.remove(part)
+    flash(request, "Reprise lancée : suis l'avancement dans le journal du nœud (quelques minutes).")
+    return go(f"/nodes/{nid}#journal")
+
+
+@router.post("/nodes/{node_id}/transfer/retry")
+async def transfer_retry(request: Request, node_id: str):
+    if node_id in transfer.pending_takeovers() and (nodes.get(node_id) or {}).get("state") != "installing":
+        nodes._update(node_id, state="installing", error=None)
+        P.spawn(transfer.resume, node_id)
+        flash(request, "Reprise relancée.")
+    return go(f"/nodes/{node_id}#journal")
+
+
+@router.post("/nodes/{node_id}/transfer/abandon")
+async def transfer_abandon(request: Request, node_id: str):
+    try:
+        await asyncio.to_thread(transfer.abandon, node_id)
+        flash(request, f"Reprise de {node_id} abandonnée : le nœud est oublié ici.")
+        return go("/nodes")
+    except ValueError as e:
+        flash(request, str(e), "error")
+        return go(f"/nodes/{node_id}")
+
+
+@router.post("/nodes/{node_id}/cede/check")
+async def cede_check(request: Request, node_id: str):
+    f = await request.form()
+    text = f.get("request") or ""
+    try:
+        req = transfer.parse_request(text)
+        c = await asyncio.to_thread(transfer.check, node_id, req)
+    except ValueError as e:
+        flash(request, str(e), "error")
+        return go(f"/nodes/{node_id}#maintenance")
+    return render(request, "transfer_check.html", title="Céder le nœud", nav="nodes", c=c,
+                  req_text="".join(text.split()))
+
+
+@router.post("/nodes/{node_id}/cede")
+async def cede(request: Request, node_id: str):
+    f = await request.form()
+    if (f.get("confirm") or "").strip() != node_id:
+        flash(request, f"Tape {node_id} pour confirmer.", "error")
+        return go(f"/nodes/{node_id}#maintenance")
+    try:
+        req = transfer.parse_request(f.get("request") or "")
+        await asyncio.to_thread(transfer.cede, node_id, req, request.session.get("user"))
+    except (ValueError, RuntimeError) as e:
+        flash(request, str(e), "error")
+        return go(f"/nodes/{node_id}#maintenance")
+    flash(request, f"Nœud {node_id} cédé : télécharge le paquet et note le code, puis reprends-le sur l'autre console.")
+    return go("/nodes#transfert")
+
+
+@router.get("/nodes/transfer/package/{node_id}/download")
+async def transfer_package(request: Request, node_id: str):
+    p = transfer.package_path(node_id)
+    if not p:
+        flash(request, "Paquet introuvable (plus de 7 jours ?).", "error")
+        return go("/nodes#transfert")
+    return FileResponse(p, media_type="application/octet-stream", filename=p.rsplit("/", 1)[1])
 
 
 # ---------------------------------------------------------------- sécurité des nœuds
@@ -272,5 +376,5 @@ async def _node_render(request, node_id, sec_f=None, sec_err=None):
             sec["own"] = True
     return render(request, "node.html", title=n["name"], nav="nodes", n=n, se=se, rng=rng, ranges=list(stats.RANGES),
                   events=events, hs=hs, now=time.time(), apps=[a for a in db.apps() if a["node"] == node_id],
-                  sec=sec, cats=JOURNAL_CATS, du=diskuse.node_view(node_id), du_busy=diskuse.busy(), refresh=n["state"] == "installing" or bool(sec and sec["applying"]),
+                  sec=sec, cats=JOURNAL_CATS, tin=node_id in transfer.pending_takeovers(), du=diskuse.node_view(node_id), du_busy=diskuse.busy(), refresh=n["state"] == "installing" or bool(sec and sec["applying"]),
                   status_code=400 if sec_err else 200)

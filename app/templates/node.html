@@ -8,6 +8,13 @@
   {% if sec %}<a href="#securite" data-tablink="securite" style="text-decoration:none">{{ badge(sec.level, sec.count) }}</a>{% endif %}
 </div>
 {% if n.state == 'error' %}<div class="flash error" role="status">{{ n.error }}</div>{% endif %}
+{% if tin %}<section class="panel" style="margin-bottom:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+  <span style="flex:1;min-width:16em"><strong>Reprise depuis une autre console</strong> <span class="hint">{{ 'en cours : suis l\'avancement dans le journal du nœud.' if n.state == 'installing' else 'interrompue : corrige la cause (journal), puis réessaie. Les applis tournent toujours sur la machine.' }}</span></span>
+  {% if n.state != 'installing' %}
+  <form method="post" action="/nodes/{{ n.id }}/transfer/retry"><button class="btn sm primary">Réessayer</button></form>
+  <form method="post" action="/nodes/{{ n.id }}/transfer/abandon" data-confirm="Abandonner la reprise ? Le nœud est oublié ici ; rien n'est touché sur la machine."><button class="btn sm">Abandonner</button></form>
+  {% endif %}
+</section>{% endif %}
 
 <nav class="tabs" aria-label="Sections du nœud">
   <a href="#apercu" data-tab="apercu">Vue d'ensemble</a>
@@ -121,6 +128,12 @@
         <span class="hint">Les applis du nœud sont coupées une à deux minutes et repartent toutes seules.</span>
         <div><button class="btn sm" {{ 'disabled' if n.state != 'ok' }}>Redémarrer le nœud</button></div></form>
     </section>
+    <form class="panel" method="post" action="/nodes/{{ n.id }}/cede/check" autocomplete="off" style="display:flex;flex-direction:column;gap:10px">
+      <h2 style="margin:0">Céder à une autre console</h2>
+      <p class="hint" style="margin:0">Le nœud et ses applis passent à une autre console Hangar, sans copie : elles continuent de tourner. Prépare d'abord une demande de reprise sur l'autre console (page Nœuds, « Transfert entre consoles »), puis colle-la ici. Tu verras ce qui sera fait avant de confirmer.</p>
+      <div class="field"><label for="treq">Demande de reprise</label><textarea id="treq" name="request" rows="3" spellcheck="false" placeholder="HANGAR-REPRISE-1:…" required></textarea></div>
+      <div><button class="btn sm" {{ 'disabled' if n.state != 'ok' }}>Vérifier</button></div>
+    </form>
     <form class="panel danger" method="post" action="/nodes/{{ n.id }}/remove">
       <h2>Retirer le nœud</h2>
       <p class="hint">Possible seulement sans appli. La machine quitte le réseau privé ; Docker, PostgreSQL et ses fichiers restent dessus.</p>

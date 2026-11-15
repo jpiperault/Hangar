@@ -76,6 +76,28 @@ via `data-confirm`, see app/static/app.js), forms rejected if they come from ano
 - Apps that remain on the console are flagged on the Nodes page and on their app page; move them with the "Node" block.
 - If the console stops, the apps on the nodes keep running, each node having its own Caddy and tunnel. Only management, monitoring, failovers and backups are lost until it comes back.
 
+## Moving a node to another console (Nodes page, a node's Maintenance tab)
+
+A node and its apps move from one Hangar console to another, without copying: containers, data/, databases and
+services stay on the machine and keep running (transfer.py).
+
+1. Console taking over: "Prepare a takeover request" (text HANGAR-REPRISE-1:…, valid 7 days, no secret: SSH and
+   WireGuard public keys, private addresses, ports, IDs and domains already in use).
+2. Console handing over: node page, Maintenance, "Hand over to another console", paste the request, check.
+   Refused if the node is used for high availability, if an app ID already exists on the other side, or if an app
+   is linked to a pre-production on another node. On confirmation: the other console's SSH key is authorized
+   (limited to 10.88.0.1), a package is encrypted with a code (gpg, kept 7 days in /srv/backups/transferts and on
+   the Nodes page), the tunnel connector is stopped, the node's WireGuard switches 5 s later to the other console
+   (same private address if free there), then the node and its apps are forgotten here without being stopped.
+3. Console taking over: upload the package and the code. The node joins its private network, this console's
+   installation brings it up to date (firewall, security, isolation, Caddy, tunnel), the records are recreated
+   (variables, passwords, addresses whose domain exists here, settings, history, crashes) and the apps are
+   redeployed in place; the old console's SSH key is removed from the node. On failure: "Retry" or "Abandon" on
+   the node page.
+
+Between the handover and the takeover, the apps are not published. Not carried over: permissions of "app" accounts,
+backups already made (they stay on the old console), statistics; GitHub webhooks must be set up again.
+
 ## Node security (Security page)
 General policy: kv "security". Node-specific settings: column nodes.security (NULL = general
 policy). Applied, observed: nodes.sec (applied fingerprint, last check, original port). Code: app/security.py.
