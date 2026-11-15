@@ -429,6 +429,7 @@ def remove(node_id):
         timeout=20, via_wg=_wg_alive(n))
     db.x("DELETE FROM nodes WHERE id = ?", (node_id,))
     db.x("DELETE FROM stats_node WHERE node = ?", (node_id,))
+    db.x("DELETE FROM kv WHERE key IN (?, ?)", (f"stats_pos_{node_id}", f"diskuse:{node_id}"))
     try:
         apply_mesh()
     except RuntimeError as e:

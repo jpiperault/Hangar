@@ -280,7 +280,7 @@ def cede(node_id, req, user):
                 P.log("warn", a["slug"], f"cédée à la console {req['console']} avec le nœud {node_id} (toujours en marche là-bas)")
             db.x("DELETE FROM nodes WHERE id = ?", (node_id,))
             db.x("DELETE FROM stats_node WHERE node = ?", (node_id,))
-            db.x("DELETE FROM kv WHERE key = ?", (f"diskuse:{node_id}",))
+            db.x("DELETE FROM kv WHERE key IN (?, ?)", (f"diskuse:{node_id}", f"stats_pos_{node_id}"))
             db.kv_set(f"transfer_out:{node_id}", {"file": name, "code": code, "created": time.time(),
                                                   "to": req["console"], "apps": [a["slug"] for a in apps], "by": user})
         P.log("warn", f"nœud {node_id}", f"cédé à la console {req['console']} par {user} avec {len(apps)} appli(s) ; "
@@ -406,7 +406,9 @@ def pending_takeovers():
     return [r["key"].split(":", 1)[1] for r in db.q("SELECT key FROM kv WHERE key LIKE 'transfer_in:%'")]
 
 
-def _restore_app(e, nid, kvs):
+def _restore_app(e, nid):
+    """Recrée la fiche d'une appli (ligne, adresses, historique, plantages). Tout ou rien : en cas d'erreur, ce qui a
+    été écrit est retiré, et « Réessayer » repart de zéro pour elle. Retourne True si son port interne a changé."""
     slug = e["slug"]
     row = e["row"]
     data = {k: row.get(k) for k in db.APP_FIELDS if k in row and k not in ("node", "state", "host_port")}
@@ -415,36 +417,52 @@ def _restore_app(e, nid, kvs):
     data["host_port"] = hp if isinstance(hp, int) and hp >= P.HOST_PORT_MIN and hp not in used else P.next_host_port()
     data.update(node=nid, state="deploying", desired=row.get("desired") or "running")
     data.setdefault("created_at", time.time())
+    from . import history
+    history.init()          # table créée à la première utilisation : absente sur une console neuve
     db.insert_app(slug, data)
-    rts, dropped = D.usable_routes(slug, e.get("routes"))
-    D.set_routes(slug, rts)
-    if dropped:
-        P.log("warn", slug, "adresses non reprises : " + ", ".join(dropped))
-    for k, v in (e.get("kv") or {}).items():
-        if KV_KEY_RE.match(k) and k not in KV_SKIP:
-            cur = kvs.setdefault(k, db.kv_get(k))
-            if cur is None:
-                cur = kvs[k] = {}
-            if isinstance(cur, dict):
-                cur[slug] = v
-    if isinstance(e.get("smoke_last"), dict):
-        db.kv_set(f"smoke_last:{slug}", e["smoke_last"])
-    for t, col in TABLES:
-        rows = (e.get("tables") or {}).get(t) or []
-        if not rows:
-            continue
-        try:
+    try:
+        rts, dropped = D.usable_routes(slug, e.get("routes"))
+        D.set_routes(slug, rts)
+        if dropped:
+            P.log("warn", slug, "adresses non reprises : " + ", ".join(dropped))
+        if isinstance(e.get("smoke_last"), dict):
+            db.kv_set(f"smoke_last:{slug}", e["smoke_last"])
+        for t, col in TABLES:
+            rows = (e.get("tables") or {}).get(t) or []
             cols = {r["name"] for r in db.q(f"PRAGMA table_info({t})")} - {"id"}
-        except Exception:
-            continue
-        for r in rows[:20000]:
-            if not isinstance(r, dict):
+            if not rows or not cols:
                 continue
-            r = {k: v for k, v in r.items() if k in cols}
-            r[col] = slug
-            db.x(f"INSERT OR IGNORE INTO {t}({', '.join(r)}) VALUES({', '.join('?' * len(r))})", list(r.values()))
+            for r in rows[:20000]:
+                if not isinstance(r, dict):
+                    continue
+                r = {k: v for k, v in r.items() if k in cols}
+                r[col] = slug
+                db.x(f"INSERT OR IGNORE INTO {t}({', '.join(r)}) VALUES({', '.join('?' * len(r))})", list(r.values()))
+    except Exception:
+        for t, col in TABLES:
+            if db.q(f"PRAGMA table_info({t})"):
+                db.x(f"DELETE FROM {t} WHERE {col} = ?", (slug,))
+        D.set_routes(slug, [])
+        db.x("DELETE FROM apps WHERE slug = ?", (slug,))
+        raise
     os.makedirs(P.app_dir(slug), mode=0o700, exist_ok=True)
     return data["host_port"] != hp
+
+
+def _merge_kv(apps):
+    """Réglages des applis ({clé: {appli: valeur}}) fusionnés dans ceux d'ici. Sans effet s'ils y sont déjà."""
+    for k in {k for e in apps for k in (e.get("kv") or {})}:
+        if not KV_KEY_RE.match(k) or k in KV_SKIP:
+            continue
+        cur = db.kv_get(k)
+        if cur is None:
+            cur = {}
+        if not isinstance(cur, dict):
+            continue
+        for e in apps:
+            if k in (e.get("kv") or {}):
+                cur[e["slug"]] = e["kv"][k]
+        db.kv_set(k, cur)
 
 
 def resume(nid):
@@ -471,13 +489,11 @@ def resume(nid):
         nodes.install(nid)
         if (nodes.get(nid) or {}).get("state") != "ok":
             raise RuntimeError("installation en échec : voir le journal du nœud, puis « Réessayer »")
-        kvs, moved = {}, []
+        moved = []
         for e in pkg["apps"]:
-            if not db.app(e["slug"]):
-                if _restore_app(e, nid, kvs):
-                    moved.append(e["slug"])
-        for k, v in kvs.items():
-            db.kv_set(k, v)
+            if not db.app(e["slug"]) and _restore_app(e, nid):
+                moved.append(e["slug"])
+        _merge_kv(pkg["apps"])
         from . import segment
         try:
             segment.push(nid)

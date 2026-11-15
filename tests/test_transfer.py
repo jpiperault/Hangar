@@ -120,6 +120,9 @@ def test_cession_puis_reprise(console, monkeypatch):
     db.kv_set("app_limits", {"blog": {"cpus": 1.5}, "ailleurs": {"cpus": 2}})
     db.kv_set("jobs", {"blog": [{"id": "j1", "cmd": "echo"}]})
     db.kv_set("user_apps", {"alice": {"blog": "viewer"}})
+    from app import history
+    history.init()
+    db.x("INSERT INTO app_history(slug, ts, username, snap) VALUES('blog', 1, 'admin', '{}')")
     calls = []
 
     def fake_ssh(n, cmd, timeout=60, input=None, via_wg=True):
@@ -139,8 +142,9 @@ def test_cession_puis_reprise(console, monkeypatch):
     raw = open(path, "rb").read()
     assert b"a1b2c3d4e5f6a7b8" not in raw and b"SECRET" not in raw      # chiffré
 
-    # B : même base d'essai, vidée de ce que A connaissait encore ; la demande en attente est celle du paquet
+    # B : même base d'essai, vidée de ce que A connaissait encore ; console neuve : pas encore de table d'historique
     db.x("DELETE FROM apps")
+    db.x("DROP TABLE IF EXISTS app_history")
     db.kv_set("transfer_request", {"nonce": "0" * 32, "created": time.time(), "text": "x"})
     with pytest.raises(ValueError, match="Code incorrect"):
         transfer.read_package(path, "MAUVA-ISCOD-E0000-00000")
@@ -170,6 +174,7 @@ def test_cession_puis_reprise(console, monkeypatch):
     assert a["host_port"] == 18001
     assert db.kv_get("app_limits")["blog"] == {"cpus": 1.5} and db.kv_get("jobs")["blog"][0]["id"] == "j1"
     assert deployed == [("blog", "1.0.0", "config")]
+    assert [r["username"] for r in db.q("SELECT username FROM app_history WHERE slug = 'blog'")] == ["admin"]
     assert removed and removed[-1].strip() == KEY_A.split()[1]     # clé de l'ancienne console retirée du nœud
     assert not db.kv_get("transfer_in:vps-1") and nodes.get(nid)["state"] == "ok"
 
