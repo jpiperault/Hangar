@@ -1715,8 +1715,9 @@ def delete(slug):
         hooks.forget(slug)
         perms.forget_app(slug)
         protect.drop(slug)
-        from . import history, patch, vulns
+        from . import diskuse, history, patch, vulns
         history.drop(slug)
+        diskuse.forget(slug)
         vulns.drop(slug)
         patch.forget(slug)
         preprod.forget(slug)

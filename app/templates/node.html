@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_meter.html" import meter %}
+{% from "_disk.html" import node_disk %}
 {% from "_security.html" import secform, statetable, summary, badge, secscript with context %}
 {% block main %}{% set i = n.info or {} %}{% set remote = n.id != 'local' %}
 <div class="bar">
@@ -39,6 +40,7 @@
       {% if remote %}<dl class="facts"><dt>Lien privé</dt><dd>{{ ('vu ' ~ (now - hs) | dur ~ ' plus tôt') if hs else 'jamais établi' }}</dd></dl>{% endif %}
     </section>
   </div>
+  <div style="margin-top:20px">{{ node_disk(du, du_busy) }}</div>
   <script nonce="{{ csp_nonce }}" id="stdata" type="application/json">{{ se | tojson }}</script>
   <script nonce="{{ csp_nonce }}" src="/static/charts.js" defer></script>
 </div>

@@ -1,0 +1,77 @@
+{% from "_meter.html" import meter %}
+{# Espace disque : tableau d'une machine (« qui occupe le disque »), détail d'une appli par conteneur. #}
+
+{% macro refresh(busy, ro) -%}
+{% if busy %}<span class="pill s-deploying">mesure en cours…</span>
+{% elif not ro %}<form method="post" action="/disk/refresh"><button class="btn sm">Mesurer maintenant</button></form>{% endif %}
+{%- endmacro %}
+
+{% macro node_disk(du, busy, ro=False) %}
+<section class="panel" id="disque">
+  <div class="bar" style="margin:0 0 6px">
+    <h2 style="margin:0">Qui occupe le disque</h2>
+    <span class="acts" style="gap:10px;align-items:center">
+      <span class="hint">{{ ('mesuré ' ~ (du.t | ago)) if du else 'jamais mesuré' }}</span>{{ refresh(busy, ro) }}
+    </span>
+  </div>
+  {% if du %}
+  <p class="hint" style="margin:0 0 10px">{{ du.disk.used | size }} utilisés sur {{ du.disk.total | size }} · {{ du.disk.free | size }} libres. Mesure chaque heure.</p>
+  <div class="tablebox"><table class="mon">
+    <thead><tr><th scope="col">Quoi</th><th scope="col" style="text-align:right">Taille</th><th scope="col">Part du disque utilisé</th><th scope="col">Note</th></tr></thead>
+    <tbody>
+    {% for r in du.rows %}
+      <tr><td>{% if r.slug %}<a href="/apps/{{ r.slug }}#disque">{{ r.label }}</a>{% else %}{{ r.label | tr }}{% endif %}</td>
+        <td class="num" style="text-align:right;white-space:nowrap">{{ r.size | size }}</td>
+        <td style="min-width:120px">{{ meter(r.pct, 100, 2) }} <span class="hint">{{ '%.0f' % r.pct }} %</span></td>
+        <td class="hint">{% if r.slug %}appli{% elif r.reclaim %}dont {{ r.reclaim | size }} récupérables (nettoyage des images){% else %}{{ r.note | tr }}{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <span class="hint">Les images Docker sont comptées ici une seule fois, même si plusieurs applis partagent des couches ; elles ne sont pas dans le total des applis.</span>
+  {% else %}
+  <p class="hint">Pas encore de mesure pour cette machine : elle est faite chaque heure, ou tout de suite avec « Mesurer maintenant ».</p>
+  {% endif %}
+</section>
+{% endmacro %}
+
+{% macro app_disk(disk, dpath, growth, busy, ro=False) %}
+<section class="panel" id="disque" style="margin-top:20px">
+  <div class="bar" style="margin:0 0 6px">
+    <h2 style="margin:0">Espace disque</h2>
+    <span class="acts" style="gap:10px;align-items:center">
+      <span class="hint">{{ ('mesuré ' ~ (disk[0].t | ago)) if disk else 'jamais mesuré' }}</span>{{ refresh(busy, ro) }}
+    </span>
+  </div>
+  {% if disk %}
+  {% set m = disk[0] %}
+  <div class="kpis">
+    <span class="kpi"><strong>{{ m.total | size }}</strong> sur {{ m.name }}</span>
+    {% if growth is not none %}<span class="kpi">{{ 'Croissance' if growth >= 0 else 'Baisse' }} <strong>{{ (growth | abs) | size }}</strong> par jour (7 jours)</span>{% endif %}
+    {% if dpath %}<span class="kpi"><svg class="spark" viewBox="0 0 96 24" width="96" height="24" role="img" aria-label="Espace occupé, un point par jour sur 30 jours"><path d="{{ dpath }}"/></svg> <span class="hint">30 jours</span></span>{% endif %}
+  </div>
+  {% for d in disk %}
+  <h3 style="margin:14px 0 6px;font-size:.95rem">{{ d.name }} <span class="hint">· {{ 'machine principale' if d.main else 'secours ou instance' }} · {{ d.total | size }}</span></h3>
+  <div class="tablebox"><table class="mon">
+    <thead><tr><th scope="col">Quoi</th><th scope="col">Détail</th><th scope="col" style="text-align:right">Taille</th></tr></thead>
+    <tbody>
+    {% for p in d.parts if p.size %}
+      <tr><td>{{ p.label | tr }}</td><td class="hint">{{ "dans le PostgreSQL partagé du nœud" if p.key == "db" else "fichiers sur la machine" }}</td><td class="num" style="text-align:right;white-space:nowrap">{{ p.size | size }}</td></tr>
+    {% endfor %}
+    {% for v in d.volumes %}
+      <tr><td>Volume <code>{{ v.name[:24] }}{{ '…' if v.name | length > 24 }}</code></td><td class="hint">monté sur {{ v.dst }}</td><td class="num" style="text-align:right;white-space:nowrap">{{ v.size | size }}</td></tr>
+    {% endfor %}
+    {% for c in d.containers %}
+      <tr><td>Conteneur <code>{{ c.name }}</code> <span class="hint">({{ c.role | tr }}{{ ', arrêté' if c.state and c.state != 'running' }})</span></td>
+        <td class="hint">écrit hors des volumes : {{ c.rw | size }} · journaux : {{ c.log | size }}</td>
+        <td class="num" style="text-align:right;white-space:nowrap">{{ (c.rw + c.log) | size }}</td></tr>
+      <tr><td style="padding-left:24px" class="hint">image <code>{{ c.image }}</code></td><td class="hint">partagée, comptée avec la machine</td><td class="num hint" style="text-align:right;white-space:nowrap">{{ c.image_size | size }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% endfor %}
+  <span class="hint">Mesure chaque heure. « Écrit hors des volumes » : fichiers que le conteneur crée ailleurs que dans data/ ou un volume ; ils sont perdus au redéploiement et ne devraient pas grossir. Les journaux Docker sont limités à 30 Mo par conteneur.</span>
+  {% else %}
+  <p class="hint">Pas encore de mesure : elle est faite chaque heure, ou tout de suite avec « Mesurer maintenant ».</p>
+  {% endif %}
+</section>
+{% endmacro %}

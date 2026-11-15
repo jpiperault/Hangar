@@ -5,7 +5,7 @@ import time
 
 from fastapi import APIRouter, Request
 
-from .. import affinity, history, mysqlrepl, patch, vulns, hooks, monitor, onboarding, perms, protect, runopts, segment, applogs, backup, cache, catalog, cloudflare, crashes, db, dbadmin, gameports, ha, jobs, kinds, limits, nodes, preprod, remoteconfig, services, sites, smoke, stats
+from .. import affinity, diskuse, history, mysqlrepl, patch, vulns, hooks, monitor, onboarding, perms, protect, runopts, segment, applogs, backup, cache, catalog, cloudflare, crashes, db, dbadmin, gameports, ha, jobs, kinds, limits, nodes, preprod, remoteconfig, services, sites, smoke, stats
 from .. import domains as D
 from .. import platform as P
 from .common import RESERVED, SLUG, VERSION, _client_names, _public_addr, _rc_url, _redis_state, apply_registry, flash, get_app_or_404, go, node_choices, render, tpl_for, validate
@@ -177,9 +177,12 @@ async def _app_ctx(request, slug):
     dsize = await asyncio.to_thread(cache.get, f"dsize:{slug}", 300, P.dir_size, a["node"], f"{P.app_dir(slug)}/data") \
         if others else None
     a["routes"] = D.routes(slug)
+    dser = diskuse.series(slug)
+    disk = dict(disk=diskuse.app_view(slug), dpath=stats.spark_path([x["total"] for x in dser]) if len(dser) > 1 else "",
+                dgrowth=diskuse.growth(slug), dbusy=diskuse.busy())
     hst = await asyncio.to_thread(ha.status, slug)
     busy = (hst and (hst["busy"] or hst["h"]["state"] == "setup"))
-    return dict(title=a["name"], nav="apps", a=a, new=False, errors={}, events=events, names=names, ha=hst,
+    return dict(title=a["name"], nav="apps", a=a, new=False, errors={}, events=events, names=names, ha=hst, **disk,
                 kinds=kinds.choices(), kind=kinds.get(a["kind"]), gports=gameports.text(slug), gfrom=", ".join(gameports.sources(slug)),
                 site_meta=sites.meta(slug), site_busy=sites.busy(slug),
                 public_addr=_public_addr(a),

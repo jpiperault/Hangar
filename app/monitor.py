@@ -359,8 +359,10 @@ def _loop():
         _every("purge_uptime", 86400, report.purge)
         from . import images
         _every("image_cleanup", 3600, images.tick)   # sans effet si l'option est coupée ou hors du jour choisi
-        from . import capacity, external
+        from . import capacity, diskuse, external
         _every("external", 60, external.tick)
+        _every("disk_usage", 3600, diskuse.collect_async)   # espace occupé par appli et par conteneur (≈ 20 s, à part)
+        _every("purge_disk", 86400, diskuse.purge)
         _every("capacity", 3600, capacity.check)      # disque plein à ce rythme, mémoire surréservée
         from . import vulns
         _every("vuln_scan", 3600, vulns.tick)         # une fois par semaine, la nuit du jour choisi        # à son propre rythme, si une sonde est choisie

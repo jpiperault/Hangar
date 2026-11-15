@@ -185,6 +185,7 @@
 "Liste de démarrage affichée sur l'accueil.": "Getting started list shown on the home page.",
 "Liste de démarrage masquée : elle reste dans Accès et comptes → Bien démarrer.": "Getting started list hidden: it remains in Access and accounts → Getting started.",
 "Marqué corrigé : une alerte partira s'il revient dans une version plus récente.": "Marked as fixed: an alert will be sent if it comes back in a newer version.",
+"Mesure de l'espace disque lancée : recharge la page dans une demi-minute.": "Disk space measurement started: reload the page in half a minute.",
 "Mise en place de la haute dispo lancée : suis l'avancement dans les événements.": "High availability setup started: follow the progress in the events.",
 "Mise à jour de {} en échec ({})": "Update of {} failed ({})",
 "Mise à jour de {} lancée ({}).": "Update of {} started ({}).",

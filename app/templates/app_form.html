@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_dns.html" import dnspill %}
+{% from "_disk.html" import app_disk %}
 {% macro rp_form() %}<form method="post" action="/apps/{{ a.slug }}/restore-point" class="inlinefield" style="margin:6px 0 10px">
       <input name="note" maxlength="200" placeholder="Note (ex. avant la migration 2.0)" aria-label="Note du point de restauration" spellcheck="false">
       <button class="btn sm primary" {{ 'disabled' if a.status == 'deploying' }}>Créer un point de restauration</button>
@@ -277,6 +278,7 @@
   <details><summary class="hint">Voir les données en tableau</summary><div class="tablebox" id="stattable"></div></details>
   <span class="hint">Requêtes vues par Caddy (le healthcheck interne de la console n'est pas compté). Données gardées 8 jours.</span>
 </section>
+{{ app_disk(disk, dpath, dgrowth, dbusy) }}
 </div>
 
 {% endif %}

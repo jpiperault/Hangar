@@ -365,6 +365,10 @@ Nodes (Nodes page)
   Internet (curl over SSH); outage = nothing or 5xx (Cloudflare errors explained); alert after N failures.
 - Capacity (Monitoring, capacity setting): disk trend over 7 days, date when it will be full, alert before
   the horizon; memory reserved for apps (limits, Redis, MySQL) compared with each machine.
+- Disk space (diskuse.py, every hour or "Measure now"): per app and per container on each machine
+  (data/, Redis, MySQL export and files, PostgreSQL database, volumes, writable layer, Docker logs, image);
+  a machine's page: "What uses the disk" (apps, images, build cache, Trivy cache, orphaned volumes,
+  backups, system). Latest reading in kv "diskuse:<machine>", history in stats_disk (90 days).
 - Search the logs of all apps: App logs page.
 - An app's charts: memory and CPU (limit drawn), memory of its Redis and its MySQL database
   (stats_res, keys "app:redis", "app:mysql").

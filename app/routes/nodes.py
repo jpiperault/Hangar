@@ -5,7 +5,7 @@ import time
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from .. import access, db, ha, nodes, security, stats
+from .. import access, db, diskuse, ha, nodes, security, stats
 from .. import platform as P
 from .common import flash, go, render
 
@@ -177,6 +177,17 @@ async def security_collect(request: Request, node_id: str):
     return go("/security" if back.split("#")[0].rstrip("/").endswith("/security") else f"/nodes/{node_id}#securite")
 
 
+@router.post("/disk/refresh")
+async def disk_refresh(request: Request):
+    """Mesure de l'espace disque de toutes les machines, en tâche de fond (20 s environ)."""
+    if not diskuse.busy():
+        diskuse.collect_async()
+    flash(request, "Mesure de l'espace disque lancée : recharge la page dans une demi-minute.")
+    from urllib.parse import urlparse
+    back = urlparse(request.headers.get("referer") or "").path   # chemin seul : pas de redirection ailleurs
+    return go((back if back.startswith(("/apps/", "/nodes")) else "/nodes") + "#disque")
+
+
 @router.get("/security/myip")
 async def security_myip(request: Request):
     return JSONResponse({"ip": await asyncio.to_thread(security.public_ip)})
@@ -261,5 +272,5 @@ async def _node_render(request, node_id, sec_f=None, sec_err=None):
             sec["own"] = True
     return render(request, "node.html", title=n["name"], nav="nodes", n=n, se=se, rng=rng, ranges=list(stats.RANGES),
                   events=events, hs=hs, now=time.time(), apps=[a for a in db.apps() if a["node"] == node_id],
-                  sec=sec, cats=JOURNAL_CATS, refresh=n["state"] == "installing" or bool(sec and sec["applying"]),
+                  sec=sec, cats=JOURNAL_CATS, du=diskuse.node_view(node_id), du_busy=diskuse.busy(), refresh=n["state"] == "installing" or bool(sec and sec["applying"]),
                   status_code=400 if sec_err else 200)

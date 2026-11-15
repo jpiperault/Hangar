@@ -77,6 +77,9 @@ CREATE TABLE IF NOT EXISTS stats_node (
     node TEXT NOT NULL, t INTEGER NOT NULL, cpu REAL, mem REAL, mem_total REAL, disk REAL, disk_total REAL,
     load1 REAL, PRIMARY KEY (node, t)
 );
+CREATE TABLE IF NOT EXISTS stats_disk (          -- espace occupé par appli et par machine, par heure (diskuse.py)
+    app TEXT NOT NULL, node TEXT NOT NULL, t INTEGER NOT NULL, total INTEGER, data INTEGER, PRIMARY KEY (app, node, t)
+);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL, ts REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS domains (              -- voir domains.py
     name TEXT PRIMARY KEY, mode TEXT NOT NULL DEFAULT 'tunnel', hub TEXT NOT NULL DEFAULT '',
