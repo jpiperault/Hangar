@@ -420,6 +420,10 @@ def instances_do(slug, action):
 def validate(a, mode, nodes_, ack):
     if mode not in ("standby", "replicas"):
         return "Mode inconnu."
+    from . import mail
+    if mail.of(a["slug"]):
+        return ("Pas de haute dispo pour un serveur mail : data/ n'est recopié que de temps en temps, une bascule perdrait "
+                "le courrier arrivé depuis la dernière copie. Pour changer de machine, utilise « Déplacer ».")
     from . import services
     if services.mysql(a["slug"]) and mode == "replicas":
         return ("Cette appli a une base MySQL/MariaDB : choisis le secours à chaud (les instances multiples demandent "

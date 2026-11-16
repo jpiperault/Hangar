@@ -64,6 +64,8 @@
       </form>
     </details>
     {% else %}<p class="hint">Opération en cours…</p>{% endif %}
+  {% elif mailcfg %}
+    <p class="hint">Pas de haute dispo pour un serveur mail : data/ n'est recopié que de temps en temps, une bascule perdrait le courrier arrivé depuis la dernière copie. Pour changer de machine, utilise « Déplacer » : les boîtes suivent et le nom du serveur est mis à jour chez Cloudflare. Les serveurs qui écrivent réessaient pendant la coupure.</p>
   {% elif not ha_nodes %}
     <p class="hint">Il faut au moins un autre nœud en ligne (page <a href="/nodes">Nœuds</a>) pour protéger cette appli.</p>
   {% else %}

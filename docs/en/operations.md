@@ -154,6 +154,9 @@ db_port, state, info). General settings: kv "ha" (safety shutdown auto | always 
   STALWART_RECOVERY_ADMIN. User portal: /account.
 - Outside Hangar: outbound port 25 open at the host, and reverse DNS (PTR) of the IP set to the server name.
 - Data: data/etc (config.json) and data/lib (RocksDB), backed up with the app.
+- Changing machines: "Move" (mailboxes copied, the server's A record updated at Cloudflare; PTR and port 25 to set
+  at the new host). Hangar refuses before any cutover if the ports are taken on the target (local postfix…).
+  No high availability: data/ is only copied periodically there, so a failover would lose mail.
 
 ## Services
 - `hangar`            console (FastAPI, /opt/hangar), runs as root

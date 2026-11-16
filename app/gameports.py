@@ -85,6 +85,22 @@ def busy(node, ports):
     return [f"{p['proto']} {p['port']} ({seen[(p['proto'], p['port'])]})" for p in ports if (p["proto"], p["port"]) in seen]
 
 
+def check_target(slug, node):
+    """Avant de déplacer une appli : ses ports publics sont-ils libres sur la cible ? Texte d'erreur, ou None."""
+    ports = of(slug)
+    if not ports:
+        return None
+    try:
+        parse(text(slug), slug, node)   # réservés à Hangar ou déjà ouverts pour une autre appli de la cible
+    except ValueError as e:
+        return f"ports publics indisponibles sur {node} : {e}"
+    taken = busy(node, ports)
+    if taken:
+        return (f"ports publics déjà utilisés sur {node} : {', '.join(taken)} (un serveur mail local, souvent postfix : "
+                "systemctl disable --now postfix)")
+    return None
+
+
 def save(slug, ports):
     allv = db.kv_get("public_ports") or {}
     if ports:

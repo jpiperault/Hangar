@@ -164,3 +164,27 @@ def test_ports_deja_ecoutes(monkeypatch):
     assert gameports.busy("vps", ports) == ["tcp 25 (master)", "tcp 993 (docker-proxy)"]
     monkeypatch.setattr(P, "nsh", lambda node, cmd, timeout=120, input=None: (255, ""))
     assert gameports.busy("vps", ports) == []
+
+
+def test_deplacement_verifie_les_ports(serveur, monkeypatch):
+    from app import move
+    gameports.save("courrier", gameports.parse("tcp 25, tcp 993", "courrier", "vps-m"))
+    monkeypatch.setattr(P, "nsh", lambda node, cmd, timeout=120, input=None:
+                        (0, 'tcp LISTEN 0 100 127.0.0.1:25 0.0.0.0:* users:(("master",pid=3,fd=13))\n'))
+    assert "postfix" in gameports.check_target("courrier", "local")
+
+    def interdit(*a, **k):
+        raise AssertionError("aucune commande Docker : refus avant la coupure")
+    monkeypatch.setattr(P, "dk", interdit)
+    move.move("courrier", "local")
+    a = db.app("courrier")
+    assert a["node"] == "vps-m" and a["state"] == "ok"
+    monkeypatch.setattr(P, "nsh", lambda node, cmd, timeout=120, input=None: (0, ""))
+    assert gameports.check_target("courrier", "local") is None
+    gameports.save("courrier", [])
+    assert gameports.check_target("courrier", "local") is None
+
+
+def test_pas_de_haute_dispo_pour_un_serveur_mail(serveur):
+    from app import ha
+    assert "serveur mail" in ha.validate(db.app("courrier"), "standby", ["local"], False)

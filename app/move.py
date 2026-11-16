@@ -54,6 +54,12 @@ def move(slug, target):
     if ha.get(slug):
         P.log("error", slug, "déplacement refusé : appli en haute dispo (utilise « Basculer » ou retire la haute dispo)")
         return
+    from . import gameports
+    err = gameports.check_target(slug, target)
+    if err:   # avant toute coupure : l'appli reste où elle est
+        P.log("error", slug, f"déplacement vers {target} refusé : {err}")
+        db.update_app(slug, state="ok")
+        return
     with P.op_lock:
         a = db.app(slug)
         if not a:

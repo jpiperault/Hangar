@@ -8,7 +8,7 @@ import urllib.parse
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
-from .. import db, dbadmin, monitor, move
+from .. import db, dbadmin, gameports, monitor, move
 from .. import platform as P
 from .common import _confirmed, flash, get_app_or_404, go, node_choices, render
 
@@ -175,6 +175,8 @@ async def app_move(request: Request, slug: str):
         flash(request, "Une opération est en cours sur cette appli.", "error")
     elif target == a["node"] or target not in {c["id"] for c in node_choices()}:
         flash(request, "Choisis un autre nœud, en ligne.", "error")
+    elif err := await asyncio.to_thread(gameports.check_target, slug, target):
+        flash(request, f"Déplacement impossible : {err}.", "error")
     else:
         db.update_app(slug, state="deploying")
         P.spawn(move.move, slug, target)
