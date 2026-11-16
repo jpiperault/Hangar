@@ -127,7 +127,10 @@ async def catalogue_install(request: Request):
     if mhost:
         mail.save(slug, mhost, mdom)
     P.log("info", slug, f"installée depuis le catalogue ({c['name']}, {c['image']}:{c['version']})")
-    P.spawn(P.deploy, slug, c["version"], "create")
+    if c.get("setup") == "stalwart":   # puis son assistant par l'API (le jeton Cloudflare ne fait que passer)
+        P.spawn(mail.install, slug, c["version"], (f.get("mail_cf_token") or "").strip())
+    else:
+        P.spawn(P.deploy, slug, c["version"], "create")
     flash(request, f"{c['name']} en cours d'installation sur https://{host}/. {c['after']}")
     return go(f"/apps/{slug}")
 
@@ -203,7 +206,8 @@ async def _app_ctx(request, slug):
         cfm = {(r["type"], r["name"]): r for r in ((cloudflare.status().get("mail") or {}).get(slug) or [])}
         mrec = [{**r, **{k: v for k, v in (cfm.get((r["type"], r["name"])) or {}).items() if k in ("ok", "msg")}}
                 for r in mail.records(slug)]
-    disk.update(mailcfg=mail.of(slug), mailrec=mrec, mailip=mail.public_ip(slug) if mail.of(slug) else None)
+    disk.update(mailcfg=mail.of(slug), mailrec=mrec, mailip=mail.public_ip(slug) if mail.of(slug) else None,
+                mailsetup=mail.needs_setup(slug), mailadmin=mail.admin_of(slug))
     hst = await asyncio.to_thread(ha.status, slug)
     busy = (hst and (hst["busy"] or hst["h"]["state"] == "setup"))
     return dict(title=a["name"], nav="apps", a=a, new=False, errors={}, events=events, names=names, ha=hst, **disk,
@@ -435,3 +439,27 @@ async def app_log_alerts(request: Request, slug: str):
     except ValueError as e:
         flash(request, f"Refusé : {e}", "error")
     return go(f"/apps/{slug}/logs#alertes")
+
+
+@router.post("/apps/{slug}/mail/setup")
+async def mail_setup(request: Request, slug: str):
+    a = get_app_or_404(slug)
+    f = await request.form()
+    if not mail.needs_setup(slug):
+        flash(request, "Stalwart est déjà configuré.", "error")
+    elif a["state"] == "deploying":
+        flash(request, "Une opération est en cours sur cette appli.", "error")
+    else:
+        P.spawn(mail.setup, slug, (f.get("mail_cf_token") or "").strip(), request.session.get("user") or "?")
+        flash(request, "Configuration de Stalwart lancée : suis l'avancement dans les événements.")
+    return go(f"/apps/{slug}#messagerie")
+
+
+@router.post("/apps/{slug}/mail/admin/forget")
+async def mail_admin_forget(request: Request, slug: str):
+    get_app_or_404(slug)
+    if getattr(request.state, "role", "admin") == "admin":
+        mail.forget_admin(slug)
+        P.log("info", slug, f"mot de passe de l'admin Stalwart oublié par la console ({request.session.get('user')})")
+        flash(request, "Mot de passe oublié par Hangar : il n'est plus que dans Stalwart.")
+    return go(f"/apps/{slug}#messagerie")

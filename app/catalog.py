@@ -64,13 +64,11 @@ CATALOG = [
              "web et espace personnel pour chaque utilisateur.",
      "image": "stalwartlabs/stalwart", "version": "v1.1-alpine", "port": 8080, "health": "/healthz/live", "mem": 512, "db": False,
      "mounts": "etc:/etc/stalwart, lib:/var/lib/stalwart", "data_user": "2000:2000",
-     "mail": True, "ports": "tcp 25, tcp 465, tcp 587, tcp 993",
+     "mail": True, "setup": "stalwart", "ports": "tcp 25, tcp 465, tcp 993",
      "env": "STALWART_RECOVERY_ADMIN=admin:{secret}\nSTALWART_PUBLIC_URL={url_noslash}\nSTALWART_HOSTNAME={mail_host}",
-     "after": "Connecte-toi sur /admin avec admin et le mot de passe de STALWART_RECOVERY_ADMIN (ses variables), puis suis "
-              "l'assistant : nom du serveur = celui choisi ici, domaine des adresses, stockage RocksDB, journaux sur la "
-              "console, certificat par DNS Cloudflare (un jeton limité à la zone). Redémarre l'appli à la fin, publie "
-              "la clé DKIM qu'il affiche, puis retire STALWART_RECOVERY_ADMIN de ses variables. Chacun gère son compte "
-              "sur /account.",
+     "after": "Hangar fait l'assistant de Stalwart tout seul une fois l'appli en ligne (une à deux minutes) : le compte "
+              "administrateur permanent s'affiche alors dans sa fiche, section Messagerie. Admin sur /admin, espace "
+              "personnel de chaque utilisateur sur /account.",
      "site": "https://stalw.art"},
     {"id": "gitea", "name": "Gitea", "cat": "dev", "color": "#609926",
      "desc": "Hébergement Git léger : dépôts, tickets, revues, paquets.",
@@ -169,7 +167,7 @@ def get(cid):
     return next((c for c in items() if c["id"] == cid), None)
 
 
-SECRET_KEY = re.compile(r"(SECRET|TOKEN|PASSWORD|PASSWD|PASS$|_KEY$|^KEY$|APIKEY|SALT)", re.I)
+SECRET_KEY = re.compile(r"(SECRET|TOKEN|PASSWORD|PASSWD|PASS$|_KEY$|^KEY$|APIKEY|SALT|RECOVERY_ADMIN)", re.I)
 
 
 def from_app(a, name, desc):

@@ -1,4 +1,7 @@
 """Messagerie (Stalwart du catalogue) : nom du serveur, ports publics, enregistrements DNS tenus chez Cloudflare."""
+import base64
+import json
+
 import pytest
 
 from app import cloudflare, db, gameports, mail, nodes
@@ -118,7 +121,8 @@ def test_installation_depuis_le_catalogue(monkeypatch):
     db.kv_set("mail_dns", {})
     db.kv_set("public_ports", {})
     monkeypatch.setattr(routes_apps, "node_choices", lambda purpose="app": [{"id": "local", "name": "Console", "free": 2000}])
-    monkeypatch.setattr(main.P, "spawn", lambda fn, *a: None)
+    spawned = []
+    monkeypatch.setattr(main.P, "spawn", lambda fn, *a: spawned.append((fn, a)))
     monkeypatch.setattr(gameports, "busy", lambda node, ports: [])
     db.x("INSERT OR REPLACE INTO users(username, hash) VALUES(?, ?)", ("mel", PasswordHasher().hash("mot-de-passe-mel")))
     c = TestClient(main.app, base_url="https://hangar.test", client=("127.0.0.1", 50042))
@@ -126,7 +130,7 @@ def test_installation_depuis_le_catalogue(monkeypatch):
     same = {"sec-fetch-site": "same-origin"}
     c.post("/login", data={"username": "mel", "password": "mot-de-passe-mel"}, headers=same)
     try:
-        _installe(c, same)
+        _installe(c, same, spawned)
     finally:
         for t in ("apps", "routes"):
             db.x(f"DELETE FROM {t} WHERE slug IN ('stalwart', 'stalwart2')")
@@ -134,19 +138,23 @@ def test_installation_depuis_le_catalogue(monkeypatch):
         db.kv_set("public_ports", {})
 
 
-def _installe(c, same):
+def _installe(c, same, spawned):
     page = c.get("/catalogue?app=stalwart").text
     assert 'name="mail_host"' in page and "mail.exemple.fr" in page
     form = {"app": "stalwart", "slug": "stalwart", "sub": "stalwart", "domain": "exemple.fr", "node": "local",
             "mail_domain": "exemple.fr", "mail_host": "stalwart.exemple.fr"}
     r = c.post("/catalogue/install", data=form, headers=same, follow_redirects=False)
     assert "catalogue" in r.headers["location"] and not db.app("stalwart")     # nom déjà pris par l'adresse web
-    r = c.post("/catalogue/install", data={**form, "mail_host": "mail.exemple.fr"}, headers=same, follow_redirects=False)
+    r = c.post("/catalogue/install", data={**form, "mail_host": "mail.exemple.fr", "mail_cf_token": "jeton"},
+               headers=same, follow_redirects=False)
     assert r.headers["location"] == "/apps/stalwart"
+    assert spawned[-1] == (mail.install, ("stalwart", "v1.1-alpine", "jeton"))   # déploiement puis assistant par l'API
+    assert mail.needs_setup("stalwart") and "Configurer Stalwart" in c.get("/apps/stalwart").text
     a = db.app("stalwart")
     assert "STALWART_HOSTNAME=mail.exemple.fr" in a["env"] and "STALWART_PUBLIC_URL=https://stalwart.exemple.fr" in a["env"]
     assert "{" not in a["env"] and a["data_user"] == "2000:2000"
-    assert [p["port"] for p in gameports.of("stalwart")] == [25, 465, 587, 993]
+    assert "STALWART_RECOVERY_ADMIN=••••••" in P.mask_env(a["env"])          # compte temporaire masqué dans la fiche
+    assert [p["port"] for p in gameports.of("stalwart")] == [25, 465, 993]
     assert mail.of("stalwart") == {"host": "mail.exemple.fr", "domain": "exemple.fr"}
     assert "Messagerie" in c.get("/apps/stalwart").text
     # un second serveur mail sur la même machine : ports déjà pris
@@ -188,3 +196,115 @@ def test_deplacement_verifie_les_ports(serveur, monkeypatch):
 def test_pas_de_haute_dispo_pour_un_serveur_mail(serveur):
     from app import ha
     assert "serveur mail" in ha.validate(db.app("courrier"), "standby", ["local"], False)
+
+
+
+class FakeStalwart:
+    """Le strict nécessaire de l'API de Stalwart en mode « premier démarrage »."""
+    def __init__(self, cred, fail=None):
+        import http.server
+        import threading
+        outer = self
+        self.cred, self.fail, self.bodies = cred, fail, []
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def _send(self, code, obj):
+                b = json.dumps(obj).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(b)))
+                self.end_headers()
+                self.wfile.write(b)
+
+            def _auth(self):
+                want = "Basic " + base64.b64encode(outer.cred.encode()).decode()
+                if self.headers.get("Authorization") != want:
+                    self._send(401, {"status": 401})
+                    return False
+                return True
+
+            def do_GET(self):
+                if self._auth():
+                    self._send(200, {"primaryAccounts": {"urn:stalwart:jmap": "d333333"}})
+
+            def do_POST(self):
+                if not self._auth():
+                    return
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                outer.bodies.append(body)
+                call = body["methodCalls"][0]
+                if outer.fail:
+                    out = {"accountId": "d333333", "notUpdated": {"singleton": {"type": "invalidProperties",
+                                                                                "description": outer.fail}}}
+                else:
+                    out = {"accountId": "d333333", "updated": {"singleton": {"username": "admin@exemple.fr",
+                                                                             "secret": "permanent-123"}}}
+                self._send(200, {"methodResponses": [[call[0], out, call[2]]]})
+
+        self.srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.port = self.srv.server_address[1]
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.srv.shutdown()
+
+
+def _stalwart_app(port):
+    db.x("DELETE FROM apps WHERE slug = 'stw'")
+    db.insert_app("stw", {"name": "Stw", "pkg": "", "source": "image", "image": "stalwartlabs/stalwart",
+                          "version": "v1.1-alpine", "port": 8080, "health_path": "/healthz/live", "mem_mb": 512,
+                          "env": "STALWART_RECOVERY_ADMIN=admin:temp-456\nSTALWART_PUBLIC_URL=https://stw.exemple.fr",
+                          "db": 0, "state": "ok", "desired": "running", "created_at": 0, "node": "local",
+                          "kind": "tool", "host_port": port, "data_user": "2000:2000"})
+    mail.save("stw", "mail.exemple.fr", "exemple.fr")
+
+
+def test_configuration_par_l_api(monkeypatch):
+    fake = FakeStalwart("admin:temp-456")
+    deployed = []
+    monkeypatch.setattr(P, "deploy", lambda slug, v, kind, previous=None: deployed.append((slug, kind)))
+    monkeypatch.setattr(P, "apply_routing", lambda: None)
+    try:
+        _stalwart_app(fake.port)
+        assert mail.needs_setup("stw")
+        assert mail.setup("stw", "jeton-cf", "alice") is True
+        sent = fake.bodies[0]["methodCalls"][0]
+        assert sent[0] == "x:Bootstrap/set"
+        b = sent[1]["update"]["singleton"]
+        assert b["defaultHostname"] == "mail.exemple.fr" and b["defaultDomain"] == "exemple.fr"
+        assert b["requestTlsCertificate"] and b["dnsServer"]["@type"] == "Cloudflare"
+        assert b["dnsServer"]["secret"] == {"@type": "Value", "secret": "jeton-cf"} and b["tracer"]["@type"] == "Stdout"
+        a = db.app("stw")
+        assert "STALWART_RECOVERY_ADMIN" not in a["env"] and "STALWART_PUBLIC_URL" in a["env"]
+        assert mail.admin_of("stw")["user"] == "admin@exemple.fr" and deployed == [("stw", "config")]
+        assert not mail.needs_setup("stw") and mail.of("stw")["stalwart_dns"]
+        assert "jeton-cf" not in json.dumps(db.kv_get("mail_dns"))           # le jeton ne fait que passer
+        assert [r["type"] for r in mail.records("stw")] == ["MX", "TXT"]      # DMARC laissé à Stalwart
+        mail.forget_admin("stw")
+        assert not mail.admin_of("stw")
+    finally:
+        fake.close()
+        db.x("DELETE FROM apps WHERE slug = 'stw'")
+        mail.forget("stw")
+
+
+def test_configuration_refusee(monkeypatch):
+    fake = FakeStalwart("admin:autre")                 # mauvais compte temporaire
+    monkeypatch.setattr(P, "deploy", lambda *a, **k: (_ for _ in ()).throw(AssertionError("pas de redémarrage")))
+    try:
+        _stalwart_app(fake.port)
+        assert mail.setup("stw") is False
+        assert "STALWART_RECOVERY_ADMIN" in db.app("stw")["env"] and mail.needs_setup("stw")
+        fake.cred, fake.fail = "admin:temp-456", "Invalid server hostname"
+        assert mail.setup("stw") is False
+        b = fake.bodies[-1]["methodCalls"][0][1]["update"]["singleton"]
+        assert not b["requestTlsCertificate"] and b["dnsServer"] == {"@type": "Manual"}
+        ev = db.q("SELECT msg FROM events WHERE app = 'stw' ORDER BY id DESC LIMIT 1")[0]["msg"]
+        assert "Invalid server hostname" in ev and "temp-456" not in ev
+    finally:
+        fake.close()
+        db.x("DELETE FROM apps WHERE slug = 'stw'")
+        mail.forget("stw")

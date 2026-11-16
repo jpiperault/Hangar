@@ -143,15 +143,21 @@ db_port, state, info). General settings: kv "ha" (safety shutdown auto | always 
 
 ## Mail (Stalwart, from the catalog)
 - At install: address domain (example.com) and server name (mail.example.com, distinct from the admin's web
-  address). Hangar opens public ports tcp 25, 465, 587 and 993 on the chosen machine (the app's "Public ports"
+  address). Hangar opens public ports tcp 25, 465 and 993 (Stalwart does not listen on 587) on the chosen machine (the app's "Public ports"
   setting, as for a game server) and stores the rest in kv `mail_dns`.
 - With a Cloudflare token, DNS sync keeps: A/AAAA of the server to its machine's public IP (never proxied), the
   domain's MX, SPF `v=spf1 mx -all`, DMARC `v=DMARC1; p=none`. Comment "géré par Hangar (messagerie)"; an existing
   MX, SPF or DMARC that Hangar did not create is never overwritten: it is reported on the app's page.
   Without a token, or if the machine has no public IP, the page lists the records to add by hand.
-- First start: wizard on /admin (account admin, password in STALWART_RECOVERY_ADMIN), certificate for the mail ports
-  through Cloudflare DNS (a zone-limited token given to Stalwart), restart the app, publish the DKIM key, then remove
-  STALWART_RECOVERY_ADMIN. User portal: /account.
+- First start: Stalwart only accepts its wizard, over plain HTTP, and rejects its UI served over HTTPS ("Client
+  metadata documents are disabled"). Hangar completes the wizard through the JMAP API (`x:Bootstrap/set`) from the
+  console, over the private network, with the temporary STALWART_RECOVERY_ADMIN account: server name, domain, RocksDB,
+  console logs, DKIM keys. It keeps the permanent admin account created (kv `mail_admin`, shown to admins on the page
+  until they "forget" it), removes the temporary account variable and restarts the app; STALWART_PUBLIC_URL then takes
+  effect and the UI works over HTTPS. On failure: "Configure Stalwart" button on the page.
+- Optional Cloudflare token (zone-limited, DNS › Edit), passed to Stalwart and not kept by Hangar: Stalwart gets its
+  certificate (DNS-01) and publishes DKIM, DMARC, SRV, autoconfig, MTA-STS; Hangar then only keeps A, MX and SPF.
+  Without a token: certificate and DKIM to set up in Stalwart's admin.
 - Outside Hangar: outbound port 25 open at the host, and reverse DNS (PTR) of the IP set to the server name.
 - Data: data/etc (config.json) and data/lib (RocksDB), backed up with the app.
 - Changing machines: "Move" (mailboxes copied, the server's A record updated at Cloudflare; PTR and port 25 to set

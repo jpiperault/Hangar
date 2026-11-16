@@ -34,7 +34,7 @@ op_lock = threading.Lock()        # une seule opération Docker à la fois
 routing_lock = threading.Lock()   # une seule régénération Caddy à la fois
 
 LABELS = {"running": "En ligne", "stopped": "Arrêtée", "error": "En erreur", "deploying": "Déploiement"}
-SECRET_KEY = re.compile(r"(SECRET|PASSWORD|PASSWD|TOKEN|KEY|PASS)$", re.I)
+SECRET_KEY = re.compile(r"(SECRET|PASSWORD|PASSWD|TOKEN|KEY|PASS|RECOVERY_ADMIN)$", re.I)   # + compte temporaire Stalwart
 MASK = "••••••"
 
 
@@ -1001,7 +1001,7 @@ def _ports(a):
     wg = node_wg(a.get("node"))
     if wg and os.path.exists("/etc/wireguard/wg-hangar.conf"):
         ports.append(f"{wg}:{a['host_port']}:{a['port']}")
-    return ports + public   # ports publics en plus de la page web (messagerie : 25, 465, 587, 993)
+    return ports + public   # ports publics en plus de la page web (messagerie : 25, 465, 993)
 
 
 def db_url(a, node=None):

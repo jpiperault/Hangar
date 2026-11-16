@@ -39,7 +39,9 @@
       <div class="field"><label for="cmdom">Domaine des adresses</label><input id="cmdom" name="mail_domain" value="{{ mdom }}" spellcheck="false" placeholder="exemple.fr"></div>
       <div class="field"><label for="cmhost">Nom du serveur mail</label><input id="cmhost" name="mail_host" value="{{ fm.mail_host or ('mail.' ~ mdom if mdom) }}" spellcheck="false" placeholder="mail.exemple.fr"></div>
     </div>
-    <p class="hint" style="margin:0">Le courrier n'emprunte ni le tunnel ni le proxy de Cloudflare : choisis une machine avec une adresse IP publique fixe, dont l'hébergeur laisse passer le port 25 et règle le DNS inverse (PTR) sur le nom du serveur. Hangar ouvre les ports {{ cur.ports }} sur cette machine et déclare chez Cloudflare le nom du serveur (non proxifié), le MX, le SPF et le DMARC.</p>
+    {% if cur.setup == 'stalwart' %}<div class="field"><label for="cmcf">Jeton Cloudflare pour Stalwart (facultatif)</label><input id="cmcf" name="mail_cf_token" type="password" autocomplete="off" spellcheck="false">
+      <span class="hint">Un jeton limité à la zone du domaine des adresses, avec le droit Zone › DNS › Modifier. Stalwart obtient alors son certificat et publie lui-même DKIM, DMARC et ses autres enregistrements. Hangar le transmet à Stalwart sans le garder. Sans jeton : certificat et DKIM à régler ensuite dans l'administration de Stalwart.</span></div>{% endif %}
+    <p class="hint" style="margin:0">Le courrier n'emprunte ni le tunnel ni le proxy de Cloudflare : choisis une machine avec une adresse IP publique fixe, dont l'hébergeur laisse passer le port 25 et règle le DNS inverse (PTR) sur le nom du serveur. Hangar ouvre les ports {{ cur.ports }} sur cette machine et déclare chez Cloudflare le nom du serveur (non proxifié), le MX, le SPF et le DMARC (que Stalwart reprend s'il a son jeton).</p>
     {% endif %}
     <dl class="facts">
       <dt>Image</dt><dd class="mono" style="word-break:break-all">{{ cur.image }}:{{ cur.version }}</dd>

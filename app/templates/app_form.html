@@ -98,7 +98,7 @@
     </div>
     <div class="field {{ 'bad' if errors.gports }}" data-kinds="game web api worker tool"><label for="gports">Ports publics</label>
       <input id="gports" name="gports" value="{{ gports or '' }}" spellcheck="false" placeholder="tcp 25565, udp 19132, tcp 8081:8080">
-      {{ err('gports') }}<span class="hint">Ouverts sur toutes les adresses de la machine (son adresse publique). « tcp 8081:8080 » : port public 8081 vers le port 8080 du conteneur. Le tunnel Cloudflare ne transporte que le web : on se connecte à l'adresse de la machine, ou à un nom DNS qui pointe vers elle. Facultatif pour une appli web (messagerie : « tcp 25, tcp 465, tcp 587, tcp 993 »).</span></div>
+      {{ err('gports') }}<span class="hint">Ouverts sur toutes les adresses de la machine (son adresse publique). « tcp 8081:8080 » : port public 8081 vers le port 8080 du conteneur. Le tunnel Cloudflare ne transporte que le web : on se connecte à l'adresse de la machine, ou à un nom DNS qui pointe vers elle. Facultatif pour une appli web (messagerie : « tcp 25, tcp 465, tcp 993 »).</span></div>
     <div class="field {{ 'bad' if errors.gfrom }}" data-kinds="game web api worker tool"><label for="gfrom">Ouverts seulement à</label>
       <input id="gfrom" name="gfrom" value="{{ gfrom or '' }}" spellcheck="false" placeholder="tout le monde">
       {{ err('gfrom') }}<span class="hint">Facultatif : adresses IP ou réseaux autorisés, séparés par des virgules (203.0.113.4, 198.51.100.0/24, 2001:db8::/48). Les autres sont bloqués par le pare-feu, en IPv4 comme en IPv6.</span></div>
@@ -165,9 +165,21 @@
     {% if gports %}{% for p in gports.split(', ') %}<div class="cert"><span class="mono">{{ public_addr }}:{{ p.split(' ')[1].split(':')[0] }}</span><span class="pill s-stopped">{{ p.split(' ')[0] | upper }} public{{ ' → conteneur ' ~ p.split(':')[1] if ':' in p }}</span></div>{% endfor %}{% if gfrom %}<p class="hint">Ports publics ouverts seulement à : <span class="mono">{{ gfrom }}</span></p>{% endif %}
     {% elif not kind.http %}<p class="hint" style="margin:0">Pas d'adresse publique : ce service n'est pas publié sur Internet. Sa santé, c'est son conteneur qui tourne.</p>{% endif %}
     {% if mailcfg %}
-    <h3 style="margin:8px 0 0">Messagerie</h3>
-    <p class="hint" style="margin:0">Serveur <span class="mono">{{ mailcfg.host }}</span> pour les adresses <span class="mono">…@{{ mailcfg.domain }}</span>.</p>
-    {% if not mailip %}<p class="hint lv-error" style="margin:0">Sa machine n'a pas d'adresse IP publique connue : le nom {{ mailcfg.host }} est à faire pointer à la main vers l'adresse où arrivent ses ports 25, 465, 587 et 993.</p>{% endif %}
+    <h3 style="margin:8px 0 0" id="messagerie">Messagerie</h3>
+    <p class="hint" style="margin:0">Serveur <span class="mono">{{ mailcfg.host }}</span> pour les adresses <span class="mono">…@{{ mailcfg.domain }}</span>.{% if mailcfg.setup %} Configuré par Hangar{{ ' ; certificat et DNS (DKIM, DMARC…) gérés par Stalwart avec son jeton Cloudflare' if mailcfg.stalwart_dns }}.{% endif %}</p>
+    {% if mailsetup %}
+    <form method="post" action="/apps/{{ a.slug }}/mail/setup" class="inline" style="display:flex;flex-wrap:wrap;gap:8px;align-items:end">
+      <div class="field" style="margin:0"><label for="mcf">Jeton Cloudflare pour Stalwart (facultatif)</label><input id="mcf" name="mail_cf_token" type="password" autocomplete="off" spellcheck="false"></div>
+      <button class="btn sm" {{ 'disabled' if a.status == 'deploying' }}>Configurer Stalwart</button>
+    </form>
+    <span class="hint">Stalwart attend encore sa configuration initiale : Hangar la fait par son API (nom du serveur, domaine, stockage, clés DKIM), retire le compte temporaire et redémarre l'appli. Son interface refuse la connexion tant que ce n'est pas fait.</span>
+    {% endif %}
+    {% if mailadmin and role == 'admin' %}
+    <div class="cert"><span>Administrateur Stalwart : <span class="mono">{{ mailadmin.user }}</span></span>
+      <details style="display:inline"><summary class="btn sm link">Afficher le mot de passe</summary><span class="mono" style="user-select:all">{{ mailadmin.secret }}</span></details>
+      <form method="post" action="/apps/{{ a.slug }}/mail/admin/forget" class="inline" data-confirm="Hangar oublie ce mot de passe : note-le avant. Continuer ?"><button class="btn sm link">Je l'ai noté : l'oublier</button></form></div>
+    {% endif %}
+    {% if not mailip %}<p class="hint lv-error" style="margin:0">Sa machine n'a pas d'adresse IP publique connue : le nom {{ mailcfg.host }} est à faire pointer à la main vers l'adresse où arrivent ses ports 25, 465 et 993.</p>{% endif %}
     <div class="tablebox"><table class="mon"><thead><tr><th>Type</th><th>Nom</th><th>Valeur</th><th></th></tr></thead><tbody>
     {% for r in mailrec %}<tr><td>{{ r.type }}</td><td class="mono">{{ r.name }}</td><td class="mono" style="word-break:break-all">{{ (r.priority ~ ' ') if r.priority }}{{ r.content }}</td>
       <td>{% if r.ok %}<span class="pill s-running">{{ r.msg | trmsg }}</span>{% elif r.ok is false %}<span class="pill s-error" title="{{ r.msg | trmsg }}">à corriger</span>{% else %}<span class="pill s-stopped">à déclarer</span>{% endif %}</td></tr>
@@ -374,7 +386,7 @@
     </div>
     <div class="field {{ 'bad' if errors.gports }}" data-kinds="game web api worker tool"><label for="gports">Ports publics</label>
       <input id="gports" name="gports" value="{{ gports or '' }}" spellcheck="false" placeholder="tcp 25565, udp 19132, tcp 8081:8080">
-      {{ err('gports') }}<span class="hint">Ouverts sur toutes les adresses de la machine (son adresse publique). « tcp 8081:8080 » : port public 8081 vers le port 8080 du conteneur. Le tunnel Cloudflare ne transporte que le web : on se connecte à l'adresse de la machine, ou à un nom DNS qui pointe vers elle. Facultatif pour une appli web (messagerie : « tcp 25, tcp 465, tcp 587, tcp 993 »).</span></div>
+      {{ err('gports') }}<span class="hint">Ouverts sur toutes les adresses de la machine (son adresse publique). « tcp 8081:8080 » : port public 8081 vers le port 8080 du conteneur. Le tunnel Cloudflare ne transporte que le web : on se connecte à l'adresse de la machine, ou à un nom DNS qui pointe vers elle. Facultatif pour une appli web (messagerie : « tcp 25, tcp 465, tcp 993 »).</span></div>
     <div class="field {{ 'bad' if errors.gfrom }}" data-kinds="game web api worker tool"><label for="gfrom">Ouverts seulement à</label>
       <input id="gfrom" name="gfrom" value="{{ gfrom or '' }}" spellcheck="false" placeholder="tout le monde">
       {{ err('gfrom') }}<span class="hint">Facultatif : adresses IP ou réseaux autorisés, séparés par des virgules (203.0.113.4, 198.51.100.0/24, 2001:db8::/48). Les autres sont bloqués par le pare-feu, en IPv4 comme en IPv6.</span></div>
