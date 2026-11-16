@@ -62,6 +62,29 @@ def parse(raw, slug, node):
     return out
 
 
+def busy(node, ports):
+    """Ports demandés déjà écoutés sur la machine, par un programme ou un autre conteneur : ["tcp 25 (master)"].
+    Un MTA local (postfix sur 127.0.0.1:25, courant sur Debian) suffit à empêcher Docker de publier 0.0.0.0:25."""
+    from . import platform as P
+    if not ports:
+        return []
+    rc, out = P.nsh(node, "ss -Hlntup", timeout=30)
+    if rc != 0:
+        return []   # machine injoignable : le déploiement dira pourquoi
+    seen = {}
+    for line in out.splitlines():
+        f = line.split()
+        if len(f) < 5 or f[0] not in ("tcp", "udp"):
+            continue
+        try:
+            port = int(f[4].rsplit(":", 1)[1])
+        except (ValueError, IndexError):
+            continue
+        m = re.search(r'\(\("([^"]+)"', line)
+        seen.setdefault((f[0], port), m.group(1) if m else "?")
+    return [f"{p['proto']} {p['port']} ({seen[(p['proto'], p['port'])]})" for p in ports if (p["proto"], p["port"]) in seen]
+
+
 def save(slug, ports):
     allv = db.kv_get("public_ports") or {}
     if ports:

@@ -17,7 +17,7 @@ def test_modeles_valides():
              "db": 1 if c["db"] else 0, "kind": "tool"}
         assert P.check_app_entry(e) == [], (c["id"], P.check_app_entry(e))
         allowed = {"secret", "url", "url_noslash", "host", "db_url", "db_host", "db_port", "db_name", "db_user",
-                   "db_password", "mysql_password"}
+                   "db_password", "mysql_password", "mail_host"}
         assert set(re.findall(r"\{([a-z_]+)\}", c["env"])) <= allowed, c["id"]
     assert kinds.get("tool")["http"]
 

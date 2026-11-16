@@ -174,14 +174,14 @@ def validate(f, cur=None):
     else:   # sans page web : pas d'adresse publique
         d["routes"] = []
     d["_ports"], d["_from"] = None, []
-    if kinds.get(d["kind"]).get("ports"):
+    if kinds.ports(d["kind"]):
         try:
             d["_from"] = gameports.parse_sources(f.get("gfrom") or "")
         except ValueError as x:
             e["gfrom"] = str(x)
         try:
             d["_ports"] = gameports.parse(f.get("gports") or "", d["slug"], cur["node"] if cur else f.get("node"))
-            if not d["_ports"]:
+            if not d["_ports"] and kinds.ports(d["kind"]) == "required":
                 e["gports"] = "Indique au moins un port public, par exemple « tcp 25565 »."
         except ValueError as x:
             e["gports"] = str(x)

@@ -7,7 +7,8 @@ Droits du jeton (Mon profil › Jetons d'API › Créer un jeton personnalisé) 
 sync() rapproche Cloudflare de ce que veut Hangar :
 - domaines en mode tunnel : une règle d'entrée du tunnel par nom (→ http://127.0.0.1:8080, Caddy) et un
   enregistrement CNAME <nom> → <id du tunnel>.cfargotunnel.com, proxifié ;
-- domaines en mode direct avec une IP : un enregistrement A <nom> → IP, non proxifié (Let's Encrypt passe en direct).
+- domaines en mode direct avec une IP : un enregistrement A <nom> → IP, non proxifié (Let's Encrypt passe en direct) ;
+- serveurs de messagerie (mail.py) : A/AAAA du serveur vers sa machine (non proxifié), MX, SPF et DMARC du domaine.
 
 Hangar ne touche qu'à ses propres noms : les autres règles du tunnel et les autres enregistrements DNS restent tels
 quels. Un nom déjà pris par un enregistrement qui ne vient pas de Hangar n'est pas écrasé : il est signalé.
@@ -29,6 +30,7 @@ from . import platform as P
 TOKEN = "/srv/platform/cloudflare.token"
 API = "https://api.cloudflare.com/client/v4"
 COMMENT = "géré par Hangar"
+MAIL_COMMENT = "géré par Hangar (messagerie)"
 _lock = threading.Lock()
 
 
@@ -213,7 +215,8 @@ def sync():
         for zid, (z, hs) in by_zone.items():
             recs = {}
             for r in _records(zid):
-                recs.setdefault(r["name"], []).append(r)
+                if r["type"] in ("A", "AAAA", "CNAME"):   # MX et TXT d'un même nom : messagerie, à part
+                    recs.setdefault(r["name"], []).append(r)
             for h in hs:
                 have = recs.get(h, [])
                 if h not in target:
@@ -249,8 +252,82 @@ def sync():
                     res[h] = {"ok": True, "msg": "en place, mais le certificat gratuit de Cloudflare ne couvre qu'un "
                                                  f"niveau sous {z['name']} : HTTPS échouera sans certificat avancé"}
         db.kv_set("cf_managed", sorted(target))
-        st = {"ts": time.time(), "names": res, "error": None, "changes": changes}
+        mail_res = _sync_mail(zcache, changes)
+        st = {"ts": time.time(), "names": res, "mail": mail_res, "error": None, "changes": changes}
         db.kv_set("cf_status", st)
         if changes:
             P.log("ok", "cloudflare", " ; ".join(changes))
         return st
+
+
+def _mail_key(r):
+    return [r["type"], r["name"], r["content"]]
+
+
+def _sync_mail(zcache, changes):
+    """Enregistrements de messagerie (mail.py). Hangar n'écrase jamais un MX, un SPF ou un DMARC qu'il n'a pas
+    créé : il le signale. Retourne {appli: [{type, name, content, ok, msg}]}."""
+    from . import mail
+    want = mail.wanted()
+    managed = [m for m in (db.kv_get("cf_mail_managed") or []) if isinstance(m, list) and len(m) == 3]
+    out, kept, recs_by_zone = {}, [], {}
+
+    def zone_recs(name):
+        z = zone_of(name, zcache)
+        if not z:
+            return None, None
+        if z["id"] not in recs_by_zone:
+            recs_by_zone[z["id"]] = _records(z["id"])
+        return z, recs_by_zone[z["id"]]
+
+    for w in want:
+        row = {k: w[k] for k in ("type", "name", "content")}
+        out.setdefault(w["slug"], []).append(row)
+        z, recs = zone_recs(w["name"])
+        if not z:
+            row.update(ok=False, msg="aucune zone Cloudflare visible avec ce jeton pour ce nom")
+            continue
+        here = [r for r in recs if r["name"] == w["name"]]
+        if any(mail.same(w, r) for r in here):
+            row.update(ok=True, msg="en place")
+            kept.append(_mail_key(w))
+            continue
+        fam = mail.kind_of(w)
+        rivals = [r for r in here if mail.kind_of(r) == fam]
+        ours = [r for r in rivals if r.get("comment") == MAIL_COMMENT]
+        body = {"type": w["type"], "name": w["name"], "content": w["content"], "ttl": 1, "comment": MAIL_COMMENT}
+        if w["type"] in ("A", "AAAA"):
+            body["proxied"] = False
+        if "priority" in w:
+            body["priority"] = w["priority"]
+        if rivals and len(ours) == len(rivals) and fam != "mx":
+            _api("PUT", f"/zones/{z['id']}/dns_records/{ours[0]['id']}", body=body)
+            row.update(ok=True, msg="mis à jour")
+            changes.append(f"DNS {w['type']} {w['name']} mis à jour")
+        elif rivals and not (fam == "mx" and len(ours) == len(rivals)):
+            what = {"addr": "ce nom pointe déjà ailleurs", "mx": "ce domaine reçoit déjà son courrier ailleurs (MX)",
+                    "spf": "un SPF existe déjà : ajoute-lui « mx »", "dmarc": "un DMARC existe déjà"}[fam]
+            row.update(ok=False, msg=f"{what} ({rivals[0]['type']} {mail._txt(rivals[0]['content'])[:60]}) : "
+                                     "Hangar ne l'écrase pas")
+            continue
+        else:
+            for r in ours:   # ancien MX de Hangar (serveur renommé)
+                _api("DELETE", f"/zones/{z['id']}/dns_records/{r['id']}")
+            _api("POST", f"/zones/{z['id']}/dns_records", body=body)
+            row.update(ok=True, msg="créé")
+            changes.append(f"DNS {w['type']} {w['name']} créé")
+        kept.append(_mail_key(w))
+        recs[:] = [r for r in recs if r not in ours] + [{**body, "id": ""}]
+
+    # ceux que Hangar avait créés et qui ne servent plus (appli supprimée, nom changé)
+    for t, name, content in managed:
+        if [t, name, content] in kept:
+            continue
+        z, recs = zone_recs(name)
+        for r in recs or []:
+            if r.get("comment") == MAIL_COMMENT and r["name"] == name and mail.same(
+                    {"type": t, "content": content, "priority": int(r.get("priority") or 0)}, r) and r.get("id"):
+                _api("DELETE", f"/zones/{z['id']}/dns_records/{r['id']}")
+                changes.append(f"DNS {t} {name} supprimé")
+    db.kv_set("cf_mail_managed", kept)
+    return out

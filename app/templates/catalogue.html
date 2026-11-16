@@ -34,6 +34,13 @@
         <select name="domain" aria-label="Domaine">{% for d in domains %}<option value="{{ d.name }}" {{ 'selected' if (fm.domain or (dft.name if dft else '')) == d.name }}>{{ d.name }}</option>{% endfor %}</select></div></div>
     <div class="field"><label for="cnode">Machine</label>
       <select id="cnode" name="node">{% for n in node_choices %}<option value="{{ n.id }}" {{ 'selected' if (fm.node or best) == n.id }}>{{ n.name }} · {{ '%.0f' % n.free }} Mo libres{{ ' (conseillé)' if n.id == best and node_choices | length > 1 }}</option>{% endfor %}</select></div>
+    {% if cur.mail %}{% set mdom = fm.mail_domain or (dft.name if dft else '') %}
+    <div class="row2">
+      <div class="field"><label for="cmdom">Domaine des adresses</label><input id="cmdom" name="mail_domain" value="{{ mdom }}" spellcheck="false" placeholder="exemple.fr"></div>
+      <div class="field"><label for="cmhost">Nom du serveur mail</label><input id="cmhost" name="mail_host" value="{{ fm.mail_host or ('mail.' ~ mdom if mdom) }}" spellcheck="false" placeholder="mail.exemple.fr"></div>
+    </div>
+    <p class="hint" style="margin:0">Le courrier n'emprunte ni le tunnel ni le proxy de Cloudflare : choisis une machine avec une adresse IP publique fixe, dont l'hébergeur laisse passer le port 25 et règle le DNS inverse (PTR) sur le nom du serveur. Hangar ouvre les ports {{ cur.ports }} sur cette machine et déclare chez Cloudflare le nom du serveur (non proxifié), le MX, le SPF et le DMARC.</p>
+    {% endif %}
     <dl class="facts">
       <dt>Image</dt><dd class="mono" style="word-break:break-all">{{ cur.image }}:{{ cur.version }}</dd>
       <dt>Base</dt><dd>{{ 'PostgreSQL dédiée' if cur.db else ({'mariadb': 'MariaDB 11.4 dédiée', 'mysql': 'MySQL 8.4 dédiée'}[cur.mysql] if cur.mysql else 'aucune (données dans /data)') }}</dd>
@@ -52,5 +59,9 @@ document.querySelectorAll('input[name=cat]').forEach(function (r) { r.addEventLi
 (function () { var s = document.getElementById('cslug'), sub = document.getElementById('csub'), touched = false;
   sub.addEventListener('input', function () { touched = true; });
   s.addEventListener('input', function () { if (!touched) sub.value = s.value; }); })();
+(function () { var d = document.getElementById('cmdom'), h = document.getElementById('cmhost');
+  if (!d || !h) return;
+  d.addEventListener('input', function () { if (!h.dataset.touched) h.value = d.value ? 'mail.' + d.value : ''; });
+  h.addEventListener('input', function () { h.dataset.touched = 1; }); })();
 </script>
 {% endblock %}

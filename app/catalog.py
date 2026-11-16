@@ -6,6 +6,7 @@ Variables : les valeurs entre accolades sont remplies à l'installation :
   {db_url}      DATABASE_URL (libpq)                  {db_host} {db_port} {db_name} {db_user} {db_password}
   {secret}      chaîne aléatoire (64 caractères hexadécimaux), une nouvelle à chaque occurrence
   {mysql_password}  mot de passe de la base MySQL/MariaDB de l'appli (hôte mysql, base et utilisateur app)
+  {mail_host}   nom du serveur mail (applis « mail » : ports publics et enregistrements DNS, voir mail.py)
 Seules les applis qui tiennent dans le modèle de Hangar y sont : un conteneur, données dans /data (ou dans des
 dossiers de data/ montés ailleurs : « mounts »), PostgreSQL, MySQL/MariaDB (« mysql » : moteur) ou rien.
 """
@@ -15,7 +16,7 @@ import secrets
 from . import db
 
 CATS = {"perso": "Mes modèles", "site": "Sites et blogs", "stats": "Statistiques et surveillance", "secu": "Sécurité",
-        "dev": "Développement", "auto": "Automatisation", "doc": "Documentation", "tools": "Outils"}
+        "mail": "Messagerie", "dev": "Développement", "auto": "Automatisation", "doc": "Documentation", "tools": "Outils"}
 
 CATALOG = [
     {"id": "wordpress", "name": "WordPress", "cat": "site", "color": "#21759b",
@@ -57,6 +58,20 @@ CATALOG = [
      "env": "DOMAIN={url}\nSIGNUPS_ALLOWED=true\nADMIN_TOKEN={secret}",
      "after": "Crée ton compte, puis mets SIGNUPS_ALLOWED=false dans ses variables. Le jeton d'administration (/admin) est dans ses variables.",
      "site": "https://github.com/dani-garcia/vaultwarden"},
+    # variante alpine : l'image standard exige un processeur x86-64-v2 (SSE4.2), absent des vieux serveurs (Atom…)
+    {"id": "stalwart", "name": "Stalwart", "cat": "mail", "color": "#d6402c",
+     "desc": "Serveur de messagerie complet : SMTP, IMAP, JMAP, agendas et contacts, anti-spam, DKIM, avec administration "
+             "web et espace personnel pour chaque utilisateur.",
+     "image": "stalwartlabs/stalwart", "version": "v1.1-alpine", "port": 8080, "health": "/healthz/live", "mem": 512, "db": False,
+     "mounts": "etc:/etc/stalwart, lib:/var/lib/stalwart", "data_user": "2000:2000",
+     "mail": True, "ports": "tcp 25, tcp 465, tcp 587, tcp 993",
+     "env": "STALWART_RECOVERY_ADMIN=admin:{secret}\nSTALWART_PUBLIC_URL={url_noslash}\nSTALWART_HOSTNAME={mail_host}",
+     "after": "Connecte-toi sur /admin avec admin et le mot de passe de STALWART_RECOVERY_ADMIN (ses variables), puis suis "
+              "l'assistant : nom du serveur = celui choisi ici, domaine des adresses, stockage RocksDB, journaux sur la "
+              "console, certificat par DNS Cloudflare (un jeton limité à la zone). Redémarre l'appli à la fin, publie "
+              "la clé DKIM qu'il affiche, puis retire STALWART_RECOVERY_ADMIN de ses variables. Chacun gère son compte "
+              "sur /account.",
+     "site": "https://stalw.art"},
     {"id": "gitea", "name": "Gitea", "cat": "dev", "color": "#609926",
      "desc": "Hébergement Git léger : dépôts, tickets, revues, paquets.",
      "image": "gitea/gitea", "version": "1", "port": 3000, "health": "/api/healthz", "mem": 384, "db": True,

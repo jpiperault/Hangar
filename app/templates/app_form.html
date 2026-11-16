@@ -96,10 +96,10 @@
       <div class="field {{ 'bad' if errors.health_path }}" data-kinds="web api mobile tool"><label for="health_path">Adresse de santé</label><input id="health_path" name="health_path" value="{{ a.health_path }}" spellcheck="false">{{ err('health_path') }}</div>
       <div class="field {{ 'bad' if errors.mem_mb }}"><label for="mem_mb">RAM max (Mo)</label><input id="mem_mb" name="mem_mb" type="number" min="32" max="4096" value="{{ a.mem_mb }}">{{ err('mem_mb') }}</div>
     </div>
-    <div class="field {{ 'bad' if errors.gports }}" data-kinds="game"><label for="gports">Ports publics</label>
+    <div class="field {{ 'bad' if errors.gports }}" data-kinds="game web api worker tool"><label for="gports">Ports publics</label>
       <input id="gports" name="gports" value="{{ gports or '' }}" spellcheck="false" placeholder="tcp 25565, udp 19132, tcp 8081:8080">
-      {{ err('gports') }}<span class="hint">Ouverts sur toutes les adresses de la machine (son adresse publique). « tcp 8081:8080 » : port public 8081 vers le port 8080 du conteneur. Le tunnel Cloudflare ne transporte que le web : les joueurs se connectent à l'adresse de la machine, ou à un nom DNS qui pointe vers elle.</span></div>
-    <div class="field {{ 'bad' if errors.gfrom }}" data-kinds="game"><label for="gfrom">Ouverts seulement à</label>
+      {{ err('gports') }}<span class="hint">Ouverts sur toutes les adresses de la machine (son adresse publique). « tcp 8081:8080 » : port public 8081 vers le port 8080 du conteneur. Le tunnel Cloudflare ne transporte que le web : on se connecte à l'adresse de la machine, ou à un nom DNS qui pointe vers elle. Facultatif pour une appli web (messagerie : « tcp 25, tcp 465, tcp 587, tcp 993 »).</span></div>
+    <div class="field {{ 'bad' if errors.gfrom }}" data-kinds="game web api worker tool"><label for="gfrom">Ouverts seulement à</label>
       <input id="gfrom" name="gfrom" value="{{ gfrom or '' }}" spellcheck="false" placeholder="tout le monde">
       {{ err('gfrom') }}<span class="hint">Facultatif : adresses IP ou réseaux autorisés, séparés par des virgules (203.0.113.4, 198.51.100.0/24, 2001:db8::/48). Les autres sont bloqués par le pare-feu, en IPv4 comme en IPv6.</span></div>
     <div class="field {{ 'bad' if errors.env }}"><label for="env">Variables d'environnement</label>
@@ -162,8 +162,19 @@
     {% for n in names %}
     <div class="cert"><span class="mono">{{ n.name }}</span>{{ dnspill(n) }}</div>
     {% endfor %}
-    {% if kind.ports %}{% for p in gports.split(', ') if gports %}<div class="cert"><span class="mono">{{ public_addr }}:{{ p.split(' ')[1].split(':')[0] }}</span><span class="pill s-stopped">{{ p.split(' ')[0] | upper }} public{{ ' → conteneur ' ~ p.split(':')[1] if ':' in p }}</span></div>{% endfor %}{% if gfrom %}<p class="hint">Ports publics ouverts seulement à : <span class="mono">{{ gfrom }}</span></p>{% endif %}
+    {% if gports %}{% for p in gports.split(', ') %}<div class="cert"><span class="mono">{{ public_addr }}:{{ p.split(' ')[1].split(':')[0] }}</span><span class="pill s-stopped">{{ p.split(' ')[0] | upper }} public{{ ' → conteneur ' ~ p.split(':')[1] if ':' in p }}</span></div>{% endfor %}{% if gfrom %}<p class="hint">Ports publics ouverts seulement à : <span class="mono">{{ gfrom }}</span></p>{% endif %}
     {% elif not kind.http %}<p class="hint" style="margin:0">Pas d'adresse publique : ce service n'est pas publié sur Internet. Sa santé, c'est son conteneur qui tourne.</p>{% endif %}
+    {% if mailcfg %}
+    <h3 style="margin:8px 0 0">Messagerie</h3>
+    <p class="hint" style="margin:0">Serveur <span class="mono">{{ mailcfg.host }}</span> pour les adresses <span class="mono">…@{{ mailcfg.domain }}</span>.</p>
+    {% if not mailip %}<p class="hint lv-error" style="margin:0">Sa machine n'a pas d'adresse IP publique connue : le nom {{ mailcfg.host }} est à faire pointer à la main vers l'adresse où arrivent ses ports 25, 465, 587 et 993.</p>{% endif %}
+    <div class="tablebox"><table class="mon"><thead><tr><th>Type</th><th>Nom</th><th>Valeur</th><th></th></tr></thead><tbody>
+    {% for r in mailrec %}<tr><td>{{ r.type }}</td><td class="mono">{{ r.name }}</td><td class="mono" style="word-break:break-all">{{ (r.priority ~ ' ') if r.priority }}{{ r.content }}</td>
+      <td>{% if r.ok %}<span class="pill s-running">{{ r.msg | trmsg }}</span>{% elif r.ok is false %}<span class="pill s-error" title="{{ r.msg | trmsg }}">à corriger</span>{% else %}<span class="pill s-stopped">à déclarer</span>{% endif %}</td></tr>
+      {% if r.ok is false %}<tr><td></td><td colspan="3" class="hint lv-error">{{ r.msg | trmsg }}</td></tr>{% endif %}{% endfor %}
+    </tbody></table></div>
+    <span class="hint">{% if cf and cf.token %}Hangar tient ces enregistrements chez Cloudflare ; le nom du serveur n'est jamais proxifié.{% else %}À déclarer chez ton fournisseur DNS, ou donne un jeton d'API Cloudflare (<a href="/domains">Domaines</a>) pour que Hangar le fasse.{% endif %} La clé DKIM (TXT <span class="mono">…._domainkey.{{ mailcfg.domain }}</span>) est créée par le serveur mail : copie-la depuis son administration. Chez l'hébergeur de la machine : DNS inverse (PTR) de son IP sur {{ mailcfg.host }}, et port 25 sortant ouvert.</span>
+    {% endif %}
     {% for n in names if n.cf and n.cf.ok is false %}<span class="hint lv-error">{{ n.name }} : {{ n.cf.msg | trmsg }}</span>{% endfor %}
     {% if names | selectattr('ok', 'false') | list %}
     <span class="hint">{% if cf and cf.token %}Hangar déclare ces noms chez Cloudflare tout seul ; la résolution DNS publique peut prendre quelques minutes.{% else %}Noms à déclarer à la main : voir <a href="/domains">Domaines</a>, ou donne un jeton d'API Cloudflare pour que Hangar le fasse.{% endif %}</span>
@@ -361,10 +372,10 @@
       <div class="field {{ 'bad' if errors.health_path }}" data-kinds="web api mobile tool"><label for="health_path">Adresse de santé</label><input id="health_path" name="health_path" value="{{ a.health_path }}" spellcheck="false">{{ err('health_path') }}</div>
       <div class="field {{ 'bad' if errors.mem_mb }}"><label for="mem_mb">RAM max (Mo)</label><input id="mem_mb" name="mem_mb" type="number" min="32" max="4096" value="{{ a.mem_mb }}">{{ err('mem_mb') }}</div>
     </div>
-    <div class="field {{ 'bad' if errors.gports }}" data-kinds="game"><label for="gports">Ports publics</label>
+    <div class="field {{ 'bad' if errors.gports }}" data-kinds="game web api worker tool"><label for="gports">Ports publics</label>
       <input id="gports" name="gports" value="{{ gports or '' }}" spellcheck="false" placeholder="tcp 25565, udp 19132, tcp 8081:8080">
-      {{ err('gports') }}<span class="hint">Ouverts sur toutes les adresses de la machine (son adresse publique). « tcp 8081:8080 » : port public 8081 vers le port 8080 du conteneur. Le tunnel Cloudflare ne transporte que le web : les joueurs se connectent à l'adresse de la machine, ou à un nom DNS qui pointe vers elle.</span></div>
-    <div class="field {{ 'bad' if errors.gfrom }}" data-kinds="game"><label for="gfrom">Ouverts seulement à</label>
+      {{ err('gports') }}<span class="hint">Ouverts sur toutes les adresses de la machine (son adresse publique). « tcp 8081:8080 » : port public 8081 vers le port 8080 du conteneur. Le tunnel Cloudflare ne transporte que le web : on se connecte à l'adresse de la machine, ou à un nom DNS qui pointe vers elle. Facultatif pour une appli web (messagerie : « tcp 25, tcp 465, tcp 587, tcp 993 »).</span></div>
+    <div class="field {{ 'bad' if errors.gfrom }}" data-kinds="game web api worker tool"><label for="gfrom">Ouverts seulement à</label>
       <input id="gfrom" name="gfrom" value="{{ gfrom or '' }}" spellcheck="false" placeholder="tout le monde">
       {{ err('gfrom') }}<span class="hint">Facultatif : adresses IP ou réseaux autorisés, séparés par des virgules (203.0.113.4, 198.51.100.0/24, 2001:db8::/48). Les autres sont bloqués par le pare-feu, en IPv4 comme en IPv6.</span></div>
     <div class="field {{ 'bad' if errors.env }}"><label for="env">Variables d'environnement</label>

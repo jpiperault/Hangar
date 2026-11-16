@@ -5,7 +5,7 @@ import time
 
 from fastapi import APIRouter, Request
 
-from .. import affinity, diskuse, history, mysqlrepl, patch, vulns, hooks, monitor, onboarding, perms, protect, runopts, segment, applogs, backup, cache, catalog, cloudflare, crashes, db, dbadmin, gameports, ha, jobs, kinds, limits, nodes, preprod, remoteconfig, services, sites, smoke, stats
+from .. import affinity, diskuse, mail, history, mysqlrepl, patch, vulns, hooks, monitor, onboarding, perms, protect, runopts, segment, applogs, backup, cache, catalog, cloudflare, crashes, db, dbadmin, gameports, ha, jobs, kinds, limits, nodes, preprod, remoteconfig, services, sites, smoke, stats
 from .. import domains as D
 from .. import platform as P
 from .common import RESERVED, SLUG, VERSION, _client_names, _public_addr, _rc_url, _redis_state, apply_registry, flash, get_app_or_404, go, node_choices, render, tpl_for, validate
@@ -84,8 +84,22 @@ async def catalogue_install(request: Request):
     if not err:
         rts, err = D._check_routes([{"kind": "sub", "domain": (f.get("domain") or "").strip().lower(),
                                      "sub": (f.get("sub") or "").strip().lower()}], slug, D.by_name())
+    pports, mhost, mdom = [], "", ""
+    if not err and c.get("mail"):   # serveur de messagerie : son nom, son domaine et ses ports publics
+        mhost = (f.get("mail_host") or "").strip().lower().rstrip(".")
+        mdom = (f.get("mail_domain") or "").strip().lower().rstrip(".")
+        err = mail.check(mhost, mdom, slug, D.host_of(rts[0]) if rts else None)
+    if not err and c.get("ports"):
+        try:
+            pports = gameports.parse(c["ports"], slug, node)
+        except ValueError as x:
+            err = f"Ports publics : {x}"
+        taken = [] if err else await asyncio.to_thread(gameports.busy, node, pports)
+        if taken:
+            err = (f"Ports déjà utilisés sur cette machine : {', '.join(taken)}. Arrête ce programme (un serveur mail "
+                   "local, souvent postfix : systemctl disable --now postfix) ou choisis une autre machine.")
     if err:
-        request.session["cform"] = {k: f.get(k) for k in ("slug", "name", "sub", "domain", "node")}
+        request.session["cform"] = {k: f.get(k) for k in ("slug", "name", "sub", "domain", "node", "mail_host", "mail_domain")}
         flash(request, err, "error")
         return back
     host = D.host_of(rts[0]) if rts else ""
@@ -97,7 +111,7 @@ async def catalogue_install(request: Request):
         my_pw = services.mysql(slug)["password"]
     vals = {"url": f"https://{host}/", "url_noslash": f"https://{host}", "host": host, "db_host": "postgres",
             "db_port": 5432, "db_name": P.db_name(slug), "db_user": P.db_name(slug), "db_password": pw or "",
-            "mysql_password": my_pw or ""}
+            "mysql_password": my_pw or "", "mail_host": mhost}
     if c["db"]:
         vals["db_url"] = P.db_url({**a, "db": 1}, node)
     d = {"name": name, "kind": c.get("kind", "tool"), "pkg": "", "source": "image", "image": c["image"], "version": c["version"],
@@ -108,6 +122,10 @@ async def catalogue_install(request: Request):
     D.set_routes(slug, rts)
     if c.get("mounts") or c.get("run"):
         runopts.save(slug, {**(c.get("run") or {}), "mounts": c.get("mounts") or ""})
+    if pports:
+        gameports.save(slug, pports)
+    if mhost:
+        mail.save(slug, mhost, mdom)
     P.log("info", slug, f"installée depuis le catalogue ({c['name']}, {c['image']}:{c['version']})")
     P.spawn(P.deploy, slug, c["version"], "create")
     flash(request, f"{c['name']} en cours d'installation sur https://{host}/. {c['after']}")
@@ -180,6 +198,12 @@ async def _app_ctx(request, slug):
     dser = diskuse.series(slug)
     disk = dict(disk=diskuse.app_view(slug), dpath=stats.spark_path([x["total"] for x in dser]) if len(dser) > 1 else "",
                 dgrowth=diskuse.growth(slug), dbusy=diskuse.busy())
+    mrec = []
+    if mail.of(slug):   # serveur de messagerie : ses enregistrements DNS, et leur état chez Cloudflare
+        cfm = {(r["type"], r["name"]): r for r in ((cloudflare.status().get("mail") or {}).get(slug) or [])}
+        mrec = [{**r, **{k: v for k, v in (cfm.get((r["type"], r["name"])) or {}).items() if k in ("ok", "msg")}}
+                for r in mail.records(slug)]
+    disk.update(mailcfg=mail.of(slug), mailrec=mrec, mailip=mail.public_ip(slug) if mail.of(slug) else None)
     hst = await asyncio.to_thread(ha.status, slug)
     busy = (hst and (hst["busy"] or hst["h"]["state"] == "setup"))
     return dict(title=a["name"], nav="apps", a=a, new=False, errors={}, events=events, names=names, ha=hst, **disk,

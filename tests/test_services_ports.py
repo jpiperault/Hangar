@@ -41,7 +41,14 @@ def test_compose(appli, tmp_path, monkeypatch):
     assert svc["ports"] == ["25565:25565/tcp", "19132:19133/udp"]
     svc = json.loads("".join(l for l in open(P.write_compose({**appli, "kind": "worker"}, "1"))
                              if not l.startswith("#")))["services"]["app"]
-    assert svc["ports"] == [] and not kinds.http("worker")
+    assert svc["ports"] == ["25565:25565/tcp", "19132:19133/udp"] and not kinds.http("worker")   # service : facultatifs
+    svc = json.loads("".join(l for l in open(P.write_compose({**appli, "kind": "tool"}, "1"))
+                             if not l.startswith("#")))["services"]["app"]
+    assert svc["ports"][-2:] == ["25565:25565/tcp", "19132:19133/udp"] and svc["ports"][0].startswith("127.0.0.1:")
+    gameports.save("mc", [])
+    svc = json.loads("".join(l for l in open(P.write_compose({**appli, "kind": "worker"}, "1"))
+                             if not l.startswith("#")))["services"]["app"]
+    assert svc["ports"] == [] and kinds.ports("static") is None and kinds.ports("game") == "required"
 
 
 def test_sante_sans_page_web(appli, monkeypatch):

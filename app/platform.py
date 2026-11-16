@@ -994,13 +994,14 @@ def registry_logout(registry):
 
 def _ports(a):
     from . import gameports, kinds
-    if not kinds.http(a.get("kind")):   # sans page web : aucun port, sauf les ports publics d'un serveur de jeu
-        return gameports.compose_ports(a["slug"]) if kinds.get(a.get("kind")).get("ports") else []
+    public = gameports.compose_ports(a["slug"]) if kinds.ports(a.get("kind")) else []
+    if not kinds.http(a.get("kind")):   # sans page web : seulement ses ports publics (serveur de jeu, service)
+        return public
     ports = [f"127.0.0.1:{a['host_port']}:{a['port']}"]
     wg = node_wg(a.get("node"))
     if wg and os.path.exists("/etc/wireguard/wg-hangar.conf"):
         ports.append(f"{wg}:{a['host_port']}:{a['port']}")
-    return ports
+    return ports + public   # ports publics en plus de la page web (messagerie : 25, 465, 587, 993)
 
 
 def db_url(a, node=None):
@@ -1708,6 +1709,8 @@ def delete(slug):
         services.drop(slug)
         gameports.save(slug, [])
         restricted = gameports.save_sources(slug, [])
+        from . import mail
+        mail.forget(slug)   # ses enregistrements DNS de messagerie partent à la prochaine synchro Cloudflare
         limits.drop(slug)
         from . import runopts
         runopts.drop(slug)
