@@ -5,7 +5,7 @@ import time
 
 from fastapi import APIRouter, Request
 
-from .. import affinity, diskuse, mail, history, mysqlrepl, patch, vulns, hooks, monitor, onboarding, perms, protect, runopts, segment, applogs, backup, cache, catalog, cloudflare, crashes, db, dbadmin, gameports, ha, jobs, kinds, limits, nodes, preprod, remoteconfig, services, sites, smoke, stats
+from .. import affinity, diskuse, mail, history, mysqlrepl, patch, vulns, hooks, monitor, onboarding, perms, protect, runopts, segment, applogs, backup, cache, catalog, cloudflare, crashes, db, dbadmin, gameports, ha, jobs, kinds, limits, nodes, preprod, remoteconfig, services, sites, smoke, stats, traffic
 from .. import domains as D
 from .. import platform as P
 from .common import RESERVED, SLUG, VERSION, _client_names, _public_addr, _rc_url, _redis_state, apply_registry, flash, get_app_or_404, go, node_choices, render, tpl_for, validate
@@ -425,6 +425,45 @@ async def app_logs(request: Request, slug: str):
     lines, total, cut = await asyncio.to_thread(applogs.read, slug, period, q, err)
     return render(request, "logs.html", title=f"Logs · {a['name']}", nav="apps", a=a, lines=lines, total=total,
                   cut=cut, period=period, q=q, err=err, periods=applogs.PERIODS, la=applogs.settings(slug))
+
+
+@router.get("/apps/{slug}/trafic")
+async def app_traffic(request: Request, slug: str):
+    """Trafic : vue d'ensemble (visiteurs, pages, origines…) ou journal d'accès (vue=journal)."""
+    a = get_app_or_404(slug)
+    qp = request.query_params
+    ctx = dict(title=f"Trafic · {a['name']}", nav="apps", a=a, ts=traffic.settings(),
+               is_admin=getattr(request.state, "role", "admin") == "admin")
+    if qp.get("vue") == "journal":
+        period = qp.get("p") if qp.get("p") in traffic.JOURNAL_PERIODS else "24h"
+        search, status = (qp.get("q") or "")[:200], qp.get("s") or ""
+        bots, live, ip = qp.get("bots") != "0", qp.get("live") == "1", (qp.get("ip") or "")[:64]
+        rows, total = await asyncio.to_thread(traffic.journal, slug, period, search, status, bots)
+        det = await asyncio.to_thread(traffic.ip_detail, slug, ip) if ip else None
+        return render(request, "traffic.html", vue="journal", rows=rows, total=total, period=period, periods=traffic.JOURNAL_PERIODS,
+                      search=search, status=status, bots=bots, live=live, ip=ip, det=det, auto_refresh=10 if live else None, **ctx)
+    rng = qp.get("r") if qp.get("r") in traffic.RANGES else "24h"
+    bots = qp.get("bots") == "1"
+    ov = await asyncio.to_thread(cache.get, f"traffic:{slug}:{rng}:{int(bots)}", 60, traffic.overview, slug, rng, bots)
+    return render(request, "traffic.html", vue="apercu", ov=ov, st=traffic.charts(ov), ranges=list(traffic.RANGES), **ctx)
+
+
+@router.post("/apps/{slug}/trafic/reglages")
+async def app_traffic_settings(request: Request, slug: str):
+    get_app_or_404(slug)
+    if getattr(request.state, "role", "admin") != "admin":
+        flash(request, "Réglage réservé aux administrateurs.", "error")
+        return go(f"/apps/{slug}/trafic")
+    f = await request.form()
+    try:
+        traffic.save_settings(f.get("days") or 0, f.get("ip_days") or 0, f.get("max_rows") or 0)
+        s = traffic.settings()
+        P.log("info", "système", f"journal d'accès : {s['days']} jours, adresses complètes {s['ip_days']} jours, "
+                                 f"{s['max_rows']} lignes max par appli")
+        flash(request, "Conservation du journal d'accès enregistrée (toutes les applis).")
+    except (TypeError, ValueError) as e:
+        flash(request, f"Refusé : {e}", "error")
+    return go(f"/apps/{slug}/trafic?vue=journal#conservation")
 
 
 @router.post("/apps/{slug}/logs/alerts")

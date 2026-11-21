@@ -200,6 +200,7 @@
         <form class="inline{{ ' ro-ok' if can_deploy }}" method="post" action="/apps/{{ a.slug }}/start"><button class="btn sm">Démarrer</button></form>
       {% endif %}
       <a class="btn sm" href="/apps/{{ a.slug }}/logs">Logs</a>
+      <a class="btn sm" href="/apps/{{ a.slug }}/trafic">Trafic</a>
     </div>
     {% endif %}
     <a class="btn sm" href="/prompt?app={{ a.slug }}" style="align-self:flex-start">Prompt de déploiement pour Claude</a>
@@ -288,6 +289,7 @@
 <section class="panel" id="stats" style="margin-top:20px">
   <div class="bar">
     <h2>Statistiques</h2>
+    <a class="btn sm link" href="/apps/{{ a.slug }}/trafic" style="margin-right:auto">Visiteurs et journal d'accès</a>
     <nav class="seg" aria-label="Période">{% for r in ranges %}<a class="segbtn {{ 'on' if st.range == r }}" href="?r={{ r }}#stats">{{ r }}</a>{% endfor %}</nav>
   </div>
   {% set su = st.summary %}

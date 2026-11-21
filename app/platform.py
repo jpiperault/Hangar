@@ -1709,7 +1709,8 @@ def delete(slug):
         services.drop(slug)
         gameports.save(slug, [])
         restricted = gameports.save_sources(slug, [])
-        from . import mail
+        from . import mail, traffic
+        traffic.forget(slug)
         mail.forget(slug)   # ses enregistrements DNS de messagerie partent à la prochaine synchro Cloudflare
         limits.drop(slug)
         from . import runopts

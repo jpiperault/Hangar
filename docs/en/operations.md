@@ -177,6 +177,7 @@ db_port, state, info). General settings: kv "ha" (safety shutdown auto | always 
 
 ## Files
 - platform.db          registry (apps, settings, event log, accounts)
+- traffic.db           access log and daily traffic summaries (traffic.py), not backed up
 - .env                 ADMIN_BIND, LAN_CIDR (adjustable from the console), TUNNEL_BIND
                        (BASE_DOMAIN, HUB, EXPOSURE_MODE: installation values, converted once into a domain)
 - Caddyfile(.prev)     generated configuration and the previous one
@@ -417,6 +418,12 @@ Nodes (Nodes page)
 - Search the logs of all apps: App logs page.
 - An app's charts: memory and CPU (limit drawn), memory of its Redis and its MySQL database
   (stats_res, keys "app:redis", "app:mysql").
+- An app's traffic (traffic.py, page /apps/<app>/trafic): the Caddy log lines already read for statistics are kept
+  in traffic.db (table hits: time, address, country from Cf-IPCountry, method, path without parameters, status,
+  duration, size, browser, bot, referrer reduced to its domain). Successful static files are only counted. Every
+  hour: finished days summarised in daily (visitors, pages, referrers, countries…), log erased after kv
+  traffic_settings.days (14), addresses truncated after ip_days (7), max_rows cap per app (500,000); summaries
+  kept 400 days. Unique visitors: distinct address + browser over the period.
 
 ## Tests
 `pytest` (tests/), without root or Docker: throwaway database and folders (conftest.py), HANGAR_NO_BACKGROUND=1 (no

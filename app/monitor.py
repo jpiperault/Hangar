@@ -9,7 +9,7 @@ import threading
 import json
 import time
 
-from . import alerts, applogs, backup, cache, db, limits, ha, jobs, nodes, registry, report, security, stats, statuspage, system
+from . import alerts, applogs, backup, cache, db, limits, ha, jobs, nodes, registry, report, security, stats, statuspage, system, traffic
 from . import platform as P
 
 _fails = {}            # slug -> échecs consécutifs
@@ -349,6 +349,7 @@ def _loop():
             except Exception as e:
                 P.log("warn", "système", f"surveillance {name} : {e}")
         _every("purge", 3600, stats.purge)
+        _every("traffic", 3600, traffic.purge)
         _every("purge_nodes", 3600, nodes.purge)
         _every("security", 1800, security.collect_all)
         _every("versions", 6 * 3600, check_versions)

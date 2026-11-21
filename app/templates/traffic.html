@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% macro num(n) %}{{ '{:,}'.format(n or 0).replace(',', ' ') }}{% endmacro %}
+{% macro tops(title, unit, rows, empty, mono=False, link=False) %}
+<section class="panel" style="display:flex;flex-direction:column;gap:6px">
+  <div class="bar"><h2>{{ title }}</h2><span class="hint">{{ unit }}</span></div>
+  {% for r in rows %}
+    {% if link %}<a class="trow" style="--w:{{ r.w }}%" href="/apps/{{ a.slug }}/trafic?vue=journal&amp;q={{ r.key | urlencode }}"><span class="{{ 'mono' if mono }}">{{ r.label }}</span><span class="n">{{ num(r.n) }}</span></a>
+    {% else %}<div class="trow" style="--w:{{ r.w }}%"><span class="{{ 'mono' if mono }}">{{ r.label }}</span><span class="n">{{ num(r.n) }}</span></div>{% endif %}
+  {% else %}<p class="hint" style="margin:0">{{ empty }}</p>{% endfor %}
+</section>
+{% endmacro %}
+{% block main %}
+<div class="bar">
+  <div><div class="crumb"><a href="/">Applications</a> / <a href="/apps/{{ a.slug }}">{{ a.name }}</a> /</div><h1>Trafic</h1></div>
+  <nav class="seg" aria-label="Vue">
+    <a class="segbtn {{ 'on' if vue == 'apercu' }}" href="/apps/{{ a.slug }}/trafic" {{ 'aria-current=page' if vue == 'apercu' }}>Vue d'ensemble</a>
+    <a class="segbtn {{ 'on' if vue == 'journal' }}" href="/apps/{{ a.slug }}/trafic?vue=journal" {{ 'aria-current=page' if vue == 'journal' }}>Journal d'accès</a>
+  </nav>
+</div>
+
+{% if vue == 'apercu' %}
+<div class="bar" style="margin:14px 0">
+  <nav class="seg" aria-label="Période">{% for r in ranges %}<a class="segbtn {{ 'on' if ov.range == r }}" href="?r={{ r }}{{ '&bots=1' if ov.bots }}">{{ r }}</a>{% endfor %}</nav>
+  {% if ov.daily %}<span class="hint">30 jours : robots exclus ; les jours passés viennent des résumés quotidiens.</span>
+  {% else %}<a class="btn sm" href="?r={{ ov.range }}{{ '' if ov.bots else '&bots=1' }}">{{ 'Exclure les robots' if ov.bots else 'Inclure les robots' }}</a>{% endif %}
+</div>
+
+<div class="ttiles">
+  <div class="ttile"><span class="tl">Visiteurs uniques</span><span class="tv">{{ num(ov.visitors) }}</span><span class="ts">{{ 'robots compris' if ov.bots else 'hors robots' }}</span></div>
+  <div class="ttile"><span class="tl">Pages vues</span><span class="tv">{{ num(ov.pages) }}</span><span class="ts">{% if ov.per_visitor %}{{ '%.1f' % ov.per_visitor }} par visiteur{% else %}pages HTML{% endif %}</span></div>
+  <div class="ttile"><span class="tl">Requêtes</span><span class="tv">{{ num(ov.req.requests) }}</span><span class="ts">tout compris (fichiers, API, robots)</span></div>
+  <div class="ttile"><span class="tl">Erreurs serveur (5xx)</span><span class="tv">{{ '%.1f %%' % ov.error_rate if ov.error_rate is not none else '—' }}</span><span class="ts">{{ num(ov.req.e5) }} requête{{ 's' if ov.req.e5 > 1 }}</span></div>
+  <div class="ttile"><span class="tl">Temps de réponse p95</span><span class="tv">{{ '%.0f ms' % ov.req.p95 if ov.req.p95 is not none else '—' }}</span><span class="ts">{{ 'non gardé au-delà de 8 jours' if ov.daily else '95 % des requêtes plus rapides' }}</span></div>
+  <div class="ttile"><span class="tl">Données envoyées</span><span class="tv">{{ ov.req.bytes | size }}</span><span class="ts">réponses de l'appli</span></div>
+</div>
+
+<section class="panel" style="margin-top:16px">
+  <div class="charts" id="charts"></div>
+  <details><summary class="hint">Voir les données en tableau</summary><div class="tablebox" id="stattable"></div></details>
+</section>
+
+<div class="tops" style="margin-top:16px">
+  {{ tops("Pages les plus vues", "pages vues", ov.top_pages, "Aucune page HTML vue sur la période (une API n'en a pas).", mono=True, link=True) }}
+  {{ tops("Origine des visites", "visiteurs", ov.top_refs, "Aucune visite sur la période.") }}
+  {{ tops("Pays", "visiteurs", ov.top_cc, "Aucune visite sur la période.") }}
+  <section class="panel" style="display:flex;flex-direction:column;gap:6px">
+    <div class="bar"><h2>Navigateurs et appareils</h2><span class="hint">visiteurs</span></div>
+    {% for r in ov.top_dev %}<div class="trow" style="--w:{{ r.w }}%"><span>{{ r.label }}</span><span class="n">{{ num(r.n) }}</span></div>{% endfor %}
+    {% if ov.top_dev %}<hr style="border:0;border-top:1px solid var(--line);margin:4px 0;width:100%">{% endif %}
+    {% for r in ov.top_br %}<div class="trow" style="--w:{{ r.w }}%"><span>{{ r.label }}</span><span class="n">{{ num(r.n) }}</span></div>
+    {% else %}<p class="hint" style="margin:0">Aucune visite sur la période.</p>{% endfor %}
+  </section>
+  <section class="panel" style="display:flex;flex-direction:column;gap:8px">
+    <div class="bar"><h2>Codes de réponse</h2><span class="hint">hors fichiers statiques réussis</span></div>
+    {% for c in ov.codes %}
+    <a class="trow" style="--w:{{ c.w }}%" href="/apps/{{ a.slug }}/trafic?vue=journal&amp;s={{ c.label[0] }}"><span><span class="tcode tc{{ c.label[0] }}">{{ c.label }}</span></span><span class="n">{{ num(c.n) }} · {{ '%.1f' % c.w }} %</span></a>
+    {% else %}<p class="hint" style="margin:0">Aucune requête sur la période.</p>{% endfor %}
+    {% if ov.top_404 %}<span class="hint">404 les plus fréquentes : {% for p, n in ov.top_404 %}<a class="mono" href="/apps/{{ a.slug }}/trafic?vue=journal&amp;q={{ p | urlencode }}">{{ p }}</a> ({{ n }}){{ ', ' if not loop.last }}{% endfor %}</span>{% endif %}
+  </section>
+  <section class="panel" style="display:flex;flex-direction:column;gap:6px">
+    <div class="bar"><h2>Robots</h2><span class="hint">{% if ov.bot_share is not none %}{{ '%.0f' % ov.bot_share }} % des requêtes{% else %}requêtes{% endif %}</span></div>
+    {% for r in ov.top_bots %}<a class="trow" style="--w:{{ r.w }}%" href="/apps/{{ a.slug }}/trafic?vue=journal&amp;q={{ r.key | urlencode if r.key not in ('autre robot', 'sans navigateur') else '' }}"><span>{{ r.label }}</span><span class="n">{{ num(r.n) }}</span></a>
+    {% else %}<p class="hint" style="margin:0">Aucun robot repéré sur la période.</p>{% endfor %}
+  </section>
+</div>
+<p class="hint">Source : journal de Caddy (console et nœuds d'entrée), mis à jour chaque minute. Visiteurs comptés sans cookie (adresse + navigateur). Les images, feuilles de style et scripts réussis sont comptés dans les requêtes, pas dans le journal. Pays : fourni par Cloudflare pour les domaines en mode tunnel.</p>
+<script nonce="{{ csp_nonce }}" id="stdata" type="application/json">{{ st | tojson }}</script>
+<script nonce="{{ csp_nonce }}" src="/static/charts.js" defer></script>
+
+{% else %}
+<form class="panel" method="get" action="/apps/{{ a.slug }}/trafic" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:14px">
+  <input type="hidden" name="vue" value="journal">
+  <div class="field" style="flex:1;min-width:220px"><label for="q">Chercher (chemin, adresse IP, navigateur, origine)</label><input id="q" name="q" type="search" value="{{ search }}" spellcheck="false" placeholder="/articles, 203.0.113.4, Googlebot"></div>
+  <div class="field"><label for="p">Période</label><select id="p" name="p">{% for k in periods %}<option value="{{ k }}" {{ 'selected' if k == period }}>{{ {'1h': 'Dernière heure', '24h': '24 heures', '7j': '7 jours', 'tout': 'Tout le journal'}[k] }}</option>{% endfor %}</select></div>
+  <div class="field"><label for="s">Statut</label><select id="s" name="s">{% for k, v in [('', 'Tous'), ('err', 'Erreurs (4xx, 5xx)'), ('2', '2xx'), ('3', '3xx'), ('4', '4xx'), ('5', '5xx')] %}<option value="{{ k }}" {{ 'selected' if k == status }}>{{ v }}</option>{% endfor %}</select></div>
+  <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:6px">
+    <input type="hidden" name="bots" value="0"><label class="check"><input type="checkbox" name="bots" value="1" {{ 'checked' if bots }}><span>Robots compris</span></label>
+    <label class="check"><input type="checkbox" name="live" value="1" {{ 'checked' if live }}><span>Actualiser toutes les 10 s</span></label>
+  </div>
+  {% if ip %}<input type="hidden" name="ip" value="{{ ip }}">{% endif %}
+  <button class="btn sm primary" style="margin-bottom:4px">Afficher</button>
+</form>
+
+<div class="tsplit" style="margin-top:16px">
+<div class="main">
+  <p class="hint" style="margin:0 0 8px">{{ num(rows | length) }} requête{{ 's' if rows | length > 1 }} affichée{{ 's' if rows | length > 1 }}{% if total > rows | length %} sur {{ num(total) }} (les plus récentes){% endif %}. Clique une adresse pour son détail.</p>
+  <div class="tablebox">
+  <table class="mon tlog">
+    <thead><tr><th>Heure</th><th>Adresse</th><th>Requête</th><th>Statut</th><th>Durée</th><th>Client</th><th>Origine</th></tr></thead>
+    <tbody>
+    {% set base = '/apps/' ~ a.slug ~ '/trafic?vue=journal&p=' ~ period ~ '&s=' ~ status ~ '&q=' ~ (search | urlencode) ~ '&bots=' ~ ('1' if bots else '0') ~ ('&live=1' if live else '') %}
+    {% for r in rows %}
+    <tr class="{{ 'sel' if ip and r.ip == ip }}">
+      <td class="mono" title="{{ r.ts | clock }}">{{ r.ts | clock }}</td>
+      <td class="mono">{% if r.trunc %}<span title="adresse tronquée après la durée réglée">{{ r.ip }}</span>{% else %}<a href="{{ base }}&ip={{ r.ip | urlencode }}">{{ r.ip }}</a>{% endif %}{% if r.cc %} <span class="hint">{{ r.cc }}</span>{% endif %}</td>
+      <td class="mono p" title="{{ r.method }} {{ r.path }}"><span class="hint">{{ r.method }}</span> {{ r.path }}</td>
+      <td><span class="tcode tc{{ (r.status // 100) if 2 <= r.status // 100 <= 5 else 3 }}">{{ r.status }}</span></td>
+      <td style="text-align:right">{{ '%.0f ms' % (r.dur * 1000) }}</td>
+      <td title="{{ r.ua }}">{% if r.bot %}{{ r.bot }} <span class="hint">(robot)</span>{% elif r.br %}{{ r.br }} · {{ r.dev }}{% else %}—{% endif %}</td>
+      <td>{{ r.ref or '—' }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7" class="hint" style="text-align:center;padding:20px">Aucune requête ne correspond. Le journal se remplit chaque minute à partir de la mise à jour de Hangar.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+<aside class="panel" aria-label="Détail de l'adresse" style="display:flex;flex-direction:column;gap:10px">
+  {% if det %}
+  <div><span class="hint">Adresse sélectionnée</span><div class="mono" style="font-size:1.05rem;font-weight:650">{{ det.ip }}</div>{% if det.country %}<span class="hint">{{ det.country }}</span>{% endif %}</div>
+  <dl style="margin:0;display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;font-size:.88rem">
+    <dt class="hint">Requêtes</dt><dd style="margin:0">{{ num(det.n) }} dans le journal · {{ num(det.n24) }} sur 24 h</dd>
+    <dt class="hint">Erreurs</dt><dd style="margin:0">{{ num(det.err) }}{% if det.n %} ({{ '%.0f' % (det.err / det.n * 100) }} %){% endif %}</dd>
+    <dt class="hint">Première vue</dt><dd style="margin:0">{{ det.first | when }}</dd>
+    <dt class="hint">Dernière vue</dt><dd style="margin:0">{{ det.last | when }}</dd>
+  </dl>
+  <div style="display:flex;flex-direction:column;gap:2px"><span class="hint">Clients</span>{% for u in det.uas %}<span style="font-size:.82rem;overflow-wrap:anywhere">{{ u.ua or '(aucun)' }}{% if u.bot %} <span class="hint">· {{ u.bot }}</span>{% endif %} <span class="hint">· {{ u.n }}</span></span>{% endfor %}</div>
+  <div style="display:flex;flex-direction:column;gap:2px"><span class="hint">Chemins les plus demandés</span>{% for p in det.paths %}<div class="trow" style="--w:0%;padding:2px 0"><span class="mono">{{ p.path }}</span><span class="n">{{ p.n }}</span></div>{% endfor %}</div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap">{% for c in det.codes %}<span class="tcode tc{{ (c.status // 100) if 2 <= c.status // 100 <= 5 else 3 }}">{{ c.status }} × {{ c.n }}</span>{% endfor %}</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap"><a class="btn sm" href="/apps/{{ a.slug }}/trafic?vue=journal&amp;p=tout&amp;q={{ det.ip | urlencode }}">Filtrer sur cette adresse</a><a class="btn sm link" href="{{ base }}">Fermer</a></div>
+  {% elif ip %}
+  <p class="hint" style="margin:0">Aucune requête de {{ ip }} dans le journal.</p>
+  {% else %}
+  <p class="hint" style="margin:0">Clique une adresse dans le tableau pour voir tout ce qu'elle a demandé : nombre de requêtes, erreurs, clients, chemins.</p>
+  {% endif %}
+</aside>
+</div>
+
+<form class="panel" id="conservation" method="post" action="/apps/{{ a.slug }}/trafic/reglages" style="margin-top:16px;display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+  <h2 style="margin:0;width:100%;font-size:1rem">Conservation <span class="hint" style="font-weight:400">· commune à toutes les applis</span></h2>
+  <div class="field"><label for="days">Journal détaillé (jours)</label><input id="days" name="days" type="number" min="1" max="90" value="{{ ts.days }}" {{ 'disabled' if not is_admin }}></div>
+  <div class="field"><label for="ip_days">Adresses IP complètes (jours)</label><input id="ip_days" name="ip_days" type="number" min="1" max="90" value="{{ ts.ip_days }}" {{ 'disabled' if not is_admin }}></div>
+  <div class="field"><label for="max_rows">Lignes max par appli</label><input id="max_rows" name="max_rows" type="number" min="10000" max="5000000" step="10000" value="{{ ts.max_rows }}" {{ 'disabled' if not is_admin }}></div>
+  {% if is_admin %}<button class="btn sm primary" style="margin-bottom:4px">Enregistrer</button>{% endif %}
+  <span class="hint" style="width:100%">Passé ce délai, les adresses sont tronquées (203.0.113.0, réseau /48 en IPv6). Les journées finies sont résumées avant d'être effacées : la vue d'ensemble garde 13 mois. Chemins enregistrés sans leurs paramètres (?…), qui peuvent contenir des jetons.</span>
+</form>
+{% endif %}
+{% endblock %}

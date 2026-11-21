@@ -44,6 +44,7 @@ FastAPI + Jinja, sans build front. Elle écoute en HTTPS (certificat auto-signé
 - **Base de données** de chaque appli : taille, tables, export `.sql.gz`, import (`.sql`, `.sql.gz`, `.dump`) et remise à zéro, avec copie de sécurité.
 - **Mises à jour système** (Debian, Docker, Caddy, cloudflared, PostgreSQL) de la console et de chaque nœud, depuis la page Système, avec retour à la version précédente si le service ne repart pas, rappel si une mise à jour attend depuis plus de 14 jours, et option de mises à jour automatiques la nuit.
 - **Statistiques** par appli sur 1 h, 24 h ou 7 jours : requêtes, erreurs, temps de réponse, mémoire, processeur.
+- **Trafic** par appli (bouton Trafic de la fiche) : visiteurs uniques sans cookie, pages vues, origines, pays, navigateurs et appareils, codes de réponse, robots, sur 1 h à 30 jours ; **journal d'accès** de chaque requête (recherche, filtres, détail d'une adresse), gardé 14 jours, adresses IP tronquées après 7 jours, résumés quotidiens sur 13 mois.
 - **Mode maintenance** par appli : page « Maintenance en cours » (503, `X-Hangar-Maintenance: 1`), posée aussi automatiquement pendant une restauration ou un import.
 - **Préproduction** d'une appli : copie `<appli>-preprod` avec la base et `data/` de la production, `HANGAR_ENVIRONMENT=preprod`, recopie des données et déploiement en production d'un clic.
 - **Tâches planifiées** par appli : commande lancée dans son conteneur toutes les N minutes, chaque jour ou chaque semaine, résultat gardé, alerte en cas d'échec.

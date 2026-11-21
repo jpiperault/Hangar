@@ -11,7 +11,7 @@
   function pad(n) { return String(n).padStart(2, '0'); }
   function hhmm(t) { var d = new Date(t * 1000); return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
   function dm(t) { var d = new Date(t * 1000); return pad(d.getDate()) + '/' + pad(d.getMonth() + 1); }
-  function when(t) { return day ? dm(t) + ' ' + hhmm(t) : hhmm(t); }
+  function when(t) { return D.step >= 86400 ? dm(t) : day ? dm(t) + ' ' + hhmm(t) : hhmm(t); }
   function fmt(v, unit) {
     if (v == null) return '—';
     var n = Math.abs(v) >= 100 ? Math.round(v) : Math.round(v * 10) / 10;

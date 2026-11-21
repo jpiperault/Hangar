@@ -18,8 +18,9 @@ def _p95(values):
     return v[min(len(v) - 1, int(round(0.95 * (len(v) - 1))))]
 
 
-def _ingest(chunk, buckets):
-    """Agrège des lignes JSON du journal de Caddy ; retourne le nombre d'octets entièrement lus."""
+def _ingest(chunk, buckets, lines=None):
+    """Agrège des lignes JSON du journal de Caddy ; retourne le nombre d'octets entièrement lus.
+    lines : liste où garder les lignes des applis, pour le journal d'accès (traffic.py)."""
     end = chunk.rfind(b"\n") + 1
     for line in chunk[:end].splitlines():
         try:
@@ -29,6 +30,8 @@ def _ingest(chunk, buckets):
         app = d.get("hangar_app")
         if not app:
             continue
+        if lines is not None:
+            lines.append(d)
         t = int(d.get("ts", time.time()) // 60 * 60)
         b = buckets.setdefault((app, t), {"n": 0, "e4": 0, "e5": 0, "dur": [], "bytes": 0})
         status = int(d.get("status") or 0)
@@ -52,7 +55,7 @@ CHUNK = 32 * 1024 * 1024
 
 def collect_requests():
     """Lit les nouvelles lignes des journaux de Caddy (console et nœuds d'entrée), agrégées par appli et par minute."""
-    buckets = {}
+    buckets, lines = {}, []
     path = P.ACCESS_LOG
     try:
         st = os.stat(path)
@@ -60,7 +63,7 @@ def collect_requests():
         off = _new_offset(saved, st.st_ino, st.st_size)
         with open(path, "rb") as f:
             f.seek(off)
-            end = _ingest(f.read(CHUNK), buckets)
+            end = _ingest(f.read(CHUNK), buckets, lines)
         db.kv_set("stats_pos", {"ino": st.st_ino, "off": off + end})
     except OSError:
         pass
@@ -77,13 +80,19 @@ def collect_requests():
                                 f"tail -c +{off + 1} {path} | head -c {CHUNK}"], capture_output=True, timeout=60)
             if p.returncode:
                 continue
-            off += _ingest(p.stdout, buckets)
+            off += _ingest(p.stdout, buckets, lines)
         db.kv_set(key, {"ino": ino, "off": off})
     for (app, t), b in buckets.items():
         db.x("""INSERT INTO stats_req(app, t, n, e4, e5, dur_sum, p95, bytes) VALUES(?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(app, t) DO UPDATE SET n = n + excluded.n, e4 = e4 + excluded.e4, e5 = e5 + excluded.e5,
                 dur_sum = dur_sum + excluded.dur_sum, p95 = max(p95, excluded.p95), bytes = bytes + excluded.bytes""",
              (app, t, b["n"], b["e4"], b["e5"], sum(b["dur"]), _p95(b["dur"]), b["bytes"]))
+    if lines:
+        from . import traffic
+        try:
+            traffic.store(lines)
+        except Exception as e:   # le journal d'accès ne doit pas bloquer les statistiques
+            P.log("warn", "système", f"journal d'accès : enregistrement impossible ({e})")
     return len(buckets)
 
 

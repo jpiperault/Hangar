@@ -476,7 +476,7 @@ def _send(d, trigger):
                           "--exclude", "*.tmp", "--exclude", f"{BK}",
                           # fichiers bruts de PostgreSQL et registre en cours d'écriture : incohérents
                           # si copiés à chaud ; remplacés par les exports et la copie du registre
-                          "--exclude", f"{P.PLATFORM}/postgres", "--exclude", f"{P.PLATFORM}/platform.db*",
+                          "--exclude", f"{P.PLATFORM}/postgres", "--exclude", f"{P.PLATFORM}/platform.db*", "--exclude", f"{P.PLATFORM}/traffic.db*",
                           "--exclude", "/srv/apps/*/pgdata", "--exclude", "/srv/apps/*/mysql",
                           STAGING, P.APPS_DIR, P.PLATFORM, timeout=6 * 3600, d=d)
     summary = next((json.loads(l) for l in out.splitlines()[::-1] if l.startswith("{") and '"summary"' in l), None)
