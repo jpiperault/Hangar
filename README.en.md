@@ -18,6 +18,7 @@ Self-hosted application host: sites, APIs, web apps, games, open source tools an
 FastAPI + Jinja, no front-end build. It listens over HTTPS (self-signed certificate) on the LAN IP, port 8443. Access is limited to the chosen private networks, by the firewall and by the console itself. Everything is configured from the console: domains, Cloudflare, the console's address, port and networks (with automatic return to the previous setting if not confirmed within 3 minutes), accounts (argon2 passwords).
 
 - Create, edit, start, stop and delete apps (source: Docker image or Git repository).
+- **Git repository without a Dockerfile**: Hangar recognises Node.js (npm, pnpm, Yarn, Bun; Next.js, Express… or an app built as a static site: Vite, React, Vue, Astro), Python (pip, uv, Poetry; Django, FastAPI, Flask), PHP (Composer, Laravel) and Go, writes the Dockerfile, builds on the app's machine and redeploys on every new commit of the branch (checked every 2 minutes, or immediately with a webhook).
 - Deploy a version: healthcheck, then **automatic rollback** to the previous version on failure. One-click rollback.
 - Edit the configuration: if the healthcheck fails, the previous configuration is restored.
 - `/data` automatically assigned to the image's `USER`.

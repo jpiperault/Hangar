@@ -211,7 +211,9 @@ async def _app_ctx(request, slug):
     hst = await asyncio.to_thread(ha.status, slug)
     busy = (hst and (hst["busy"] or hst["h"]["state"] == "setup"))
     all_tabs = request.session.get("user") in (db.kv_get("ui_all_tabs") or [])
-    return dict(title=a["name"], nav="apps", a=a, new=False, errors={}, events=events, names=names, ha=hst, **disk, all_tabs=all_tabs,
+    from .. import autobuild
+    ab = autobuild.of(slug) if a["source"] == "git" else None
+    return dict(title=a["name"], nav="apps", a=a, new=False, errors={}, events=events, names=names, ha=hst, **disk, all_tabs=all_tabs, ab=ab,
                 kinds=kinds.choices(), kind=kinds.get(a["kind"]), gports=gameports.text(slug), gfrom=", ".join(gameports.sources(slug)),
                 site_meta=sites.meta(slug), site_busy=sites.busy(slug),
                 public_addr=_public_addr(a),

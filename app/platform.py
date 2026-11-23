@@ -1074,6 +1074,10 @@ def write_compose(a, version, instance=None, role=None):
         svc["labels"]["fr.hangar.ha-role"] = role
     if a["source"] == "git":
         svc["build"] = {"context": f"{a['image']}#{version}"}
+        from . import autobuild
+        df = autobuild.inline(a["slug"])
+        if df:   # dépôt sans Dockerfile : celui que Hangar a choisi pour sa technologie (autobuild.py)
+            svc["build"]["dockerfile_inline"] = df
     if "mysql" in extra:   # l'appli démarre quand la base répond (première initialisation, restauration d'un export)
         svc["depends_on"] = {"mysql": {"condition": "service_healthy"}}
     doc = {"name": f"app-{a['slug']}", "services": {"app": svc, **extra},
@@ -1514,7 +1518,14 @@ def _up(a, version):
         rc, _ = dk(node, "image", "inspect", image_ref(a, version), timeout=30)
         if rc or a["slug"] in _rebuild:   # absente, ou reconstruction demandée (webhook : nouveaux commits)
             _rebuild.discard(a["slug"])
-            log("info", a["slug"], f"build de {a['image']}#{version}")
+            from . import autobuild
+            try:   # sans Dockerfile dans le dépôt : technologie reconnue à chaque construction
+                ab = autobuild.refresh(a, version)
+            except RuntimeError as e:
+                return False, f"build impossible : {e}"
+            write_compose(a, version)
+            log("info", a["slug"], f"build de {a['image']}#{version}"
+                + ("" if ab.get("own") else f" sans Dockerfile : {ab['label']}, démarrage « {ab['start']} »"))
             rc, out = dk(node, "compose", "build", "--pull", cwd=d, timeout=1800)
             if rc:
                 return False, "build impossible : " + tail(out)
@@ -1709,8 +1720,9 @@ def delete(slug):
         services.drop(slug)
         gameports.save(slug, [])
         restricted = gameports.save_sources(slug, [])
-        from . import mail, traffic
+        from . import autobuild, mail, traffic
         traffic.forget(slug)
+        autobuild.forget(slug)
         mail.forget(slug)   # ses enregistrements DNS de messagerie partent à la prochaine synchro Cloudflare
         limits.drop(slug)
         from . import runopts

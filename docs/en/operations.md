@@ -410,6 +410,16 @@ Nodes (Nodes page)
 - Image cleanup (System, image_cleanup setting, off by default): keeps the live version, the previous one,
   the N most recent and the original of a patched image; deletes the others and those of apps moved elsewhere.
 
+## Building without a Dockerfile (autobuild.py)
+- "Git repository" app without a Dockerfile at its root: before each build, the console clones the repository
+  (depth 1, throwaway folder, nothing is run), recognises the technology and keeps the chosen Dockerfile in kv
+  "autobuild" ({slug: {stack, label, start, dockerfile, version}}); the compose file passes it as dockerfile_inline,
+  the build runs on the app's machine. Order: repository's Dockerfile, Node.js, Python, PHP, Go, static site (index.html).
+- Port 8080 for all (PORT variable); non-root user; Procfile "web: …" = start command.
+- Public repositories only (or reachable by the console without credentials).
+- New commits: kv "git_watch" ({slug: last commit seen}), git ls-remote every 2 minutes for apps following a branch
+  (not a pinned commit), unless "rebuild on push" is unticked; the webhook does the same without waiting.
+
 ## Monitoring
 - Seen from outside (Monitoring, external_probe setting): a chosen machine opens each public address over the
   Internet (curl over SSH); outage = nothing or 5xx (Cloudflare errors explained); alert after N failures.
