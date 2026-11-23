@@ -128,22 +128,48 @@
 </form>
 </div>
 {% else %}
+<div class="tabbar">
 <nav class="tabs" aria-label="Sections de l'appli">
   {% if kind.static %}<a href="#site" data-tab="site">Site</a>
   <a href="#reglages" data-tab="reglages">Réglages</a>
   {% else %}
+  {% set crit = vul and vul.counts and (vul.counts.CRITICAL or vul.counts.HIGH) %}
+  {% set open_crashes = crash_groups | selectattr('status', 'equalto', 'open') | list %}
+  {# onglet affiché d'office (essentiel, ou réglage en service) ; les autres vont dans « Plus », sauf « tous les onglets » #}
+  {% set used = {'acces': prot.users or prot.ips or hook, 'base': a.db or redis or mysql or mail, 'hautedispo': ha,
+                 'taches': jobs, 'mobile': has_clients, 'vulns': crit, 'avance': False, 'restauration': False} %}
+  {% set extra = [
+    ('acces', "Accès et publication", ' <span class="hint">🔒</span>' if prot.users or prot.ips else ''),
+    ('base', "Base et services", ''),
+    ('hautedispo', "HA et nœud", ''),
+    ('taches', "Tâches", (' <span class="hint">' ~ (jobs | length) ~ '</span>') if jobs else ''),
+    ('mobile', "Clients", (' <span class="pill s-error">' ~ (open_crashes | length) ~ '</span>') if open_crashes else ''),
+    ('avance', "Avancé", ''),
+    ('vulns', "Vulnérabilités", (' <span class="pill s-error">' ~ vul.counts.CRITICAL ~ '</span>') if vul and vul.counts and vul.counts.CRITICAL
+                                else (' <span class="hint">' ~ vul.counts.HIGH ~ '</span>') if crit else ''),
+    ('restauration', "Revenir en arrière", '')] | selectattr(0, 'ne', 'mobile' if not has_clients else '') | list %}
   <a href="#apercu" data-tab="apercu">Vue d'ensemble</a>
   <a href="#reglages" data-tab="reglages">Réglages</a>
-  <a href="#acces" data-tab="acces">Accès et publication{% if prot.users or prot.ips %} <span class="hint">🔒</span>{% endif %}</a>
-  <a href="#base" data-tab="base">Base et services</a>
-  <a href="#hautedispo" data-tab="hautedispo">HA et nœud</a>
-  <a href="#taches" data-tab="taches">Tâches{% if jobs %} <span class="hint">{{ jobs | length }}</span>{% endif %}</a>
-  {% if has_clients %}<a href="#mobile" data-tab="mobile">Clients{% if crash_groups | selectattr('status', 'equalto', 'open') | list %} <span class="pill s-error">{{ crash_groups | selectattr('status', 'equalto', 'open') | list | length }}</span>{% endif %}</a>{% endif %}
-  <a href="#avance" data-tab="avance">Avancé</a>
-  <a href="#vulns" data-tab="vulns">Vulnérabilités{% if vul and vul.counts and vul.counts.CRITICAL %} <span class="pill s-error">{{ vul.counts.CRITICAL }}</span>{% elif vul and vul.counts and vul.counts.HIGH %} <span class="hint">{{ vul.counts.HIGH }}</span>{% endif %}</a>
-  <a href="#restauration" data-tab="restauration">Revenir en arrière</a>
+  {% for id, label, badge in extra if all_tabs or used[id] %}<a href="#{{ id }}" data-tab="{{ id }}" data-label="{{ label | tr }}">{{ label | tr }}{{ badge | safe }}</a>
+  {% endfor %}
+  {% if kind.http %}<a href="/apps/{{ a.slug }}/trafic">Trafic</a>{% endif %}
+  <a href="/apps/{{ a.slug }}/logs">Logs</a>
   {% endif %}
 </nav>
+{% if not kind.static %}
+<details class="tabmore">
+  <summary>{% if all_tabs %}Affichage{% else %}Plus<span class="cur"></span>{% endif %}</summary>
+  <div class="menu">
+    {% if not all_tabs %}{% for id, label, badge in extra if not used[id] %}<a href="#{{ id }}" data-tab="{{ id }}" data-label="{{ label | tr }}">{{ label | tr }}{{ badge | safe }}</a>
+    {% endfor %}{% endif %}
+    <form method="post" action="/users/{{ user }}/onglets" class="ro-ok">
+      <input type="hidden" name="back" value="/apps/{{ a.slug }}">
+      <button class="linkbtn">{{ "Afficher seulement l'essentiel" if all_tabs else "Toujours afficher tous les onglets" }}</button>
+    </form>
+  </div>
+</details>
+{% endif %}
+</div>
 
 {% if kind.static %}{% include "_site_pane.html" %}{% else %}
 <div data-pane="apercu">
@@ -200,7 +226,6 @@
         <form class="inline{{ ' ro-ok' if can_deploy }}" method="post" action="/apps/{{ a.slug }}/start"><button class="btn sm">Démarrer</button></form>
       {% endif %}
       <a class="btn sm" href="/apps/{{ a.slug }}/logs">Logs</a>
-      <a class="btn sm" href="/apps/{{ a.slug }}/trafic">Trafic</a>
     </div>
     {% endif %}
     <a class="btn sm" href="/prompt?app={{ a.slug }}" style="align-self:flex-start">Prompt de déploiement pour Claude</a>
@@ -910,9 +935,20 @@ try { /* … */ } catch (e) { hangar.report(e); }</pre>{% endif %}
     }
     panes.forEach(function (p) { p.hidden = p.dataset.pane !== id; });
     tabs.forEach(function (t) { var on = t.dataset.tab === id; t.classList.toggle('on', on); t.setAttribute('aria-current', on ? 'page' : 'false'); });
+    var more = document.querySelector('.tabmore');
+    if (more) {   // onglet ouvert depuis « Plus » : le menu le dit, puis se referme
+      var act = more.querySelector('[data-tab].on'), cur = more.querySelector('.cur');
+      more.classList.toggle('on', !!act);
+      if (cur) cur.textContent = act ? ' · ' + act.dataset.label : '';
+      more.open = false;
+    }
     if (id === 'apercu') window.dispatchEvent(new Event('resize'));   // graphiques dessinés à la bonne largeur
     if (el) el.scrollIntoView({block: 'start'});
   }
+  document.addEventListener('click', function (e) {   // clic ailleurs : le menu « Plus » se ferme
+    var more = document.querySelector('.tabmore');
+    if (more && more.open && (!more.contains(e.target) || e.target.closest('.menu a'))) more.open = false;
+  });
   window.addEventListener('hashchange', show); show();
 })();
 </script>

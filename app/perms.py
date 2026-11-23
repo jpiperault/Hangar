@@ -52,7 +52,7 @@ def visible(role, username, slug):
 
 def refused(method, path, username):
     """Message de refus pour un compte « appli », sinon None."""
-    if path in ("/logout", f"/users/{username}/password", f"/users/{username}/lang") or \
+    if path in ("/logout", f"/users/{username}/password", f"/users/{username}/lang", f"/users/{username}/onglets") or \
             path.startswith(f"/users/{username}/2fa/"):
         return None
     sc = scopes(username)

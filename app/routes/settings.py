@@ -187,6 +187,19 @@ async def users_lang(request: Request, name: str):
     return r
 
 
+@router.post("/users/{name}/onglets")
+async def users_tabs(request: Request, name: str):
+    """Fiche d'une appli : tous les onglets, ou seulement l'essentiel (le reste dans « Plus »), au choix de chaque compte."""
+    me = request.session.get("user")
+    back = (await request.form()).get("back") or "/"
+    back = back if back.startswith("/apps/") and "//" not in back else "/"
+    if name == me:
+        allv = set(db.kv_get("ui_all_tabs") or [])
+        allv ^= {me}
+        db.kv_set("ui_all_tabs", sorted(allv))
+    return go(back)
+
+
 @router.post("/users/{name}/2fa/{op}")
 async def users_2fa(request: Request, name: str, op: str):
     me = request.session.get("user")

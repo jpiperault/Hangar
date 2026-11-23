@@ -352,6 +352,10 @@ Nodes (Nodes page)
   app/i18n/en.json); messages composed by the code (actions, event log, alerts) according to their template
   (app/msgs.py, app/i18n/msg_en.json). Adding a text: write it in French, then complete both files
   (the tests report templates extracted from the code).
+- Tabs of an app's page: Overview, Settings, Traffic and Logs always; Access, Database and services, HA, Jobs,
+  Clients and Vulnerabilities only when in use (protection, database or service, high availability, job, client,
+  critical or high vulnerability); the others under "More". "Always show all tabs": per account, kv "ui_all_tabs"
+  (list of accounts).
 
 ## App: advanced settings
 - Startup and health (Advanced tab, app_run setting): entrypoint, command (lists, no shell), health
