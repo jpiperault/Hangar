@@ -10,7 +10,7 @@
 <div class="login">
   <form class="panel" method="post" action="/login">
     <div class="brand" style="padding:0"><b></b>Hangar</div>
-    <p class="hint">Console d'administration de {{ s.home }}</p>
+    <p class="hint">Console d'administration de <span class="mono">{{ s.hostname }}</span></p>
     {% if flash %}<div class="flash {{ flash.kind }}" role="status">{{ flash.msg }}</div>{% endif %}
     <div class="field"><label for="username">Identifiant</label><input id="username" name="username" value="admin" autocomplete="username" required></div>
     <div class="field"><label for="password">Mot de passe</label><input id="password" name="password" type="password" autocomplete="current-password" required autofocus></div>

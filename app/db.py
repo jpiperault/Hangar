@@ -1,5 +1,6 @@
 """Registre SQLite de la plateforme : réglages, applis, journal, comptes."""
 import json
+import socket
 import os
 import sqlite3
 import threading
@@ -210,6 +211,7 @@ def settings():
     d = one("SELECT name, hub FROM domains ORDER BY is_default DESC, created_at LIMIT 1")
     s["domain"] = d["name"] if d else ""
     s["home"] = (f"{d['hub']}.{d['name']}" if d["hub"] else d["name"]) if d else ""
+    s["hostname"] = socket.gethostname()   # nom de la machine de la console (page de connexion)
     return s
 
 
