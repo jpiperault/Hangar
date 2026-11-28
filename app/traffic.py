@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 from . import db
 
 PATH = os.path.join(os.path.dirname(os.path.abspath(db.DB_PATH)), "traffic.db")
-DEFAULTS = {"days": 14, "ip_days": 7, "max_rows": 500000}
+DEFAULTS = {"days": 14, "ip_days": 7, "max_rows": 500000, "autoblock": 0}
 DAILY_DAYS = 400
 RANGES = {"1h": (3600, 300), "24h": (86400, 3600), "7j": (7 * 86400, 6 * 3600), "30j": (30 * 86400, 86400)}
 
@@ -70,15 +70,18 @@ def settings():
     return s
 
 
-def save_settings(days, ip_days, max_rows):
+def save_settings(days, ip_days, max_rows, autoblock=None):
     days, ip_days, max_rows = int(days), int(ip_days), int(max_rows)
+    autoblock = settings()["autoblock"] if autoblock is None else int(autoblock or 0)
+    if autoblock not in (0, 1, 24, 168):
+        raise ValueError("blocage automatique : non, 1 h, 24 h ou 7 jours")
     if not 1 <= days <= 90:
         raise ValueError("journal détaillé : entre 1 et 90 jours")
     if not 1 <= ip_days <= days:
         raise ValueError("adresses complètes : entre 1 jour et la durée du journal")
     if not 10000 <= max_rows <= 5000000:
         raise ValueError("plafond : entre 10 000 et 5 000 000 lignes par appli")
-    db.kv_set("traffic_settings", {"days": days, "ip_days": ip_days, "max_rows": max_rows})
+    db.kv_set("traffic_settings", {"days": days, "ip_days": ip_days, "max_rows": max_rows, "autoblock": autoblock})
 
 
 # ---------------------------------------------------------------- lecture d'une ligne du journal de Caddy
@@ -396,6 +399,7 @@ def overview(slug, rng="24h", bots=False, now=None):
                   for c in ("2xx", "3xx", "4xx", "5xx") if codes.get(c)],
         "top_404": tops["404"][:5],
         "top_bots": _rows(tops["bot"]), "bot_n": bot_n, "bot_share": (bot_n / hits_n * 100) if hits_n else None,
+        "suspects": [] if daily else suspects(slug, start, now + 1),
     }
 
 
@@ -449,3 +453,98 @@ def ip_detail(slug, ip, now=None):
     cc = q("SELECT cc FROM hits WHERE app = ? AND ip = ? AND cc != '' LIMIT 1", (slug, ip))
     return {"ip": ip, "n": one["n"], "n24": day, "err": one["err"] or 0, "first": one["first"], "last": one["last"],
             "uas": uas, "paths": paths, "codes": codes, "country": country(cc[0]["cc"]) if cc else ""}
+
+
+
+# ---------------------------------------------------------------- comportements suspects
+
+SCAN_MIN, SCAN_SHARE = 30, 0.8        # recherche de failles : au moins 30 erreurs 404, 80 % de ses requêtes en erreur
+LOGIN_MIN = 20                        # essais de mots de passe : au moins 20 envois refusés (401/403)
+WINDOW = 600                          # surveillance : 10 dernières minutes
+
+
+def suspects(slug, start, end=None):
+    """Adresses au comportement suspect sur [start, end[ : [{ip, kind, n, err, what, cc, paths}]."""
+    from . import protect
+    end = end or time.time() + 1
+    blocked = [ipaddress.ip_network(n, strict=False) for n in protect.deny_ips(slug)]
+    out = []
+    rows = q("SELECT ip, count(*) n, sum(status = 404) nf, sum(status >= 400) err, "
+             "sum(method = 'POST' AND status IN (401, 403)) lg, max(cc) cc FROM hits "
+             "WHERE app = ? AND ts >= ? AND ts < ? AND trunc = 0 GROUP BY ip HAVING nf >= ? OR lg >= ? ORDER BY n DESC LIMIT 20",
+             (slug, start, end, SCAN_MIN, LOGIN_MIN))
+    for r in rows:
+        try:
+            a = ipaddress.ip_address(r["ip"])
+        except ValueError:
+            continue
+        if a.is_private or a.is_loopback or any(a in n for n in blocked if n.version == a.version):
+            continue
+        if r["lg"] >= LOGIN_MIN:
+            kind, what = "login", f"{r['lg']} connexions refusées (401/403)"
+        elif r["err"] >= SCAN_SHARE * r["n"]:
+            kind, what = "scan", f"{r['n']} requêtes, {round(r['err'] / r['n'] * 100)} % en erreur, recherche de fichiers absents"
+        else:
+            continue
+        paths = [x["path"] for x in q("SELECT path, count(*) c FROM hits WHERE app = ? AND ip = ? AND ts >= ? AND ts < ? "
+                                      "AND status >= 400 GROUP BY path ORDER BY c DESC LIMIT 3", (slug, r["ip"], start, end))]
+        out.append({"ip": r["ip"], "kind": kind, "n": r["n"], "err": r["err"], "what": what, "cc": r["cc"] or "",
+                    "paths": paths})
+    return out
+
+
+def watch(now=None):
+    """Toutes les 5 minutes : alerte (et blocage, si réglé) pour chaque adresse suspecte des 10 dernières minutes."""
+    from . import alerts, protect
+    from . import platform as P
+    now = now or time.time()
+    s = settings()
+    seen = {k: v for k, v in (db.kv_get("traffic_suspects") or {}).items() if v > now - 86400}
+    changed = False
+    for a in db.apps():
+        for x in suspects(a["slug"], now - WINDOW, now + 1):
+            key = f"{a['slug']}|{x['ip']}|{x['kind']}"
+            if key in seen:
+                continue
+            seen[key] = now
+            why = ("recherche de failles" if x["kind"] == "scan" else "essais de mots de passe") + f" : {x['what']}"
+            blocked = ""
+            if s["autoblock"]:
+                try:
+                    protect.block(a["slug"], x["ip"], s["autoblock"], why)
+                    changed = True
+                    blocked = f"\nBloquée automatiquement pour {s['autoblock']} h."
+                except ValueError:
+                    pass
+            P.log("warn", a["slug"], f"comportement suspect de {x['ip']} : {why}" + (" ; bloquée" if blocked else ""))
+            alerts.send(f"{a['name']} : comportement suspect", f"{x['ip']} ({country(x['cc'])}) : {why}.\n"
+                        f"Chemins : {', '.join(x['paths'])}{blocked}\nJournal d'accès de l'appli : bloquer ou débloquer.",
+                        priority=3, tags=["shield"])
+    db.kv_set("traffic_suspects", seen)
+    if changed or protect.expire(now):
+        P.apply_routing()
+
+
+# ---------------------------------------------------------------- export
+
+CSV_COLUMNS = ("heure", "adresse", "pays", "méthode", "chemin", "statut", "durée_ms", "taille", "navigateur", "appareil",
+               "robot", "origine")
+
+
+def export_csv(slug, period="24h", search="", status="", bots=True, limit=100000):
+    import csv
+    import io
+    rows, _ = journal(slug, period, search, status, bots, limit=limit)
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(CSV_COLUMNS)
+    for r in rows:
+        w.writerow([time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(r["ts"])), r["ip"], r["cc"], r["method"],
+                    _cell(r["path"]), r["status"], round(r["dur"] * 1000), r["size"], r["br"], r["dev"], r["bot"], _cell(r["ref"])])
+    return buf.getvalue()
+
+
+def _cell(v):
+    """Jamais de formule dans un tableur : une cellule qui commence par = + - @ est préfixée d'une apostrophe."""
+    v = v or ""
+    return "'" + v if v[:1] in ("=", "+", "-", "@") else v

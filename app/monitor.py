@@ -350,6 +350,7 @@ def _loop():
                 P.log("warn", "système", f"surveillance {name} : {e}")
         _every("purge", 3600, stats.purge)
         _every("traffic", 3600, traffic.purge)
+        _every("traffic_watch", 300, traffic.watch)
         _every("gitwatch", autobuild.WATCH_EVERY, autobuild.watch_tick)
         _every("purge_nodes", 3600, nodes.purge)
         _every("security", 1800, security.collect_all)

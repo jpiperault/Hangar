@@ -120,7 +120,7 @@ def test_plafond_et_reglages():
     with pytest.raises(ValueError):
         traffic.save_settings(14, 20, 100000)
     traffic.save_settings(30, 7, 100000)
-    assert traffic.settings() == {"days": 30, "ip_days": 7, "max_rows": 100000}
+    assert traffic.settings() == {"days": 30, "ip_days": 7, "max_rows": 100000, "autoblock": 0}
 
 
 def test_ip_tronquee():
@@ -154,3 +154,71 @@ def test_pages(monkeypatch):
                headers=same, follow_redirects=False)
     assert r.status_code in (302, 303) and traffic.settings()["days"] == 21
     db.x("DELETE FROM apps WHERE slug = 'trafic-essai'")
+
+
+def test_suspects_alerte_et_blocage(monkeypatch):
+    from app import alerts, protect
+    from app import platform as P
+    now = time.time()
+    db.kv_set("ip_deny", {})
+    db.kv_set("traffic_suspects", {})
+    lines = [line(ts=now - 100 + i, ip="51.15.10.47", uri=f"/wp-{i}.php", status=404, ua="curl/8.5.0") for i in range(35)]
+    lines += [line(ts=now - 50 + i, ip="45.155.205.12", uri="/connexion", status=401, method="POST") for i in range(22)]
+    lines += [line(ts=now - 30 + i, ip="192.0.2.5", uri="/") for i in range(40)]                  # visiteur normal
+    lines += [line(ts=now - 30 + i, ip="10.0.0.5", uri=f"/x{i}", status=404) for i in range(40)]   # réseau local : ignoré
+    db.x("DELETE FROM apps WHERE slug = 'blog'")
+    db.insert_app("blog", {"name": "Blog", "pkg": "", "expose": "path", "sub": "", "source": "image", "image": "x/y",
+                           "version": "1", "port": 8080, "host_port": 18079, "health_path": "/", "mem_mb": 256, "env": "",
+                           "db": 0, "db_password": "", "state": "ok", "desired": "running", "created_at": now, "node": "local",
+                           "kind": "web"})
+    traffic.store(lines)
+    sus = {x["ip"]: x["kind"] for x in traffic.suspects("blog", now - 600)}
+    assert sus == {"51.15.10.47": "scan", "45.155.205.12": "login"}
+    sent, routed = [], []
+    monkeypatch.setattr(alerts, "send", lambda title, msg, **k: sent.append((title, msg)))
+    monkeypatch.setattr(P, "apply_routing", lambda: routed.append(1))
+    traffic.watch(now=now)
+    assert len(sent) == 2 and not protect.deny_ips("blog") and not routed       # alerte seulement, par défaut
+    traffic.watch(now=now)
+    assert len(sent) == 2                                                       # pas deux fois la même alerte
+    db.kv_set("traffic_suspects", {})
+    db.kv_set("traffic_settings", {"autoblock": 24})
+    traffic.watch(now=now)
+    assert set(protect.deny_ips("blog")) == {"51.15.10.47/32", "45.155.205.12/32"} and routed
+    assert "Bloquée automatiquement" in sent[-1][1]
+    assert traffic.suspects("blog", now - 600) == []                            # déjà bloquées : plus listées
+    assert protect.expire(now + 25 * 3600) and not protect.deny_ips("blog", now + 25 * 3600)
+    db.x("DELETE FROM apps WHERE slug = 'blog'")
+
+
+def test_blocages_et_caddy(tmp_path):
+    import subprocess
+    from app import protect
+    from app import platform as P
+    db.kv_set("ip_deny", {})
+    protect.block("blog", "51.15.10.47", 24, "essai")
+    protect.block(protect.ALL, "45.155.205.0/24")
+    for bad in ("10.1.2.3", "0.0.0.0/0", "203.0.0.0/8"):
+        with pytest.raises(ValueError):
+            protect.block("blog", bad)
+    assert protect.deny_ips("blog") == ["51.15.10.47/32", "45.155.205.0/24"] and protect.deny_ips("autre") == ["45.155.205.0/24"]
+    L = protect.caddy_lines("blog", "\t")
+    assert "\t@hp_deny_blog client_ip 51.15.10.47/32 45.155.205.0/24" in L and '\t\trespond "Accès refusé" 403' in L
+    f = tmp_path / "Caddyfile"
+    f.write_text("{\n\tadmin off\n}\n:18998 {\n" + "\n".join(L) + "\n\trespond ok\n}\n")
+    r = subprocess.run(["caddy", "validate", "--config", str(f), "--adapter", "caddyfile"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr[-300:]
+    assert protect.unblock("blog", "51.15.10.47/32") and protect.deny_ips("blog") == ["45.155.205.0/24"]
+    assert [b["target"] for b in protect.blocked_list()] == ["*"]
+    db.kv_set("ip_deny", {})
+    assert P is not None
+
+
+def test_export_csv():
+    now = time.time()
+    traffic.store([line(ts=now - 5, uri="/=HYPERLINK(1)"), line(ts=now - 4, ref="https://evil.example/")])
+    text = traffic.export_csv("blog")
+    head, *rows = text.strip().splitlines()
+    assert head.startswith("heure,adresse,pays") and len(rows) == 2
+    assert "'/=HYPERLINK(1)" not in text and "/=HYPERLINK(1)" in text                 # commence par « / » : pas une formule
+    assert traffic._cell("=1+1") == "'=1+1" and traffic._cell("@x") == "'@x"

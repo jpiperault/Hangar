@@ -505,12 +505,58 @@ async def app_traffic(request: Request, slug: str):
         bots, live, ip = qp.get("bots") != "0", qp.get("live") == "1", (qp.get("ip") or "")[:64]
         rows, total = await asyncio.to_thread(traffic.journal, slug, period, search, status, bots)
         det = await asyncio.to_thread(traffic.ip_detail, slug, ip) if ip else None
-        return render(request, "traffic.html", vue="journal", rows=rows, total=total, period=period, periods=traffic.JOURNAL_PERIODS,
+        return render(request, "traffic.html", vue="journal", blocked=[b for b in protect.blocked_list()
+                                                                         if b["target"] in (slug, protect.ALL)], rows=rows, total=total, period=period, periods=traffic.JOURNAL_PERIODS,
                       search=search, status=status, bots=bots, live=live, ip=ip, det=det, auto_refresh=10 if live else None, **ctx)
     rng = qp.get("r") if qp.get("r") in traffic.RANGES else "24h"
     bots = qp.get("bots") == "1"
     ov = await asyncio.to_thread(cache.get, f"traffic:{slug}:{rng}:{int(bots)}", 60, traffic.overview, slug, rng, bots)
     return render(request, "traffic.html", vue="apercu", ov=ov, st=traffic.charts(ov), ranges=list(traffic.RANGES), **ctx)
+
+
+@router.get("/apps/{slug}/trafic/export.csv")
+async def app_traffic_export(request: Request, slug: str):
+    from fastapi.responses import Response
+    a = get_app_or_404(slug)
+    qp = request.query_params
+    period = qp.get("p") if qp.get("p") in traffic.JOURNAL_PERIODS else "24h"
+    text = await asyncio.to_thread(traffic.export_csv, slug, period, (qp.get("q") or "")[:200], qp.get("s") or "",
+                                   qp.get("bots") != "0")
+    P.log("info", slug, f"journal d'accès exporté ({period}) par {request.session.get('user')}")
+    name = f"trafic-{a['slug']}-{time.strftime('%Y%m%d-%H%M')}.csv"
+    return Response("\ufeff" + text, media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@router.post("/apps/{slug}/trafic/bloquer")
+async def app_traffic_block(request: Request, slug: str):
+    """Bloquer ou débloquer une adresse (cette appli, ou toutes), depuis le journal d'accès."""
+    get_app_or_404(slug)
+    f = await request.form()
+    ip, op = (f.get("ip") or "").strip(), f.get("op")
+    target = protect.ALL if f.get("all") == "1" else slug
+    back = f"/apps/{slug}/trafic?vue=journal&ip={ip}#bloquees"
+    if target == protect.ALL and getattr(request.state, "role", "admin") != "admin":
+        flash(request, "Bloquer pour toutes les applis est réservé aux administrateurs.", "error")
+        return go(back)
+    try:
+        if op == "unblock":
+            if not protect.unblock(target, ip):
+                return go(back)
+            P.log("info", slug if target != protect.ALL else "système", f"{ip} débloquée ({request.session.get('user')})")
+            msg = f"{ip} débloquée."
+        else:
+            hours = {"1": 1, "24": 24, "168": 168}.get(f.get("hours") or "", None)
+            n = protect.block(target, ip, hours, (f.get("why") or "bloquée depuis le journal d'accès")[:200])
+            P.log("warn", slug if target != protect.ALL else "système",
+                  f"{n} bloquée" + (" pour toutes les applis" if target == protect.ALL else "")
+                  + (f" pendant {hours} h" if hours else "") + f" ({request.session.get('user')})")
+            msg = f"{n} bloquée" + (f" pendant {hours} h." if hours else ".")
+        await asyncio.to_thread(P.apply_routing)
+        flash(request, msg)
+    except (ValueError, RuntimeError) as e:
+        flash(request, f"Refusé : {e}", "error")
+    return go(back)
 
 
 @router.post("/apps/{slug}/trafic/reglages")
@@ -521,7 +567,7 @@ async def app_traffic_settings(request: Request, slug: str):
         return go(f"/apps/{slug}/trafic")
     f = await request.form()
     try:
-        traffic.save_settings(f.get("days") or 0, f.get("ip_days") or 0, f.get("max_rows") or 0)
+        traffic.save_settings(f.get("days") or 0, f.get("ip_days") or 0, f.get("max_rows") or 0, f.get("autoblock") or 0)
         s = traffic.settings()
         P.log("info", "système", f"journal d'accès : {s['days']} jours, adresses complètes {s['ip_days']} jours, "
                                  f"{s['max_rows']} lignes max par appli")

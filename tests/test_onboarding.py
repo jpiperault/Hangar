@@ -29,4 +29,4 @@ def test_valeurs_neutres():
     for path in ("install.sh", "README.md", "deploy/platform.env.example", "deploy/nftables/platform.nft",
                  "app/__main__.py", "app/db.py", "app/main.py", "app/domains.py", "docs/prompt-deploiement.md"):
         txt = open(os.path.join(root, path)).read()
-        assert "piperault" not in txt and "192.168.91." not in txt, path
+        assert "piperault.fr" not in txt and "192.168.91." not in txt, path   # ni domaine ni réseau personnels

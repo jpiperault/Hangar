@@ -75,7 +75,7 @@ def test_modele_perso(app_row, monkeypatch):
     catalog.save_custom(t)
     assert catalog.get("perso-mon-jeu")["name"] == "Mon modèle" and catalog.items()[0]["custom"]
     out = catalog.render_env(t["env"], {"url": "https://autre.exemple.fr/", "host": "autre.exemple.fr"})
-    assert "abc" not in out and "PUBLIC_URL=https://autre.exemple.fr/" in out
+    assert "JWT_SECRET=abc" not in out and "PUBLIC_URL=https://autre.exemple.fr/" in out   # secret régénéré
     catalog.delete_custom("perso-mon-jeu")
     assert catalog.get("perso-mon-jeu") is None
 

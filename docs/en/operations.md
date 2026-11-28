@@ -444,6 +444,14 @@ Nodes (Nodes page)
   hour: finished days summarised in daily (visitors, pages, referrers, countries…), log erased after kv
   traffic_settings.days (14), addresses truncated after ip_days (7), max_rows cap per app (500,000); summaries
   kept 400 days. Unique visitors: distinct address + browser over the period.
+- Suspicious behaviour (traffic.watch, every 5 minutes, over 10 minutes): vulnerability scanning (≥ 30 404 errors and
+  ≥ 80% errors) or password guessing (≥ 20 POSTs refused with 401/403); one alert per day and per address (kv
+  "traffic_suspects"), automatic block if traffic_settings.autoblock (hours, 0 = no).
+- Blocked addresses (protect.py, kv "ip_deny": {app or "*": [{ip, until, why, ts}]}): 403 from Caddy before the app,
+  technical paths included; expired ones removed every hour. No private network, at most /16 (IPv4).
+- CSV export of the log (/apps/<app>/trafic/export.csv): 100,000 rows at most, cells starting with = + - @ prefixed
+  with an apostrophe (no spreadsheet formula). Caddy's log: Cookie, Authorization, Proxy-Authorization, X-Hangar-Key,
+  Cf-Access-Jwt-Assertion and Set-Cookie removed before writing.
 
 ## Tests
 `pytest` (tests/), without root or Docker: throwaway database and folders (conftest.py), HANGAR_NO_BACKGROUND=1 (no
