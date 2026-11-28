@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from app import cloudflare, db, gameports, mail, nodes
+from app import cloudflare, db, gameports, mail
 from app import platform as P
 
 
