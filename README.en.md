@@ -70,7 +70,7 @@ FastAPI + Jinja, no front-end build. It listens over HTTPS (self-signed certific
 ## Directory layout
 
 ```
-app/                 console code: main.py (startup), routes/ (pages by theme), platform.py (deployments, Caddy), db.py (SQLite registry),
+app/                 console code: main.py (startup), routes/ (pages by theme), platform.py (deployments, Docker), routing.py (Caddy, public names, tunnel), db.py (SQLite registry),
                      backup.py, monitor.py (monitoring), alerts.py (ntfy, email, Discord, Telegram), stats.py, system.py (updates),
                      dbadmin.py (databases), registry.py (Docker registry API)
 deploy/              system files installed on the server (reference copies)

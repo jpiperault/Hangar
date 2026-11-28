@@ -1,0 +1,152 @@
+{# Fiche d'une appli : onglet « mobile » (inclus par app_form.html, même contexte). #}
+<div data-pane="mobile" style="display:flex;flex-direction:column;gap:20px">
+  <section class="panel">
+    <h2>Clients de l'appli</h2>
+    <div class="clientcards">
+      {% if a.pkg %}<div class="ccard"><b>Android</b><span class="mono">{{ a.pkg }}</span><span class="hint">configuration : {% if rc_urls.android %}<a href="{{ rc_urls.android }}" target="_blank" rel="noopener">{{ rc_urls.android.split('/.well-known/')[0] }}…</a>{% else %}pas d'hôte de routes{% endif %}</span></div>{% endif %}
+      {% if a.ios_bundle %}<div class="ccard"><b>iOS</b><span class="mono">{{ a.ios_bundle }}</span><span class="hint">configuration : {% if rc_urls.ios %}<a href="{{ rc_urls.ios }}" target="_blank" rel="noopener">{{ rc_urls.ios.split('/.well-known/')[0] }}…</a>{% else %}pas d'hôte de routes{% endif %}</span></div>{% endif %}
+      {% if a.web_client %}<div class="ccard"><b>Web (navigateur)</b><span class="mono">{{ (names | selectattr('kind', 'equalto', 'sub') | map(attribute='name') | first) if names else '' }}</span><span class="hint">script <code>/.well-known/hangar/client.js</code> sur l'adresse de l'appli</span></div>{% endif %}
+    </div>
+    <span class="hint">Les clients se règlent dans l'onglet Réglages (bloc Clients).</span>
+  </section>
+
+  <form class="panel" id="config-distance" method="post" action="/apps/{{ a.slug }}/remote-config" style="display:flex;flex-direction:column;gap:10px">
+    <h2 style="margin:0">Configuration à distance</h2>
+    <p class="hint" style="margin:0">Une seule configuration pour tous les clients, lue à leur démarrage et publiée tout de suite, sans passer par les stores.</p>
+    {% if a.pkg %}<div class="row2">
+      <div class="field"><label for="rcmin">Android : version minimale (versionCode)</label><input id="rcmin" name="min_code" value="{{ rc.min_code or '' }}" inputmode="numeric" placeholder="aucune"><span class="hint">En dessous, l'appli bloque et demande la mise à jour.</span></div>
+      <div class="field"><label for="rcrec">Android : version conseillée</label><input id="rcrec" name="rec_code" value="{{ rc.rec_code or '' }}" inputmode="numeric" placeholder="aucune"><span class="hint">En dessous, elle la propose sans bloquer.</span></div>
+    </div>{% endif %}
+    {% if a.ios_bundle %}<div class="row3">
+      <div class="field"><label for="rcimin">iOS : build minimal</label><input id="rcimin" name="ios_min" value="{{ rc.ios_min or '' }}" inputmode="numeric" placeholder="aucun"></div>
+      <div class="field"><label for="rcirec">iOS : build conseillé</label><input id="rcirec" name="ios_rec" value="{{ rc.ios_rec or '' }}" inputmode="numeric" placeholder="aucun"></div>
+      <div class="field"><label for="rcistore">Lien App Store</label><input id="rcistore" name="ios_store" value="{{ rc.ios_store }}" placeholder="https://apps.apple.com/…" spellcheck="false"></div>
+    </div>{% endif %}
+    <div class="field"><label for="rcflags">Interrupteurs (une par ligne : <code>cle = valeur</code>)</label>
+      <textarea id="rcflags" name="flags" spellcheck="false" style="min-height:70px" placeholder="nouveau_menu = true&#10;max_joueurs = 8&#10;theme = hiver">{{ rc.flags }}</textarea>
+      <span class="hint">Valeurs : true/false, nombres ou texte. Les clients les lisent dans <code>flags</code>{{ ' (web : window.hangar.flags)' if a.web_client }}.</span></div>
+    <div class="field"><label for="rcmsg">Message d'annonce</label><input id="rcmsg" name="message" value="{{ rc.message }}" maxlength="500" placeholder="Maintenance prévue dimanche de 8 h à 9 h"></div>
+    <div class="row2">
+      <div class="field"><label for="rclvl">Type</label><select id="rclvl" name="level"><option value="info">Information</option><option value="warn" {{ 'selected' if rc.level == 'warn' }}>Avertissement</option></select></div>
+      <div class="field"><label for="rcuntil">Jusqu'au (inclus)</label><input id="rcuntil" name="until" type="date" value="{{ rc.until }}"></div>
+    </div>
+    <div><button class="btn sm primary">Publier</button></div>
+  </form>
+
+  <section class="panel" id="plantages">
+    <h2>Plantages et erreurs</h2>
+    {% for g in crash_groups %}
+    <div class="cert" style="align-items:flex-start">
+      <span style="min-width:0"><span class="pill s-stopped">{{ {'android': 'Android', 'ios': 'iOS', 'web': 'Web'}.get(g.platform, g.platform) }}</span>
+        <span class="pill {{ 's-error' if g.status == 'open' else 's-running' }}">{{ 'à corriger' if g.status == 'open' else 'corrigé' }}</span>
+        <a href="/apps/{{ a.slug }}/crashes/{{ g.fp }}"><strong>{{ g.exc or 'Exception' }}</strong></a>
+        <div class="hint" style="word-break:break-all">{{ g.msg[:160] }}{% if g.top %}<br><code>{{ g.top }}</code>{% endif %}</div>
+        <span class="hint">{{ g.count }} fois · dernier {{ g.last | ago }} · premier {{ g.first | ago }}{% if g.vmax %} · jusqu'à la version {{ g.vmax }}{% endif %}{% if g.status == 'resolved' %} · corrigé en {{ g.resolved_code }}{% endif %}</span></span>
+      <span class="acts">
+        {% if g.status == 'open' %}<form class="inline" method="post" action="/apps/{{ a.slug }}/crashes/{{ g.fp }}/resolved"><button class="btn sm">Corrigé</button></form>
+        {% else %}<form class="inline" method="post" action="/apps/{{ a.slug }}/crashes/{{ g.fp }}/open"><button class="btn sm">Rouvrir</button></form>{% endif %}
+        <form class="inline" method="post" action="/apps/{{ a.slug }}/crashes/{{ g.fp }}/delete" data-confirm="Supprimer ce groupe et ses rapports ?"><button class="btn sm link">Supprimer</button></form>
+      </span>
+    </div>
+    {% else %}<p class="hint">Rien reçu pour l'instant. Ajoute le code ci-dessous au client pour recevoir ses plantages ici.</p>{% endfor %}
+    <p class="hint">Regroupés par plateforme, type d'erreur et premières lignes du code. Alerte au premier plantage d'un nouveau groupe, et si un groupe marqué corrigé revient dans une version plus récente. Gardés 90 jours ; rien de personnel (ni adresse IP, ni identifiant).</p>
+  </section>
+
+  <section class="panel" id="code-clients">
+    <h2>Code à ajouter aux clients</h2>
+    <div class="seg" role="tablist" aria-label="Langage">
+      {% if a.pkg %}<label><input type="radio" name="codetab" value="kotlin" checked><span>Android (Kotlin)</span></label>{% endif %}
+      {% if a.ios_bundle %}<label><input type="radio" name="codetab" value="swift" {{ 'checked' if not a.pkg }}><span>iOS (Swift)</span></label>{% endif %}
+      {% if a.web_client %}<label><input type="radio" name="codetab" value="js" {{ 'checked' if not a.pkg and not a.ios_bundle }}><span>Web (JavaScript)</span></label>{% endif %}
+    </div>
+{% if a.pkg %}<pre class="mono codebox" data-code="kotlin">// 1. Au démarrage (Application.onCreate) : configuration à distance, en arrière-plan
+val CONFIG = "{{ rc_urls.android or 'https://apps.<domaine>/.well-known/apps/' ~ a.pkg ~ '.json' }}"
+thread {
+    runCatching {
+        val c = JSONObject(URL(CONFIG).readText())
+        prefs.edit().putString("hangar_config", c.toString()).apply()   // relue au démarrage suivant si pas de réseau
+        val code = BuildConfig.VERSION_CODE
+        if (!c.isNull("min_version_code") &amp;&amp; code &lt; c.getInt("min_version_code")) { /* écran « Mets à jour » bloquant → c.getString("store_url") */ }
+        else if (!c.isNull("recommended_version_code") &amp;&amp; code &lt; c.getInt("recommended_version_code")) { /* proposer la mise à jour */ }
+        val flags = c.getJSONObject("flags")          // ex. flags.optBoolean("nouveau_menu")
+        if (!c.isNull("message")) { /* afficher c.getJSONObject("message").getString("text") */ }
+    }
+}
+
+// 2. Plantages : écrits au moment du plantage, envoyés au démarrage suivant
+val prev = Thread.getDefaultUncaughtExceptionHandler()
+Thread.setDefaultUncaughtExceptionHandler { t, e ->
+    runCatching {
+        File(filesDir, "crash.json").writeText(JSONObject()
+            .put("version_name", BuildConfig.VERSION_NAME).put("version_code", BuildConfig.VERSION_CODE)
+            .put("os", "Android ${Build.VERSION.RELEASE}").put("device", "${Build.MANUFACTURER} ${Build.MODEL}")
+            .put("exception", e.javaClass.name).put("message", e.message ?: "")
+            .put("stacktrace", e.stackTraceToString().take(15000)).toString())
+    }
+    prev?.uncaughtException(t, e)
+}
+thread {
+    val f = File(filesDir, "crash.json")
+    val c = runCatching { JSONObject(prefs.getString("hangar_config", "{}")!!) }.getOrNull()
+    if (f.exists() &amp;&amp; c != null &amp;&amp; c.has("crash_url")) runCatching {
+        (URL(c.getString("crash_url")).openConnection() as HttpURLConnection).run {
+            requestMethod = "POST"; doOutput = true; connectTimeout = 5000; readTimeout = 5000
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("X-Hangar-Key", c.getString("crash_key"))
+            outputStream.use { it.write(f.readBytes()) }
+            if (responseCode in 200..299 || responseCode == 400 || responseCode == 413) f.delete()
+        }
+    }
+}</pre>{% endif %}
+{% if a.ios_bundle %}<pre class="mono codebox" data-code="swift" {{ 'hidden' if a.pkg }}>// 1. Au lancement : configuration à distance (en arrière-plan, mémorisée dans UserDefaults)
+let configURL = URL(string: "{{ rc_urls.ios or 'https://apps.<domaine>/.well-known/apps/' ~ a.ios_bundle ~ '.json' }}")!
+Task.detached {
+    if let (data, _) = try? await URLSession.shared.data(from: configURL),
+       let c = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+        UserDefaults.standard.set(data, forKey: "hangar_config")
+        let build = Int(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0") ?? 0
+        if let min = c["min_version_code"] as? Int, build &lt; min { /* écran « Mets à jour » → c["store_url"] */ }
+        else if let rec = c["recommended_version_code"] as? Int, build &lt; rec { /* proposer la mise à jour */ }
+        let flags = c["flags"] as? [String: Any] ?? [:]   // ex. flags["nouveau_menu"] as? Bool
+    }
+}
+
+// 2. Plantages (exceptions Objective-C) : écrits dans un fichier, envoyés au lancement suivant
+let crashFile = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("crash.json")
+NSSetUncaughtExceptionHandler { e in
+    let info = Bundle.main.infoDictionary ?? [:]
+    let r: [String: Any] = ["exception": e.name.rawValue, "message": e.reason ?? "",
+        "stacktrace": e.callStackSymbols.joined(separator: "\n"),
+        "version_name": info["CFBundleShortVersionString"] ?? "", "version_code": Int(info["CFBundleVersion"] as? String ?? "0") ?? 0,
+        "os": "iOS \(UIDevice.current.systemVersion)", "device": UIDevice.current.model]
+    try? JSONSerialization.data(withJSONObject: r).write(to: crashFile)
+}
+if let body = try? Data(contentsOf: crashFile),
+   let saved = UserDefaults.standard.data(forKey: "hangar_config"),
+   let c = try? JSONSerialization.jsonObject(with: saved) as? [String: Any],
+   let url = (c["crash_url"] as? String).flatMap(URL.init), let key = c["crash_key"] as? String {
+    var req = URLRequest(url: url); req.httpMethod = "POST"; req.httpBody = body
+    req.setValue("application/json", forHTTPHeaderField: "Content-Type"); req.setValue(key, forHTTPHeaderField: "X-Hangar-Key")
+    URLSession.shared.dataTask(with: req) { _, resp, _ in
+        if let code = (resp as? HTTPURLResponse)?.statusCode, (200..&lt;300).contains(code) || code == 400 || code == 413 {
+            try? FileManager.default.removeItem(at: crashFile) }
+    }.resume()
+}</pre>{% endif %}
+{% if a.web_client %}<pre class="mono codebox" data-code="js" {{ 'hidden' if a.pkg or a.ios_bundle }}>&lt;!-- Dans chaque page, avant les autres scripts : --&gt;
+&lt;script src="/.well-known/hangar/client.js" defer&gt;&lt;/script&gt;
+&lt;meta name="app-version" content="1.4.0"&gt;   &lt;!-- facultatif : version affichée dans les rapports --&gt;
+
+// Les erreurs JavaScript et les promesses rejetées sont envoyées toutes seules (5 au plus par page).
+// Configuration : attendre qu'elle soit lue, puis
+hangar.ready.then(function () {
+  if (hangar.flags.nouveau_menu) { /* … */ }
+  if (hangar.message) { /* bandeau : hangar.message.text, hangar.message.level */ }
+});
+// Une erreur attrapée à signaler quand même :
+try { /* … */ } catch (e) { hangar.report(e); }</pre>{% endif %}
+  </section>
+  <script nonce="{{ csp_nonce }}">
+  document.querySelectorAll('input[name=codetab]').forEach(function (r) { r.addEventListener('change', function () {
+    document.querySelectorAll('[data-code]').forEach(function (p) { p.hidden = p.dataset.code !== r.value; }); }); });
+  </script>
+</div>

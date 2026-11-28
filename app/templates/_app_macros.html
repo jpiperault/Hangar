@@ -1,0 +1,6 @@
+{# Macros de la fiche d'une appli, partagées par ses onglets (app/_pane_*.html). #}
+{% macro rp_form() %}<form method="post" action="/apps/{{ a.slug }}/restore-point" class="inlinefield" style="margin:6px 0 10px">
+      <input name="note" maxlength="200" placeholder="Note (ex. avant la migration 2.0)" aria-label="Note du point de restauration" spellcheck="false">
+      <button class="btn sm primary" {{ 'disabled' if a.status == 'deploying' }}>Créer un point de restauration</button>
+    </form><span class="hint">Copie la base (export cohérent) et data/ maintenant, sans arrêter l'appli. À faire avant une opération risquée.</span>{% endmacro %}
+{% macro err(k) %}{% if errors.get(k) %}<span class="err">{{ errors[k] }}</span>{% endif %}{% endmacro %}

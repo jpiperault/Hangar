@@ -1,0 +1,24 @@
+{# Fiche d'une appli : onglet « restauration » (inclus par app_form.html, même contexte). #}
+{% from "_app_macros.html" import err, rp_form with context %}
+<div data-pane="restauration">
+  {% if safety %}
+  <section class="panel" id="securite">
+    <h2>Revenir en arrière</h2>
+    <p class="hint">Avant chaque restauration ou import de données, l'état de l'appli est mis de côté. Tu peux le remettre : l'état actuel est lui-même mis de côté d'abord, donc un retour arrière s'annule de la même façon. Copies gardées 30 jours (toujours les 3 dernières).</p>
+    {{ rp_form() }}
+    {% for c in safety %}
+    <form class="cert" method="post" action="/apps/{{ a.slug }}/revert" data-confirm="Remettre {{ a.name }} dans son état du {{ c.ts | when }} ? L'appli est arrêtée quelques instants ; son état actuel est mis de côté.">
+      <input type="hidden" name="copy" value="{{ c.name }}">
+      <span><span class="mono">{{ c.ts | when }}</span> <span class="hint">{{ c.size | size }}{{ ' · ' ~ c.note if c.note }}</span><br>
+        {% if c.has_db %}<label class="check" style="display:inline-flex"><input type="checkbox" name="db" {{ 'checked' if a.db else 'disabled' }}><span>base{{ '' if a.db else ' (appli sans base)' }}</span></label>{% endif %}
+        {% if c.has_data %}<label class="check" style="display:inline-flex"><input type="checkbox" name="data" checked><span>data/</span></label>{% endif %}</span>
+      <span class="acts">
+        <button class="btn sm" {{ 'disabled' if a.status == 'deploying' }}>Revenir à cet état</button>
+        <button class="btn sm link" formaction="/backups/safety/{{ c.name }}/delete" name="back" value="app" data-confirm="Supprimer cette copie de sécurité ?">Supprimer</button>
+      </span>
+    </form>
+    {% endfor %}
+  </section>
+  {% endif %}
+  {% if not safety %}<section class="panel" id="securite"><h2>Revenir en arrière</h2><p class="hint">Aucune copie de sécurité pour l'instant. Avant chaque restauration ou import de données, l'état de l'appli est mis de côté ici. Pour revenir à une sauvegarde de nuit : page <a href="/backups">Sauvegardes</a>.</p>{{ rp_form() }}</section>{% endif %}
+</div>

@@ -1,0 +1,166 @@
+{# Fiche d'une appli : onglet « apercu » (inclus par app_form.html, même contexte). #}
+{% from "_dns.html" import dnspill %}
+{% from "_disk.html" import app_disk %}
+<div data-pane="apercu">
+<div class="cols">
+<div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+  <section class="panel">
+    <h2>État</h2>
+    <dl class="facts">
+      <dt>Nœud</dt><dd><a href="/nodes/{{ a.node }}">{{ a.node }}</a></dd>
+      <dt>Conteneur</dt><dd>{{ a.container or 'absent' }}</dd>
+      <dt>RAM</dt><dd>{{ a.ram }} Mo / {{ a.mem_mb }} Mo</dd>
+      <dt>Port</dt><dd>{{ a.host_port }}</dd>
+      <dt>/data</dt><dd>{{ ('propriétaire ' ~ a.data_owner) if a.data_owner else '—' }}</dd>
+      <dt>Déployée</dt><dd>{{ a.deployed_at | when }}</dd>
+    </dl>
+    {% for n in names %}
+    <div class="cert"><span class="mono">{{ n.name }}</span>{{ dnspill(n) }}</div>
+    {% endfor %}
+    {% if gports %}{% for p in gports.split(', ') %}<div class="cert"><span class="mono">{{ public_addr }}:{{ p.split(' ')[1].split(':')[0] }}</span><span class="pill s-stopped">{{ p.split(' ')[0] | upper }} public{{ ' → conteneur ' ~ p.split(':')[1] if ':' in p }}</span></div>{% endfor %}{% if gfrom %}<p class="hint">Ports publics ouverts seulement à : <span class="mono">{{ gfrom }}</span></p>{% endif %}
+    {% elif not kind.http %}<p class="hint" style="margin:0">Pas d'adresse publique : ce service n'est pas publié sur Internet. Sa santé, c'est son conteneur qui tourne.</p>{% endif %}
+    {% if mailcfg %}
+    <h3 style="margin:8px 0 0" id="messagerie">Messagerie</h3>
+    <p class="hint" style="margin:0">Serveur <span class="mono">{{ mailcfg.host }}</span> pour les adresses <span class="mono">…@{{ mailcfg.domain }}</span>.{% if mailcfg.setup %} Configuré par Hangar{{ ' ; certificat et DNS (DKIM, DMARC…) gérés par Stalwart avec son jeton Cloudflare' if mailcfg.stalwart_dns }}.{% endif %}</p>
+    {% if mailsetup %}
+    <form method="post" action="/apps/{{ a.slug }}/mail/setup" class="inline" style="display:flex;flex-wrap:wrap;gap:8px;align-items:end">
+      <div class="field" style="margin:0"><label for="mcf">Jeton Cloudflare pour Stalwart (facultatif)</label><input id="mcf" name="mail_cf_token" type="password" autocomplete="off" spellcheck="false"></div>
+      <button class="btn sm" {{ 'disabled' if a.status == 'deploying' }}>Configurer Stalwart</button>
+    </form>
+    <span class="hint">Stalwart attend encore sa configuration initiale : Hangar la fait par son API (nom du serveur, domaine, stockage, clés DKIM), retire le compte temporaire et redémarre l'appli. Son interface refuse la connexion tant que ce n'est pas fait.</span>
+    {% endif %}
+    {% if mailadmin and role == 'admin' %}
+    <div class="cert"><span>Administrateur Stalwart : <span class="mono">{{ mailadmin.user }}</span></span>
+      <details style="display:inline"><summary class="btn sm link">Afficher le mot de passe</summary><span class="mono" style="user-select:all">{{ mailadmin.secret }}</span></details>
+      <form method="post" action="/apps/{{ a.slug }}/mail/admin/forget" class="inline" data-confirm="Hangar oublie ce mot de passe : note-le avant. Continuer ?"><button class="btn sm link">Je l'ai noté : l'oublier</button></form></div>
+    {% endif %}
+    {% if not mailip %}<p class="hint lv-error" style="margin:0">Sa machine n'a pas d'adresse IP publique connue : le nom {{ mailcfg.host }} est à faire pointer à la main vers l'adresse où arrivent ses ports 25, 465 et 993.</p>{% endif %}
+    <div class="tablebox"><table class="mon"><thead><tr><th>Type</th><th>Nom</th><th>Valeur</th><th></th></tr></thead><tbody>
+    {% for r in mailrec %}<tr><td>{{ r.type }}</td><td class="mono">{{ r.name }}</td><td class="mono" style="word-break:break-all">{{ (r.priority ~ ' ') if r.priority }}{{ r.content }}</td>
+      <td>{% if r.ok %}<span class="pill s-running">{{ r.msg | trmsg }}</span>{% elif r.ok is false %}<span class="pill s-error" title="{{ r.msg | trmsg }}">à corriger</span>{% else %}<span class="pill s-stopped">à déclarer</span>{% endif %}</td></tr>
+      {% if r.ok is false %}<tr><td></td><td colspan="3" class="hint lv-error">{{ r.msg | trmsg }}</td></tr>{% endif %}{% endfor %}
+    </tbody></table></div>
+    <span class="hint">{% if cf and cf.token %}Hangar tient ces enregistrements chez Cloudflare ; le nom du serveur n'est jamais proxifié.{% else %}À déclarer chez ton fournisseur DNS, ou donne un jeton d'API Cloudflare (<a href="/domains">Domaines</a>) pour que Hangar le fasse.{% endif %} La clé DKIM (TXT <span class="mono">…._domainkey.{{ mailcfg.domain }}</span>) est créée par le serveur mail : copie-la depuis son administration. Chez l'hébergeur de la machine : DNS inverse (PTR) de son IP sur {{ mailcfg.host }}, et port 25 sortant ouvert.</span>
+    {% endif %}
+    {% for n in names if n.cf and n.cf.ok is false %}<span class="hint lv-error">{{ n.name }} : {{ n.cf.msg | trmsg }}</span>{% endfor %}
+    {% if names | selectattr('ok', 'false') | list %}
+    <span class="hint">{% if cf and cf.token %}Hangar déclare ces noms chez Cloudflare tout seul ; la résolution DNS publique peut prendre quelques minutes.{% else %}Noms à déclarer à la main : voir <a href="/domains">Domaines</a>, ou donne un jeton d'API Cloudflare pour que Hangar le fasse.{% endif %}</span>
+    {% endif %}
+    {% if a.status != 'deploying' %}
+    <div class="acts" style="justify-content:flex-start;flex-wrap:wrap">
+      {% if a.status == 'running' %}
+        <form class="inline{{ ' ro-ok' if can_deploy }}" method="post" action="/apps/{{ a.slug }}/restart"><button class="btn sm">Redémarrer</button></form>
+        <form class="inline{{ ' ro-ok' if can_deploy }}" method="post" action="/apps/{{ a.slug }}/stop"><button class="btn sm">Arrêter</button></form>
+      {% else %}
+        <form class="inline{{ ' ro-ok' if can_deploy }}" method="post" action="/apps/{{ a.slug }}/start"><button class="btn sm">Démarrer</button></form>
+      {% endif %}
+      <a class="btn sm" href="/apps/{{ a.slug }}/logs">Logs</a>
+    </div>
+    {% endif %}
+    <a class="btn sm" href="/prompt?app={{ a.slug }}" style="align-self:flex-start">Prompt de déploiement pour Claude</a>
+  </section>
+
+  <section class="panel">
+    <h2>Version</h2>
+    <dl class="facts">
+      <dt>Déployée</dt><dd>{{ a.version }}</dd>
+      <dt>Précédente</dt><dd>{{ a.prev_version or '—' }}</dd>
+      {% if a.source == 'git' %}<dt>Construction</dt><dd>{% if not ab %}reconnue à la prochaine construction{% elif ab.own %}Dockerfile du dépôt{% else %}{{ ab.label }} <span class="hint">· démarrage <code>{{ ab.start }}</code></span>{% endif %}</dd>{% endif %}
+      {% if a.source == 'image' %}<dt>Registre</dt><dd>{% if a.latest_version %}<span class="pill s-deploying">{{ a.latest_version }} disponible</span>{% elif img_update %}<span class="pill s-deploying">nouvelle image {{ a.version }} ({{ img_update.ts | ago }})</span>{% elif a.latest_error %}<span class="lv-warn">{{ a.latest_error }}</span>{% elif a.latest_checked %}à jour{% else %}pas encore vérifié{% endif %}</dd>{% endif %}
+    </dl>
+    {% if ab and not ab.own %}<details><summary class="hint">Dockerfile écrit par Hangar (le dépôt n'en a pas)</summary>
+      <pre class="log" style="max-height:320px">{{ ab.dockerfile }}</pre>
+      <span class="hint">Pour le changer, ajoute un Dockerfile au dépôt (celui-ci peut servir de point de départ), ou un Procfile « web: … » pour la seule commande de démarrage.</span></details>{% endif %}
+    {% if ab and not ab.own %}{% for n in ab.notes or [] %}<p class="hint lv-warn" style="margin:0">{{ n }}</p>{% endfor %}{% endif %}
+    {% if img_update and not a.latest_version and a.status != 'deploying' %}
+    <form {% if can_deploy %}class="ro-ok" {% endif %}method="post" action="/apps/{{ a.slug }}/version"><input type="hidden" name="version" value="{{ a.version }}">
+      <button class="btn primary sm">Mettre à jour ({{ a.version }})</button></form>
+    {% endif %}
+    {% if a.latest_version and a.status != 'deploying' %}
+    <form {% if can_deploy %}class="ro-ok" {% endif %}method="post" action="/apps/{{ a.slug }}/version"><input type="hidden" name="version" value="{{ a.latest_version }}">
+      <button class="btn primary sm">Déployer {{ a.latest_version }}</button></form>
+    {% endif %}
+    <form {% if can_deploy %}class="ro-ok" {% endif %}method="post" action="/apps/{{ a.slug }}/version" style="display:flex;gap:8px">
+      <label class="sr" for="newversion" hidden>Nouvelle version</label>
+      <input id="newversion" name="version" placeholder="{{ 'tag, ex. 1.5.0' if a.source == 'image' else 'branche ou commit' }}" spellcheck="false" required aria-label="Nouvelle version">
+      <button class="btn primary sm" {{ 'disabled' if a.status == 'deploying' }}>Déployer</button>
+    </form>
+    {% if a.prev_version %}
+    <form {% if can_deploy %}class="ro-ok" {% endif %}method="post" action="/apps/{{ a.slug }}/rollback"><button class="btn warn sm" {{ 'disabled' if a.status == 'deploying' }}>Revenir à {{ a.prev_version }}</button></form>
+    {% endif %}
+    <span class="hint">Avant de basculer, la console attend que {{ a.health_path }} réponde. En cas d'échec, la version actuelle est remise en ligne.{% if a.source == 'image' %} Les nouvelles versions (tags x.y.z) sont recherchées toutes les 6 h{% if a.latest_checked %}, dernière fois {{ a.latest_checked | ago }}{% endif %}.{% elif a.source == 'git' and hook_opts.rebuild %} Nouveaux commits sur {{ a.version }} : reconstruits et déployés automatiquement (vérifié toutes les 2 minutes ; un webhook rend ça immédiat, onglet Accès et publication).{% endif %}</span>
+    {% if a.source == 'image' %}<form method="post" action="/apps/{{ a.slug }}/versions/check"><button class="btn sm primary">Vérifier maintenant</button></form>{% endif %}
+  </section>
+  {% if prod %}
+  <section class="panel" id="preprod" style="border-left:3px solid var(--warn)">
+    <h2>Préproduction de <a href="/apps/{{ prod.slug }}">{{ prod.name }}</a></h2>
+    <p class="hint" style="margin:0">Copie de la production pour tester une version avec de vraies données. L'appli reçoit <code>HANGAR_ENVIRONMENT=preprod</code> : ses e-mails, notifications ou paiements doivent être coupés (vérifie ses variables dans Réglages).</p>
+    <dl class="facts"><dt>Ici</dt><dd class="mono">{{ a.version }}</dd><dt>En production</dt><dd class="mono">{{ prod.version }}</dd></dl>
+    <div class="acts" style="justify-content:flex-start;flex-wrap:wrap">
+      {% if a.version != prod.version %}<form class="inline" method="post" action="/apps/{{ a.slug }}/preprod?op=promote" data-confirm="Déployer {{ a.version }} en production ({{ prod.name }}) ?"><button class="btn sm primary" {{ 'disabled' if a.status == 'deploying' }}>Déployer {{ a.version }} en production</button></form>{% endif %}
+      <form class="inline" method="post" action="/apps/{{ a.slug }}/preprod?op=refresh" data-confirm="Remplacer la base et data/ d'ici par ceux de la production ? L'état actuel est mis de côté."><button class="btn sm" {{ 'disabled' if a.status == 'deploying' }}>Recopier les données de la production</button></form>
+    </div>
+  </section>
+  {% elif not new and kind.http %}
+  <section class="panel" id="preprod">
+    <h2>Préproduction</h2>
+    {% if pre %}
+    <dl class="facts"><dt>Appli</dt><dd><a href="/apps/{{ pre.slug }}">{{ pre.name }}</a> <span class="pill s-{{ 'running' if pre.state == 'ok' else ('deploying' if pre.state == 'deploying' else 'error') }}">{{ {'ok': 'en ligne', 'deploying': 'en cours', 'error': 'erreur'}.get(pre.state, pre.state) }}</span></dd>
+      <dt>Version</dt><dd class="mono">{{ pre.version }}</dd></dl>
+    <div class="acts" style="justify-content:flex-start;flex-wrap:wrap">
+      {% if pre.version != a.version %}<form class="inline" method="post" action="/apps/{{ pre.slug }}/preprod?op=promote" data-confirm="Déployer {{ pre.version }} en production ?"><button class="btn sm primary" {{ 'disabled' if a.status == 'deploying' }}>Déployer {{ pre.version }} en production</button></form>{% endif %}
+      <form class="inline" method="post" action="/apps/{{ pre.slug }}/preprod?op=refresh"><button class="btn sm">Recopier les données de la production</button></form>
+      <a class="btn sm link" href="/apps/{{ pre.slug }}#supprimer">Supprimer la préproduction…</a>
+    </div>
+    {% else %}
+    <p class="hint" style="margin:0">Une copie de l'appli (<code>{{ a.slug }}-preprod</code>, sous-domaines en <code>-preprod</code>) avec la base et data/ de la production, pour tester une version avec de vraies données avant de la déployer ici. Ses variables sont celles de la production : elle reçoit en plus <code>HANGAR_ENVIRONMENT=preprod</code>.</p>
+    <form method="post" action="/apps/{{ a.slug }}/preprod" class="inlinefield">
+      <input name="version" placeholder="version (actuelle : {{ a.version }})" spellcheck="false" aria-label="Version à tester">
+      <button class="btn sm" {{ 'disabled' if a.status == 'deploying' }}>Créer la préproduction</button>
+    </form>
+    {% endif %}
+  </section>
+  {% endif %}
+  {% set mt = maint %}
+  <form class="panel {{ 'danger' if mt }}" id="maintenance" method="post" action="/apps/{{ a.slug }}/maintenance" style="display:flex;flex-direction:column;gap:10px">
+    <h2 style="margin:0">Mode maintenance {% if mt %}<span class="pill s-deploying">actif{{ ' (automatique)' if mt.auto }}</span>{% endif %}</h2>
+    {% if mt %}
+    <p class="hint" style="margin:0">Depuis {{ mt.since | ago }}, les visiteurs voient une page « Maintenance en cours » (code 503, en-tête <code>X-Hangar-Maintenance: 1</code> pour les clients qui veulent le détecter).{% if mt.auto %} Posé par une restauration ou un import : il s'enlève tout seul à la fin.{% endif %}</p>
+    <input type="hidden" name="on" value="0"><div><button class="btn sm primary">Désactiver la maintenance</button></div>
+    {% else %}
+    <p class="hint" style="margin:0">Affiche une page « Maintenance en cours » (503) au lieu de l'appli, par exemple pendant une migration. Il se met tout seul pendant une restauration, un import ou un retour arrière.</p>
+    <input type="hidden" name="on" value="1">
+    <div class="inlinefield"><input name="msg" maxlength="300" placeholder="Message (facultatif)" aria-label="Message de maintenance"><button class="btn sm">Activer</button></div>
+    {% endif %}
+  </form>
+</div>
+<div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+  {% if events %}
+  <section class="panel">
+    <div class="bar"><h2>Derniers événements</h2><a class="btn sm link" href="/journal?app={{ a.slug }}">Tout voir</a></div>
+    <ul class="events">
+      {% for e in events %}<li><time>{{ e.ts | when }}</time><span class="lv-{{ e.level }}">{{ e.msg | trmsg }}</span></li>{% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+</div>
+</div>
+<section class="panel" id="stats" style="margin-top:20px">
+  <div class="bar">
+    <h2>Statistiques</h2>
+    <a class="btn sm link" href="/apps/{{ a.slug }}/trafic" style="margin-right:auto">Visiteurs et journal d'accès</a>
+    <nav class="seg" aria-label="Période">{% for r in ranges %}<a class="segbtn {{ 'on' if st.range == r }}" href="?r={{ r }}#stats">{{ r }}</a>{% endfor %}</nav>
+  </div>
+  {% set su = st.summary %}
+  <div class="kpis">
+    <span class="kpi"><strong>{{ '{:,}'.format(su.requests).replace(',', ' ') }}</strong> requêtes</span>
+    <span class="kpi"><strong>{{ su.errors5 }}</strong> erreurs serveur (5xx){% if su.requests %} · {{ '%.1f' % su.error_rate }} %{% endif %}</span>
+    <span class="kpi">Temps moyen <strong>{{ '%.0f ms' % su.avg_ms if su.avg_ms is not none else '—' }}</strong></span>
+    <span class="kpi">RAM max <strong>{{ '%.0f' % su.mem_max if su.mem_max is not none else '—' }}</strong> / {{ a.mem_mb }} Mo</span>
+  </div>
+  <div class="charts" id="charts"></div>
+  <details><summary class="hint">Voir les données en tableau</summary><div class="tablebox" id="stattable"></div></details>
+  <span class="hint">Requêtes vues par Caddy (le healthcheck interne de la console n'est pas compté). Données gardées 8 jours.</span>
+</section>
+{{ app_disk(disk, dpath, dgrowth, dbusy) }}
+</div>

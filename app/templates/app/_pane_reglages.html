@@ -1,0 +1,147 @@
+{# Fiche d'une appli : onglet « reglages » (inclus par app_form.html, même contexte). #}
+{% from "_app_macros.html" import err, rp_form with context %}
+<div data-pane="reglages">
+<div class="cols">
+<form class="panel" method="post" action="{{ '/apps/new' if new else '/apps/' ~ a.slug }}" id="appform" novalidate>
+  <div class="group">
+    <span class="lbl">Application</span>
+    {% if new %}
+    <div class="kindgrid" role="radiogroup" aria-label="Type d'application">
+      {% for k in kinds if not k.catalog %}<label class="kindcard"><input type="radio" name="kind" value="{{ k.id }}" data-kind {{ 'checked' if k.id == a.kind }}
+        data-port="{{ k.defaults.port }}" data-health="{{ k.defaults.health_path }}" data-db="{{ k.defaults.db }}" data-client="{{ 1 if k.client else 0 }}" data-client-open="{{ 1 if k.client_open else 0 }}">
+        <span><b>{{ k.name | tr }}</b><small>{{ k.desc | tr }}</small></span></label>{% endfor %}
+      <a class="kindcard more" href="/catalogue"><span><b>Outil auto-hébergé</b><small>Une appli open source prête : statistiques, mots de passe, wiki, Git… depuis le catalogue.</small></span></a>
+    </div>
+    {% endif %}
+    <div class="row2">
+      <div class="field {{ 'bad' if errors.name }}"><label for="name">Nom</label><input id="name" name="name" value="{{ a.name }}" required>{{ err('name') }}</div>
+      {% if not new %}<div class="field"><label for="kind">Type</label><select id="kind" name="kind">{% for k in kinds %}<option value="{{ k.id }}" {{ 'selected' if k.id == a.kind }}>{{ k.name | tr }}</option>{% endfor %}</select></div>{% endif %}
+    </div>
+  </div>
+
+  <div class="group" data-kinds="web api mobile tool static">
+    <span class="lbl">Adresses publiques</span>
+    <div class="field {{ 'bad' if errors.slug }}"><label for="slug">Identifiant</label>
+      <input id="slug" name="slug" value="{{ a.slug }}" spellcheck="false" {{ 'readonly' if not new }} placeholder="courses">
+      {{ err('slug') }}<span class="hint">{{ "Sert aussi de chemin et de sous-domaine proposé. Ne peut plus changer après la création." if new else "Fixé à la création." }}</span></div>
+    <div class="field {{ 'bad' if errors.routes }}">
+      <div id="routes">
+      {% for r in a.routes or [] %}
+        <div class="rrow">
+          <select name="r_kind" aria-label="Type d'adresse"><option value="sub" {{ 'selected' if r.kind == 'sub' }}>Sous-domaine</option><option value="path" {{ 'selected' if r.kind == 'path' }}>Chemin</option></select>
+          <input name="r_sub" value="{{ r.sub }}" spellcheck="false" aria-label="Sous-domaine" placeholder="vide = domaine nu">
+          <select name="r_domain" aria-label="Domaine">{% for d in domains %}<option value="{{ d.name }}" {{ 'selected' if d.name == r.domain }}>{{ d.name }}</option>{% endfor %}</select>
+          <button type="button" class="btn sm rdel" aria-label="Retirer cette adresse">Retirer</button>
+        </div>
+      {% endfor %}
+      </div>
+      {{ err('routes') }}
+      <div><button type="button" class="btn sm" id="addroute">Ajouter une adresse</button></div>
+      <span class="hint">La première adresse est l'adresse principale, annoncée dans <code>/.well-known/apps.json</code>. Un sous-domaine vide sert le domaine lui-même. « Chemin » donne <code>&lt;préfixe&gt;.&lt;domaine&gt;/&lt;identifiant&gt;/</code>. Les domaines se gèrent dans <a href="/domains">Domaines</a>.</span>
+    </div>
+    <div class="preview" id="preview" aria-live="polite"></div>
+  </div>
+
+  <div class="group" data-kinds="web api mobile worker game tool">
+    <span class="lbl">Source</span>
+    <div class="seg" role="radiogroup" aria-label="Source">
+      <label><input type="radio" name="source" value="image" {{ 'checked' if a.source == 'image' }}><span>Image Docker</span></label>
+      <label><input type="radio" name="source" value="git" {{ 'checked' if a.source == 'git' }}><span>Dépôt Git (construit par Hangar)</span></label>
+    </div>
+    <div class="{{ 'row2' if new else '' }}">
+      <div class="field {{ 'bad' if errors.image }}"><label for="image" id="imagelbl">Image</label><input id="image" name="image" value="{{ a.image }}" spellcheck="false" placeholder="ghcr.io/moi/courses-api">{{ err('image') }}</div>
+      <div class="githint gitbox" hidden>
+        <div class="field {{ 'bad' if errors.git_dir }}"><label for="git_dir">Dossier de l'appli dans le dépôt (facultatif)</label><input id="git_dir" name="git_dir" value="{{ (gsrc or {}).dir or '' }}" spellcheck="false" placeholder="racine du dépôt, ou apps/api">{{ err('git_dir') }}</div>
+        <div class="field {{ 'bad' if errors.git_token }}"><label for="git_token">Jeton de lecture (dépôt privé)</label><input id="git_token" name="git_token" type="password" autocomplete="new-password" spellcheck="false" placeholder="{{ 'enregistré : laisser vide pour le garder' if (gsrc or {}).token else 'dépôt public : rien à saisir' }}">{{ err('git_token') }}
+          {% if (gsrc or {}).token %}<label class="check"><input type="checkbox" name="git_token_drop"><span>Retirer le jeton enregistré</span></label>{% endif %}</div>
+        <div style="grid-column:1/-1;display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+          <button type="button" class="btn sm analyse">Analyser le dépôt</button>
+          <div class="hint analyse-out" aria-live="polite" style="flex:1;min-width:240px"></div>
+        </div>
+        <span class="hint" style="grid-column:1/-1">Jeton : GitHub, « fine-grained token » avec Contents en lecture seule sur ce dépôt ; GitLab ou Gitea, jeton avec read_repository.</span>
+      </div>
+      <span class="hint githint" hidden>Avec ou sans Dockerfile : sans, Hangar reconnaît Node.js, Python, PHP, Go et les sites statiques, et écrit le Dockerfile lui-même. L'appli doit écouter sur le port 8080 (variable PORT, déjà fournie). Dépôt public, ou accessible depuis cette machine.</span>
+      {% if new %}
+      <div class="field {{ 'bad' if errors.version }}"><label for="version" id="versionlbl">Version (tag)</label><input id="version" name="version" value="{{ a.version }}" spellcheck="false" placeholder="latest">{{ err('version') }}</div>
+      {% endif %}
+    </div>
+    <div id="regbox">
+      <div class="preview" id="regstate" aria-live="polite"></div>
+      <div class="row2">
+        <div class="field {{ 'bad' if errors.reg_user }}"><label for="reg_user">Utilisateur du registre</label>
+          <input id="reg_user" name="reg_user" value="{{ reg_user or '' }}" spellcheck="false" autocomplete="off">{{ err('reg_user') }}</div>
+        <div class="field {{ 'bad' if errors.reg_token }}"><label for="reg_token">Jeton d'accès (image privée)</label>
+          <input id="reg_token" name="reg_token" type="password" spellcheck="false" autocomplete="new-password" placeholder="laisser vide si inutile">{{ err('reg_token') }}</div>
+      </div>
+      <span class="hint" id="reghint"></span>
+    </div>
+  </div>
+
+  <div class="group" data-kinds="web api mobile worker game tool">
+    <span class="lbl">Exécution</span>
+    {% if new %}
+    <div class="field {{ 'bad' if errors.node }}"><label for="node">Nœud</label>
+      <select id="node" name="node">{% for c in node_choices %}<option value="{{ c.id }}" {{ 'selected' if a.node == c.id }}>{{ c.name }} · {{ '%.0f' % c.free }} Mo libres{{ ' (conseillé)' if c.id == best and node_choices | length > 1 }}</option>{% endfor %}</select>
+      {{ err('node') }}<span class="hint">La machine qui fait tourner l'appli et sa base. Conseillé : celle qui a le plus de mémoire libre (total moins la RAM réservée par les applis).</span></div>
+    {% endif %}
+    <div class="row3">
+      <div class="field {{ 'bad' if errors.port }}" data-kinds="web api mobile tool"><label for="port">Port interne</label><input id="port" name="port" type="number" min="1" max="65535" value="{{ a.port }}">{{ err('port') }}</div>
+      <div class="field {{ 'bad' if errors.health_path }}" data-kinds="web api mobile tool"><label for="health_path">Adresse de santé</label><input id="health_path" name="health_path" value="{{ a.health_path }}" spellcheck="false">{{ err('health_path') }}</div>
+      <div class="field {{ 'bad' if errors.mem_mb }}"><label for="mem_mb">RAM max (Mo)</label><input id="mem_mb" name="mem_mb" type="number" min="32" max="4096" value="{{ a.mem_mb }}">{{ err('mem_mb') }}</div>
+    </div>
+    <div class="field {{ 'bad' if errors.gports }}" data-kinds="game web api worker tool"><label for="gports">Ports publics</label>
+      <input id="gports" name="gports" value="{{ gports or '' }}" spellcheck="false" placeholder="tcp 25565, udp 19132, tcp 8081:8080">
+      {{ err('gports') }}<span class="hint">Ouverts sur toutes les adresses de la machine (son adresse publique). « tcp 8081:8080 » : port public 8081 vers le port 8080 du conteneur. Le tunnel Cloudflare ne transporte que le web : on se connecte à l'adresse de la machine, ou à un nom DNS qui pointe vers elle. Facultatif pour une appli web (messagerie : « tcp 25, tcp 465, tcp 993 »).</span></div>
+    <div class="field {{ 'bad' if errors.gfrom }}" data-kinds="game web api worker tool"><label for="gfrom">Ouverts seulement à</label>
+      <input id="gfrom" name="gfrom" value="{{ gfrom or '' }}" spellcheck="false" placeholder="tout le monde">
+      {{ err('gfrom') }}<span class="hint">Facultatif : adresses IP ou réseaux autorisés, séparés par des virgules (203.0.113.4, 198.51.100.0/24, 2001:db8::/48). Les autres sont bloqués par le pare-feu, en IPv4 comme en IPv6.</span></div>
+    <div class="field {{ 'bad' if errors.env }}"><label for="env">Variables d'environnement</label>
+      <textarea id="env" name="env" spellcheck="false" placeholder="JWT_SECRET=...&#10;PUSH_ENABLED=true">{{ a.env if new else mask_env(a.env) }}</textarea>
+      {{ err('env') }}<span class="hint">Une par ligne, CLE=valeur. Les valeurs des clés finissant par SECRET, KEY, TOKEN ou PASSWORD sont masquées : laisse ••••••  pour ne pas les changer.</span></div>
+    <label class="check"><input type="checkbox" name="db" {{ 'checked' if a.db }}><span>Base PostgreSQL dédiée, injectée dans <code>DATABASE_URL</code></span></label>
+    <div class="field {{ 'bad' if errors.data_user }}"><label for="data_user">Propriétaire de /data</label>
+      <input id="data_user" name="data_user" value="{{ a.data_user or '' }}" spellcheck="false" placeholder="automatique : utilisateur de l'image">
+      {{ err('data_user') }}<span class="hint">Les fichiers persistants vont dans <code>/data</code> du conteneur (dossier <code>/srv/apps/{{ a.slug or '&lt;id&gt;' }}/data</code>). À chaque déploiement, ce dossier est attribué à l'utilisateur défini par <code>USER</code> dans l'image. Indique un UID (<code>1000</code> ou <code>1000:1000</code>) seulement si la détection échoue.</span></div>
+  </div>
+
+  <details class="group clientbox" id="clientbox" data-kinds="web api mobile" {{ 'open' if a.pkg or a.ios_bundle or a.web_client or errors.pkg or errors.ios_bundle or (new and a.kind == 'mobile') }}>
+    <summary><span class="lbl" style="display:inline">Clients</span> <span class="hint">· facultatif{% if a.pkg or a.ios_bundle or a.web_client %} · {{ [a.pkg and 'Android', a.ios_bundle and 'iOS', a.web_client and 'web'] | select | join(', ') }}{% else %} · aucun{% endif %}</span></summary>
+    <div class="row2" style="margin-top:10px">
+      <div class="field {{ 'bad' if errors.pkg }}"><label for="pkg">Package Android</label><input id="pkg" name="pkg" value="{{ a.pkg }}" spellcheck="false" placeholder="fr.exemple.monappli">{{ err('pkg') }}</div>
+      <div class="field {{ 'bad' if errors.ios_bundle }}"><label for="ios_bundle">Bundle iOS</label><input id="ios_bundle" name="ios_bundle" value="{{ a.ios_bundle or '' }}" spellcheck="false" placeholder="fr.exemple.monappli">{{ err('ios_bundle') }}</div>
+    </div>
+    <label class="check"><input type="checkbox" name="web_client" {{ 'checked' if a.web_client }}><span>Client web : erreurs du navigateur et configuration à distance (script Hangar servi sur l'adresse de l'appli)</span></label>
+    <span class="hint">Les applis mobiles trouvent leur serveur dans <code>/.well-known/apps.json</code>. Chaque client gagne l'onglet Clients : configuration à distance et rapports de plantage.</span>
+  </details>
+
+  <div class="bar" style="justify-content:flex-end">
+    <a class="btn" href="{{ '/' if new else '/apps/' ~ a.slug }}">Annuler</a>
+    <button class="btn primary" type="submit">{{ 'Créer et déployer' if new else 'Enregistrer' }}</button>
+  </div>
+</form>
+
+<div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+  {% if not kind.static %}<form class="panel" id="limites" method="post" action="/apps/{{ a.slug }}/limits" style="display:flex;flex-direction:column;gap:10px">
+    <h2 style="margin:0">Processeur max</h2>
+    <p class="hint" style="margin:0">Sans limite, une appli qui s'emballe peut prendre tout le processeur du nœud et ralentir les autres. Nombre de cœurs (0,5 = la moitié d'un cœur) ; vide = sans limite. Alerte si elle reste à sa limite 10 minutes, si sa mémoire dépasse 90 % pendant 5 minutes, ou si elle redémarre toute seule (tuée faute de mémoire, plantée).</p>
+    <div class="inlinefield"><input name="cpus" value="{{ cpus if cpus else '' }}" inputmode="decimal" placeholder="sans limite" aria-label="Processeur max en cœurs" style="max-width:9em"><span class="hint">cœur(s)</span><button class="btn sm primary" {{ 'disabled' if a.status == 'deploying' }}>Enregistrer</button></div>
+  </form>
+  {% endif %}
+  <section class="panel" id="historique" style="display:flex;flex-direction:column;gap:8px">
+    <h2 style="margin:0">Historique des réglages</h2>
+    <p class="hint" style="margin:0">Chaque changement de réglage (image, variables, mémoire, port, démarrage…), qui l'a fait et quand. « Revenir » remet ces réglages et redéploie ; si l'appli ne démarre pas, ceux d'avant reviennent. Les valeurs des variables ne sont pas affichées.</p>
+    {% for h in hist %}
+    <div class="cert" style="align-items:flex-start"><span><strong>{{ h.ts | when }}</strong> <span class="hint">· {{ h.user or '?' }}</span>
+      {% for lbl, before, after in h.changes %}<br><span class="hint">{{ lbl }}{% if before or after %} : {% if before %}<span class="mono">{{ before }}</span> → {% endif %}<span class="mono">{{ after }}</span>{% endif %}</span>{% endfor %}</span>
+      {% if h.current %}<span class="pill s-running">en place</span>{% else %}<form class="inline" method="post" action="/apps/{{ a.slug }}/history/{{ h.id }}/restore" data-confirm="Remettre les réglages du {{ h.ts | when }} et redéployer ?"><button class="btn sm" {{ 'disabled' if a.status == 'deploying' }}>Revenir</button></form>{% endif %}</div>
+    {% else %}<p class="hint" style="margin:0">Rien pour l'instant : le premier changement de réglage sera noté ici.</p>{% endfor %}
+  </section>
+  <form class="panel danger" id="supprimer" method="post" action="/apps/{{ a.slug }}/delete">
+    <h2>Supprimer l'application</h2>
+    <p class="hint">Le conteneur et les adresses sont supprimés. Le dossier data/ et un dump de la base sont gardés dans /srv/backups/deleted.</p>
+    <div class="field"><label for="confirm">Tape <code>{{ a.slug }}</code> pour confirmer</label><input id="confirm" name="confirm" autocomplete="off" spellcheck="false"></div>
+    <button class="btn danger sm" id="delbtn" disabled>Supprimer définitivement</button>
+  </form>
+</div>
+</div>
+</div>

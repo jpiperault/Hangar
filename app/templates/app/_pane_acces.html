@@ -1,0 +1,11 @@
+{# Fiche d'une appli : onglet « acces » (inclus par app_form.html, même contexte). #}
+<div data-pane="acces">
+<div class="cols" style="align-items:start">
+<div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+  {% if kind.http and not kind.static %}{% include "_protect_panel.html" %}{% endif %}
+</div>
+<div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+  {% if a.source in ('image', 'git') and not kind.static %}{% include "_hook_panel.html" %}{% endif %}
+</div>
+</div>
+</div>

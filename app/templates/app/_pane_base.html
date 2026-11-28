@@ -1,0 +1,69 @@
+{# Fiche d'une appli : onglet « base » (inclus par app_form.html, même contexte). #}
+<div data-pane="base" style="display:flex;flex-direction:column;gap:20px">
+  {% if a.db %}
+  <section class="panel" id="base">
+    <h2>Base de données</h2>
+    <div id="dbpanel" {{ 'data-lazy=/apps/' ~ a.slug ~ '/db/panel' if dbi is none }}>
+    {% if dbi is not none %}{% include "_dbpanel.html" %}{% else %}<p class="hint">Lecture de la base…</p>{% endif %}
+    </div>
+  </section>
+  {% endif %}
+  {% if not a.db %}<section class="panel"><h2>Base de données</h2><p class="hint">Pas de base PostgreSQL pour cette appli. Pour en ajouter une, coche « Base PostgreSQL » dans l'onglet Réglages.</p></section>{% endif %}
+  <form class="panel" id="redis" method="post" action="/apps/{{ a.slug }}/services/redis" style="display:flex;flex-direction:column;gap:10px">
+    <h2 style="margin:0">Redis {% if redis %}<span class="pill {{ 's-running' if redis_st and redis_st.state == 'running' else 's-error' }}">{{ {'running': 'en marche', 'absent': 'pas encore créé'}.get(redis_st.state, redis_st.state) if redis_st else '?' }}</span>{% endif %}</h2>
+    {% if redis %}
+    <dl class="facts">
+      <dt>Adresse</dt><dd>variable <code>REDIS_URL</code> (hôte <code>redis</code>, port 6379, mot de passe compris)</dd>
+      <dt>Mémoire</dt><dd>{{ redis_st.used_memory_human or '—' }} utilisés sur {{ redis.mem }} Mo</dd>
+      {% if redis_st.db0 %}<dt>Clés</dt><dd class="mono">{{ redis_st.db0 }}</dd>{% endif %}
+      <dt>Version</dt><dd>Valkey {{ redis_st.valkey_version or redis_st.redis_version or '—' }}</dd>
+    </dl>
+    <p class="hint" style="margin:0">Données persistantes dans <code>data/.hangar-redis</code> : sauvegardées, restaurées et déplacées avec data/. Joignable seulement par l'appli (réseau cloisonné). Plein, il refuse les écritures au lieu d'effacer des clés.
+      {% if ha and ha.h.mode == 'replicas' %}<br><strong>Instances multiples :</strong> un seul Redis, sur le nœud principal ({{ a.node }}), que les instances des autres nœuds joignent par le réseau privé. Si ce nœud tombe, la bascule le recrée vide sur le nouveau nœud principal.
+      {% elif ha %}<br><strong>Secours à chaud :</strong> sa copie part vers le secours avec data/ ; en cas de bascule, il redémarre là-bas avec les données de la dernière copie (quelques minutes au plus).{% endif %}</p>
+    <div class="inlinefield"><input type="hidden" name="on" value="1"><input name="mem" type="number" min="32" max="4096" value="{{ redis.mem }}" aria-label="Mémoire de Redis en Mo"><button class="btn sm">Changer la mémoire</button></div>
+    <div><button class="btn sm link" formaction="/apps/{{ a.slug }}/services/redis?off=1" data-confirm="Retirer Redis ? L'appli est redéployée sans lui ; ses données restent dans data/.hangar-redis.">Retirer Redis</button></div>
+    {% else %}
+    <p class="hint" style="margin:0">Cache, files d'attente, sessions, classements, état des parties… Un Redis (Valkey) propre à l'appli, sur son réseau cloisonné, persistant et sauvegardé. L'appli reçoit <code>REDIS_URL</code> et est redéployée.{% if ha %} Haute dispo : {{ "un seul Redis sur le nœud principal, partagé par les instances par le réseau privé" if ha.h.mode == 'replicas' else "il suit l'appli, sa copie part vers le secours avec data/" }}.{% endif %}</p>
+    <input type="hidden" name="on" value="1">
+    <div class="inlinefield"><input name="mem" type="number" min="32" max="4096" value="128" aria-label="Mémoire de Redis en Mo"><span class="hint">Mo</span><button class="btn sm primary" {{ 'disabled' if a.status == 'deploying' }}>Ajouter Redis</button></div>
+    {% endif %}
+  </form>
+  <form class="panel" id="mail" method="post" action="/apps/{{ a.slug }}/services/mail" autocomplete="off" style="display:flex;flex-direction:column;gap:10px">
+    <h2 style="margin:0">E-mails {% if mail %}<span class="pill s-running">activés</span>{% endif %}</h2>
+    {% if not relay %}
+    <p class="hint" style="margin:0">Pour que l'appli envoie des e-mails (inscriptions, mots de passe oubliés, notifications), règle d'abord le <a href="/system#relais">relais e-mail</a> une fois pour toutes, puis reviens ici.</p>
+    {% else %}
+    <p class="hint" style="margin:0">Par le relais {{ relay.host }}. L'appli reçoit <code>SMTP_HOST</code>, <code>SMTP_PORT</code>, <code>SMTP_USER</code>, <code>SMTP_PASSWORD</code>, <code>SMTP_SECURE</code> (starttls, ssl ou none) et <code>SMTP_FROM</code> ; une variable du même nom réglée dans ses Variables l'emporte. Si l'appli attend d'autres noms, reprends ces valeurs dans ses Variables.</p>
+    <div class="inlinefield"><input name="sender" value="{{ mail['from'] if mail else (relay['from'] or ('noreply@' ~ (s.domain or 'exemple.fr'))) }}" spellcheck="false" aria-label="Expéditeur" style="min-width:16em">
+      <button class="btn sm primary" {{ 'disabled' if a.status == 'deploying' }}>{{ "Changer l'expéditeur" if mail else 'Activer les e-mails' }}</button>
+      {% if mail %}<button class="btn sm link" formaction="/apps/{{ a.slug }}/services/mail?off=1" formnovalidate data-confirm="Couper les e-mails de cette appli ?">Couper</button>{% endif %}</div>
+    {% endif %}
+  </form>
+  <form class="panel" id="mysql" method="post" action="/apps/{{ a.slug }}/services/mysql" style="display:flex;flex-direction:column;gap:10px">
+    {% set ms = mysql_st or {} %}
+    <h2 style="margin:0">MySQL / MariaDB {% if mysql %}<span class="pill {{ 's-running' if ms.state == 'running' and ms.health != 'unhealthy' else ('s-deploying' if ms.state in ('…', 'absent') else 's-error') }}">{{ {'running': 'en marche' if ms.health != 'starting' else 'démarrage', 'absent': 'pas encore créée', '…': '…'}.get(ms.state, ms.state) }}</span>{% endif %}</h2>
+    {% if mysql %}
+    <dl class="facts">
+      <dt>Moteur</dt><dd>{{ mysql_engines[mysql.engine].name }}</dd>
+      <dt>Connexion</dt><dd>hôte <code>mysql</code>, port 3306, base et utilisateur <code>app</code> ; variables <code>MYSQL_HOST</code>, <code>MYSQL_DATABASE</code>, <code>MYSQL_USER</code>, <code>MYSQL_PASSWORD</code>, <code>MYSQL_URL</code></dd>
+      <dt>Mémoire</dt><dd>{{ mysql.mem }} Mo</dd>
+      <dt>Dernier export</dt><dd>{% if ms.dump_ts %}{{ ms.dump_ts | ago }} · {{ ms.dump_size | size }}{% else %}aucun pour l'instant (le premier part avec la prochaine sauvegarde){% endif %}</dd>
+    </dl>
+    <p class="hint" style="margin:0">Ses fichiers ne sont jamais copiés pendant qu'elle tourne : un export cohérent (<code>data/.hangar-mysql/dump.sql.gz</code>) est fait avant chaque sauvegarde, archive, point de restauration ou déplacement. Après une restauration, la base repart de cet export. Joignable seulement par l'appli.{% if not ha %} Haute dispo possible en secours à chaud (avec réplication en continu).{% endif %}</p>
+    {% if ha %}<p class="hint" style="margin:0"><strong>Réplication vers le secours :</strong>
+      {% if mysql_repl and mysql_repl.running %}<span class="pill s-running">à jour{% if mysql_repl.lag %} ({{ mysql_repl.lag }} s de retard){% endif %}</span> La bascule promeut la réplique en quelques secondes ; en cas de panne, seules les dernières secondes non répliquées sont perdues.
+      {% elif mysql_repl %}<span class="pill s-error">arrêtée</span> {{ mysql_repl.error | trmsg }} Hangar la reconstruit d'ici 10 minutes ; d'ici là, une bascule repartirait de l'export.
+      {% else %}<span class="pill s-deploying">pas en place</span> Une bascule repartirait de l'export copié avec data/ (quelques minutes de données au plus).{% endif %}</p>{% endif %}
+    <input type="hidden" name="engine" value="{{ mysql.engine }}">
+    <div class="inlinefield"><input name="mem" type="number" min="128" max="8192" value="{{ mysql.mem }}" aria-label="Mémoire de la base en Mo"><span class="hint">Mo</span><button class="btn sm" {{ 'disabled' if a.status == 'deploying' }}>Changer la mémoire</button></div>
+    <div><button class="btn sm link" formaction="/apps/{{ a.slug }}/services/mysql?off=1" data-confirm="Retirer la base ? L'appli est redéployée sans elle ; son dernier export reste dans data/.hangar-mysql.">Retirer la base</button></div>
+    {% elif ha and ha.h.mode == 'replicas' %}
+    <p class="hint" style="margin:0">Pas compatible avec les instances multiples (le secours à chaud, oui).</p>
+    {% else %}
+    <p class="hint" style="margin:0">Pour les applis qui veulent MySQL ou MariaDB plutôt que PostgreSQL (WordPress, Matomo, Ghost…). Une base propre à l'appli, sur son réseau cloisonné, exportée et sauvegardée chaque nuit. L'appli reçoit <code>MYSQL_HOST</code>, <code>MYSQL_DATABASE</code>, <code>MYSQL_USER</code>, <code>MYSQL_PASSWORD</code> et <code>MYSQL_URL</code>, et est redéployée.</p>
+    <div class="inlinefield"><select name="engine" aria-label="Moteur">{% for k, e in mysql_engines.items() %}<option value="{{ k }}">{{ e.name }}</option>{% endfor %}</select>
+      <input name="mem" type="number" min="128" max="8192" value="256" aria-label="Mémoire de la base en Mo"><span class="hint">Mo</span><button class="btn sm primary" {{ 'disabled' if a.status == 'deploying' }}>Ajouter la base</button></div>
+    {% endif %}
+  </form>
+</div>

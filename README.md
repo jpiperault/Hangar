@@ -72,7 +72,7 @@ FastAPI + Jinja, sans build front. Elle écoute en HTTPS (certificat auto-signé
 ## Arborescence
 
 ```
-app/                 code de la console : main.py (démarrage), routes/ (pages par thème), platform.py (déploiements, Caddy), db.py (registre SQLite),
+app/                 code de la console : main.py (démarrage), routes/ (pages par thème), platform.py (déploiements, Docker), routing.py (Caddy, noms publics, tunnel), db.py (registre SQLite),
                      backup.py, monitor.py (surveillance), alerts.py (ntfy, e-mail, Discord, Telegram), stats.py, system.py (mises à jour),
                      dbadmin.py (bases), registry.py (API des registres Docker)
 deploy/              fichiers système installés sur le serveur (copies de référence)
