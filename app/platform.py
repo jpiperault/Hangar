@@ -27,6 +27,8 @@ CADDYFILE = f"{PLATFORM}/Caddyfile"
 PUBLIC = f"{PLATFORM}/public"
 ENV_FILE = f"{PLATFORM}/.env"
 ACCESS_LOG = "/var/log/caddy/access.log"
+LOG_SECRET_FIELDS = ("request>headers>Cookie", "request>headers>Authorization", "request>headers>Proxy-Authorization",
+                     "request>headers>X-Hangar-Key", "request>headers>Cf-Access-Jwt-Assertion", "resp_headers>Set-Cookie")
 PG = "platform-postgres-1"
 HOST_PORT_MIN = 18001
 
@@ -336,7 +338,10 @@ def render_caddyfile(s, apps, here=LOCAL):
     L += ["}", "",
           "# Journal des requêtes (JSON), lu par Hangar pour les statistiques",
           "(hangar_log) {", "\tlog {", f"\t\toutput file {ACCESS_LOG} {{", "\t\t\troll_size 20MiB",
-          "\t\t\troll_keep 3", "\t\t}", "\t\tformat json", "\t}", "}", "",
+          "\t\t\troll_keep 3", "\t\t}",
+          # jamais de secrets dans le journal : sessions, jetons, clés des clients mobiles
+          "\t\tformat filter {", "\t\t\twrap json", *[f"\t\t\t{f} delete" for f in LOG_SECRET_FIELDS], "\t\t}",
+          "\t}", "}", "",
           "# Sites servis par le tunnel : HTTP local seulement",
           f"(tunnel) {{", f"\tbind {bind_host}", "}"]
     by_slug = {a["slug"]: a for a in apps}

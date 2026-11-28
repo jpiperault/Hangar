@@ -45,6 +45,7 @@ def test_caddy_valide(appli, tmp_path):
     protect.set_ips("mon-jeu", ["203.0.113.4/32"])
     conf = P.render_caddyfile({**db.settings(), "tunnel_bind": "127.0.0.1:8080"}, db.apps())
     assert conf.count("basic_auth") == 2 and "not client_ip 203.0.113.4/32" in conf and "not path /.well-known/hangar/*" in conf
+    assert "request>headers>Cookie delete" in conf and "request>headers>Authorization delete" in conf   # jamais journalisés
     f = tmp_path / "Caddyfile"
     f.write_text(conf.replace(P.ACCESS_LOG, str(tmp_path / "a.log")))
     r = subprocess.run(["caddy", "validate", "--config", str(f), "--adapter", "caddyfile"], capture_output=True, text=True)
