@@ -413,10 +413,16 @@ Nodes (Nodes page)
 ## Building without a Dockerfile (autobuild.py)
 - "Git repository" app without a Dockerfile at its root: before each build, the console clones the repository
   (depth 1, throwaway folder, nothing is run), recognises the technology and keeps the chosen Dockerfile in kv
-  "autobuild" ({slug: {stack, label, start, dockerfile, version}}); the compose file passes it as dockerfile_inline,
-  the build runs on the app's machine. Order: repository's Dockerfile, Node.js, Python, PHP, Go, static site (index.html).
+  "autobuild" ({slug: {stack, label, start, dockerfile, version, sha}}); the compose file passes it as
+  dockerfile_inline. Order: repository's Dockerfile, Node.js, Python, PHP, Go, static site (index.html).
+- Build: Hangar copies the repository itself onto the app's machine (<app folder>/src, erased after the build), and
+  Docker builds from that folder (or its subfolder). Every Git app goes through this.
 - Port 8080 for all (PORT variable); non-root user; Procfile "web: …" = start command.
-- Public repositories only (or reachable by the console without credentials).
+- kv "git_source" ({slug: {dir, token}}): app subfolder in the repository, read token for a private repository
+  (https; given to git through the environment, never as an argument). "Analyse the repository" button in the form:
+  POST /depot/analyse, same reading without keeping anything.
+- Django recognised: DJANGO_ALLOWED_HOSTS, DJANGO_SECRET_KEY (kv "autobuild_secrets", stable), DJANGO_CSRF_TRUSTED_ORIGINS,
+  and the same without the prefix, unless the app's settings set them.
 - New commits: kv "git_watch" ({slug: last commit seen}), git ls-remote every 2 minutes for apps following a branch
   (not a pinned commit), unless "rebuild on push" is unticked; the webhook does the same without waiting.
 

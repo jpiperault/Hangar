@@ -138,7 +138,11 @@ def test_compose_recoit_le_dockerfile(monkeypatch, tmp_path, app_row):
     a = {**app_row, "slug": "autoc", "source": "git", "image": "https://github.com/exemple/app", "version": "main", "kind": "web"}
     db.kv_set("autobuild", {"autoc": {"own": False, "dockerfile": "FROM node:22\n", "label": "Node.js 22", "start": "npm run start"}})
     doc = json.loads(open(P.write_compose(a, "main")).read().split("\n", 1)[1])
-    assert doc["services"]["app"]["build"] == {"context": "https://github.com/exemple/app#main", "dockerfile_inline": "FROM node:22\n"}
+    assert doc["services"]["app"]["build"] == {"context": f"{tmp_path}/autoc/src", "dockerfile_inline": "FROM node:22\n"}
+    autobuild.save_source("autoc", "apps/api", None)
+    doc = json.loads(open(P.write_compose(a, "main")).read().split("\n", 1)[1])
+    assert doc["services"]["app"]["build"]["context"] == f"{tmp_path}/autoc/src/apps/api"
+    autobuild.forget("autoc")
     db.kv_set("autobuild", {})
     doc = json.loads(open(P.write_compose(a, "main")).read().split("\n", 1)[1])
     assert "dockerfile_inline" not in doc["services"]["app"]["build"]
@@ -152,7 +156,7 @@ def test_nouveaux_commits_sans_webhook(monkeypatch, app_row):
                              "version": v, "state": "ok", "kind": "web", "created_at": 0, "expose": "path", "sub": "", "host_port": port})
     db.kv_set("git_watch", {"disparue": "x" * 40})
     heads = {"main": "1" * 40}
-    monkeypatch.setattr(autobuild, "head", lambda repo, br: heads.get(br))
+    monkeypatch.setattr(autobuild, "head", lambda repo, br, token="": heads.get(br))
     deployed = []
     monkeypatch.setattr(P, "spawn", lambda fn, *a: deployed.append(a))
     autobuild.watch_tick()
@@ -165,3 +169,83 @@ def test_nouveaux_commits_sans_webhook(monkeypatch, app_row):
     P._rebuild.discard("suivie")
     db.x("DELETE FROM apps WHERE slug IN ('suivie', 'figee')")
     db.kv_set("git_watch", {})
+
+
+def test_source_dossier_et_jeton():
+    autobuild.save_source("srcx", "apps/api/", "ghp_abcdefgh12345678")
+    assert autobuild.source("srcx") == {"dir": "apps/api", "token": "ghp_abcdefgh12345678"}
+    for bad in ("../x", "a/../../b", "a b", "a;b"):
+        with pytest.raises(ValueError):
+            autobuild.save_source("srcx", bad, None)
+    autobuild.save_source("srcx", None, "")                                   # jeton retiré, dossier gardé
+    assert autobuild.source("srcx") == {"dir": "apps/api", "token": ""}
+    autobuild.save_source("srcx", "", None)
+    assert "srcx" not in (db.kv_get("git_source") or {})
+
+
+def test_jeton_jamais_sur_la_ligne_de_commande():
+    sc = autobuild.clone_script("https://github.com/moi/prive.git", "main", "/srv/apps/x/src", "ghp_SECRET12345678")
+    lines = sc.splitlines()
+    assert any(l.startswith("export GIT_CONFIG_VALUE_0=") for l in lines)
+    assert not any("SECRET" in l or "Authorization" in l for l in lines if l.startswith("git "))
+    import base64
+    assert base64.b64encode(b"x-access-token:ghp_SECRET12345678").decode() in sc
+    assert "oauth2:" in base64.b64decode(autobuild._auth_env("https://gitlab.com/a/b.git", "glpat-12345678")["GIT_CONFIG_VALUE_0"].split()[-1]).decode()
+    assert "'main'" in sc or " main" in sc
+    sc = autobuild.clone_script("https://x/y.git", "main; rm -rf /", "/d")
+    assert "'main; rm -rf /'" in sc                                            # valeurs toujours citées
+
+
+def test_analyse_sous_dossier(tmp_path):
+    import subprocess
+    repo = tmp_path / "mono"
+    proj(repo, {"README.md": "", "apps/api/requirements.txt": "flask\n", "apps/api/app.py": "app = Flask(__name__)\n"})
+    g = lambda *a: subprocess.run(["git", "-C", str(repo), "-c", "user.email=t@t", "-c", "user.name=t", *a], check=True, capture_output=True)  # noqa: E731
+    g("init", "-q", "-b", "main")
+    g("add", ".")
+    g("commit", "-qm", "x")
+    d = autobuild.analyse(f"file://{repo}", "main", "apps/api")
+    assert d["label"].endswith("Flask") and len(d["sha"]) == 40
+    with pytest.raises(RuntimeError, match="absent"):
+        autobuild.analyse(f"file://{repo}", "main", "apps/web")
+    with pytest.raises(RuntimeError, match="non reconnue"):
+        autobuild.analyse(f"file://{repo}", "main")
+    with pytest.raises(RuntimeError, match="introuvable"):
+        autobuild.analyse(f"file://{repo}", "pas-de-branche")
+
+
+def test_variables_django():
+    db.x("DELETE FROM routes WHERE slug = 'dj'")
+    db.x("INSERT OR IGNORE INTO domains(name, mode, hub, created_at) VALUES('exemple.fr', 'tunnel', 'apps', 0)")
+    db.x("INSERT INTO routes(slug, pos, kind, domain, sub) VALUES('dj', 0, 'sub', 'exemple.fr', 'blog')")
+    db.kv_set("autobuild", {"dj": {"framework": "Django"}})
+    env = autobuild.extra_env("dj")
+    assert env["DJANGO_ALLOWED_HOSTS"].startswith("blog.exemple.fr,") and env["ALLOWED_HOSTS"] == env["DJANGO_ALLOWED_HOSTS"]
+    assert env["CSRF_TRUSTED_ORIGINS"] == "https://blog.exemple.fr" and len(env["DJANGO_SECRET_KEY"]) > 40
+    assert autobuild.extra_env("dj")["SECRET_KEY"] == env["SECRET_KEY"]       # stable d'un déploiement à l'autre
+    db.kv_set("autobuild", {"dj": {"framework": "Flask"}})
+    assert autobuild.extra_env("dj") == {}
+    autobuild.forget("dj")
+    db.x("DELETE FROM routes WHERE slug = 'dj'")
+
+
+def test_analyse_depuis_le_formulaire(monkeypatch):
+    from argon2 import PasswordHasher
+    from fastapi.testclient import TestClient
+    from app import main
+    seen = []
+    monkeypatch.setattr(autobuild, "analyse", lambda repo, ref, folder="", token="": seen.append((repo, ref, folder, token))
+                        or {"own": False, "label": "Python 3.12 (pip) · Django", "start": "gunicorn x", "notes": ["n"], "sha": "a" * 40})
+    db.x("INSERT OR REPLACE INTO users(username, hash) VALUES(?, ?)", ("ana", PasswordHasher().hash("mot-de-passe-ana")))
+    c = TestClient(main.app, base_url="https://hangar.test", client=("127.0.0.1", 50045))
+    main._fails.clear()
+    same = {"sec-fetch-site": "same-origin"}
+    c.post("/login", data={"username": "ana", "password": "mot-de-passe-ana"}, headers=same, follow_redirects=False)
+    r = c.post("/depot/analyse", data={"repo": "https://github.com/moi/app", "ref": "main", "git_dir": "apps/api",
+                                      "git_token": "ghp_abcdefgh12345678"}, headers=same).json()
+    assert r == {"ok": True, "own": False, "label": "Python 3.12 (pip) · Django", "start": "gunicorn x", "notes": ["n"], "sha": "aaaaaaa"}
+    assert seen == [("https://github.com/moi/app", "main", "apps/api", "ghp_abcdefgh12345678")]
+    r = c.post("/depot/analyse", data={"repo": "file:///etc", "ref": "main"}, headers=same).json()
+    assert not r["ok"] and "invalide" in r["error"]
+    r = c.post("/depot/analyse", data={"repo": "https://github.com/moi/app", "git_dir": "../x"}, headers=same).json()
+    assert not r["ok"]

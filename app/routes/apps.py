@@ -1,5 +1,6 @@
 """Applications : liste, catalogue, création, fiche, actions courantes."""
 import asyncio
+import re
 import secrets
 import time
 
@@ -153,12 +154,25 @@ async def new_app(request: Request):
                   kinds=kinds.choices())
 
 
+def _git_source(f, errors):
+    """Sous-dossier et jeton d'un dépôt Git saisis dans le formulaire : (dossier, jeton ou None si inchangé)."""
+    from .. import autobuild
+    folder = (f.get("git_dir") or "").strip().strip("/")
+    token = "" if f.get("git_token_drop") else ((f.get("git_token") or "").strip() or None)
+    if folder and (not autobuild.DIR_RE.match(folder) or ".." in folder.split("/")):
+        errors["git_dir"] = "Un chemin relatif simple, par exemple apps/api."
+    if token and not re.fullmatch(r"[A-Za-z0-9_.\-]{8,255}", token):
+        errors["git_token"] = "Jeton invalide."
+    return folder, token
+
+
 @router.post("/apps/new")
 async def create_app(request: Request):
     f = await request.form()
     d, errors = validate(f)
     if not errors:
         _, errors = await apply_registry(f, d)
+    git_dir, git_token = _git_source(f, errors) if f.get("source") == "git" else ("", None)
     if errors:
         return render(request, "app_form.html", 400, title="Nouvelle application", nav="apps", a=d, new=True,
                       errors=errors, registries=P.registry_logins(), reg_user=f.get("reg_user") or "",
@@ -174,6 +188,9 @@ async def create_app(request: Request):
              created_at=time.time(), db_password=secrets.token_hex(16) if d["db"] else None)
     db.insert_app(slug, d)
     D.set_routes(slug, rts)
+    if d["source"] == "git" and (git_dir or git_token):
+        from .. import autobuild
+        autobuild.save_source(slug, git_dir, git_token)
     if static:
         P.log("info", slug, "site statique créé : publie une première version (zip ou dépôt Git)")
         await asyncio.to_thread(P.apply_routing)
@@ -213,7 +230,9 @@ async def _app_ctx(request, slug):
     all_tabs = request.session.get("user") in (db.kv_get("ui_all_tabs") or [])
     from .. import autobuild
     ab = autobuild.of(slug) if a["source"] == "git" else None
-    return dict(title=a["name"], nav="apps", a=a, new=False, errors={}, events=events, names=names, ha=hst, **disk, all_tabs=all_tabs, ab=ab,
+    gs = autobuild.source(slug)
+    gsrc = {"dir": gs["dir"], "token": bool(gs["token"])}   # le jeton lui-même ne repart jamais vers la page
+    return dict(title=a["name"], nav="apps", a=a, new=False, errors={}, events=events, names=names, ha=hst, **disk, all_tabs=all_tabs, ab=ab, gsrc=gsrc,
                 kinds=kinds.choices(), kind=kinds.get(a["kind"]), gports=gameports.text(slug), gfrom=", ".join(gameports.sources(slug)),
                 site_meta=sites.meta(slug), site_busy=sites.busy(slug),
                 public_addr=_public_addr(a),
@@ -284,6 +303,20 @@ async def save_app(request: Request, slug: str):
             P.log("info", slug, "ports publics ouverts à : " + (", ".join(gameports.sources(slug)) or "tous"))
     runtime = ("port", "health_path", "mem_mb", "source", "image", "env", "db", "data_user", "kind")
     changed = [k for k in runtime if str(d[k]) != str(cur[k])] + (["ports publics"] if ports_changed else [])
+    if d["source"] == "git":   # sous-dossier ou jeton du dépôt changés : nouvelle construction
+        from .. import autobuild
+        gerr = {}
+        git_dir, git_token = _git_source(f, gerr)
+        if gerr:
+            flash(request, "Refusé : " + " ".join(gerr.values()), "error")
+            return go(f"/apps/{slug}#reglages")
+        before = autobuild.source(slug)
+        autobuild.save_source(slug, git_dir, git_token)
+        if autobuild.source(slug) != before:
+            changed.append("dépôt (dossier ou jeton)")
+            P.request_rebuild(slug)
+    if any(k in changed for k in ("source", "image")) and d["source"] == "git":
+        P.request_rebuild(slug)
     if logged and cur["state"] == "error":
         changed.append("identifiants du registre")  # le téléchargement avait échoué : on retente
     if d["db"] and not cur["db_password"]:
@@ -428,6 +461,35 @@ async def app_logs(request: Request, slug: str):
     lines, total, cut = await asyncio.to_thread(applogs.read, slug, period, q, err)
     return render(request, "logs.html", title=f"Logs · {a['name']}", nav="apps", a=a, lines=lines, total=total,
                   cut=cut, period=period, q=q, err=err, periods=applogs.PERIODS, la=applogs.settings(slug))
+
+
+@router.post("/depot/analyse")
+async def analyse_repo(request: Request):
+    """Formulaire : ce que Hangar construirait pour ce dépôt (lu sur la console, rien n'y est exécuté)."""
+    from fastapi.responses import JSONResponse
+    from .. import autobuild
+    f = await request.form()
+    repo, ref = (f.get("repo") or "").strip(), (f.get("ref") or "main").strip()
+    errors = {}
+    folder, token = _git_source(f, errors)
+    slug = f.get("slug") or ""
+    if token is None and slug and db.app(slug):   # fiche existante : jeton déjà enregistré
+        token = autobuild.source(slug)["token"]
+    if not P.GIT.match(repo) or not VERSION.match(ref) or errors:
+        return JSONResponse({"ok": False, "error": "URL du dépôt, branche ou dossier invalide."})
+    if not _analyse_lock.acquire(blocking=False):
+        return JSONResponse({"ok": False, "error": "Une analyse est déjà en cours, réessaie dans un instant."})
+    try:
+        d = await asyncio.to_thread(autobuild.analyse, repo, ref, folder, token or "")
+    except RuntimeError as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+    finally:
+        _analyse_lock.release()
+    return JSONResponse({"ok": True, "own": d["own"], "label": d.get("label", ""), "start": d.get("start", ""),
+                         "notes": d.get("notes", []), "sha": d.get("sha", "")[:7]})
+
+
+_analyse_lock = __import__("threading").Lock()
 
 
 @router.get("/apps/{slug}/trafic")

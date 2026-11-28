@@ -13,7 +13,7 @@ say() { echo "HANGAR_STEP=$*"; }
 
 say "paquets de base"
 $APT update >/dev/null
-$APT install --no-upgrade ca-certificates curl gnupg nftables wireguard-tools python3 rsync openssh-server unattended-upgrades >/dev/null
+$APT install --no-upgrade ca-certificates curl gnupg nftables wireguard-tools python3 rsync git openssh-server unattended-upgrades >/dev/null
 
 say "Docker"
 install -m 0755 -d /etc/apt/keyrings

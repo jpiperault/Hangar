@@ -1044,6 +1044,10 @@ def write_compose(a, version, instance=None, role=None):
             env.setdefault(k, v)
         else:
             env[k] = v
+    if a["source"] == "git":   # Django reconnu sans Dockerfile : adresses de l'appli, clé secrète (autobuild.py)
+        from . import autobuild
+        for k, v in autobuild.extra_env(a["slug"]).items():
+            env.setdefault(k, v)
     from . import system
     tzs = system.tz_settings()
     if tzs["apps"] and tzs["tz"] and "TZ" not in env:   # heure locale dans l'appli (sauf TZ déjà choisie par elle)
@@ -1078,8 +1082,9 @@ def write_compose(a, version, instance=None, role=None):
     if role:   # haute dispo : l'arrêt de sécurité d'un nœud isolé vise ces conteneurs
         svc["labels"]["fr.hangar.ha-role"] = role
     if a["source"] == "git":
-        svc["build"] = {"context": f"{a['image']}#{version}"}
         from . import autobuild
+        # copie du dépôt faite par Hangar sur cette machine (autobuild.checkout) : dépôts privés, sous-dossiers
+        svc["build"] = {"context": autobuild.context(a["slug"])}
         df = autobuild.inline(a["slug"])
         if df:   # dépôt sans Dockerfile : celui que Hangar a choisi pour sa technologie (autobuild.py)
             svc["build"]["dockerfile_inline"] = df
@@ -1528,10 +1533,15 @@ def _up(a, version):
                 ab = autobuild.refresh(a, version)
             except RuntimeError as e:
                 return False, f"build impossible : {e}"
+            try:
+                autobuild.checkout(a, version)
+            except RuntimeError as e:
+                return False, f"build impossible : {e}"
             write_compose(a, version)
-            log("info", a["slug"], f"build de {a['image']}#{version}"
+            log("info", a["slug"], f"build de {a['image']}#{version}" + (f" ({ab['sha'][:7]})" if ab.get("sha") else "")
                 + ("" if ab.get("own") else f" sans Dockerfile : {ab['label']}, démarrage « {ab['start']} »"))
             rc, out = dk(node, "compose", "build", "--pull", cwd=d, timeout=1800)
+            nsh(node, f"rm -rf {autobuild.src_dir(a['slug'])}", timeout=120)   # le code n'est plus utile après le build
             if rc:
                 return False, "build impossible : " + tail(out)
     if a["source"] != "git" and not pa:

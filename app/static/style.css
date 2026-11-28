@@ -297,3 +297,5 @@ html.navigating::before{content:"";position:fixed;top:0;left:0;height:3px;width:
 .tabmore .menu form{border-top:1px solid var(--line);margin-top:4px;padding-top:4px}
 .linkbtn{background:none;border:0;padding:9px 10px;font:inherit;font-size:.85rem;color:var(--muted);cursor:pointer;text-align:left;width:100%;border-radius:6px}
 .linkbtn:hover{background:var(--sunken);color:var(--fg)}
+.gitbox{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;width:100%}
+.gitbox[hidden]{display:none}

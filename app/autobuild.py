@@ -225,7 +225,10 @@ def _python(root):
     extra = [e for e in extra if e.split("[")[0] not in low]
     add = f"RUN pip install {' '.join(extra)}\n" if extra else ""
     static = "RUN python manage.py collectstatic --noinput >/dev/null 2>&1 || true\n" if fw == "Django" else ""
-    return {"stack": "python", "label": f"Python {ver} ({tool})" + (f" · {fw}" if fw else ""), "start": start,
+    notes = ["Hangar fournit DJANGO_ALLOWED_HOSTS, DJANGO_SECRET_KEY et DJANGO_CSRF_TRUSTED_ORIGINS (aussi sans le "
+             "préfixe DJANGO_) avec les adresses de l'appli : settings.py doit les lire (os.environ)."] if fw == "Django" else []
+    return {"stack": "python", "framework": fw or "", "notes": notes,
+            "label": f"Python {ver} ({tool})" + (f" · {fw}" if fw else ""), "start": start,
             "dockerfile": f"""FROM python:{ver}-slim
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PORT={PORT}
 WORKDIR /app
@@ -316,26 +319,115 @@ def detect(root):
 
 # ---------------------------------------------------------------- dépôt → réglage
 
-def fetch(repo, ref, dest):
-    """Clone superficiel d'une branche, d'un tag ou d'un commit dans dest (dossier vide)."""
-    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_LFS_SKIP_SMUDGE": "1"}
+# ---------------------------------------------------------------- dépôt : lecture (console) et copie (machine de construction)
 
-    def git(*args, timeout=180):
-        p = subprocess.run(["git", *args], capture_output=True, text=True, timeout=timeout, env=env)
-        return p.returncode, (p.stdout + p.stderr).strip()
-    rc, out = git("clone", "--quiet", "--depth", "1", "--no-tags", "--branch", ref, "--", repo, dest)
-    if rc and re.fullmatch(r"[0-9a-f]{7,40}", ref or ""):   # commit : récupéré seul
-        shutil.rmtree(dest, ignore_errors=True)
-        os.makedirs(dest)
-        for args in (("init", "--quiet", dest), ("-C", dest, "remote", "add", "origin", repo),
-                     ("-C", dest, "fetch", "--quiet", "--depth", "1", "origin", ref), ("-C", dest, "checkout", "--quiet", "FETCH_HEAD")):
-            rc, out = git(*args)
-            if rc:
-                break
+GIT_SOURCE = "git_source"   # kv : {slug: {"dir": "sous/dossier", "token": "jeton de lecture"}}
+DIR_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*){0,6}$")
+
+
+def source(slug):
+    return {"dir": "", "token": "", **((db.kv_get(GIT_SOURCE) or {}).get(slug) or {})}
+
+
+def save_source(slug, folder=None, token=None):
+    """Sous-dossier de l'appli dans le dépôt, et jeton de lecture d'un dépôt privé (None : inchangé, '' : retiré)."""
+    cur = source(slug)
+    if folder is not None:
+        folder = folder.strip().strip("/")
+        if folder and (not DIR_RE.match(folder) or ".." in folder.split("/")):
+            raise ValueError("dossier : un chemin relatif simple, par exemple apps/api")
+        cur["dir"] = folder
+    if token is not None:
+        token = token.strip()
+        if token and not re.fullmatch(r"[A-Za-z0-9_.\-]{8,255}", token):
+            raise ValueError("jeton : caractères inattendus")
+        cur["token"] = token
+    allv = db.kv_get(GIT_SOURCE) or {}
+    if cur["dir"] or cur["token"]:
+        allv[slug] = {k: v for k, v in cur.items() if v}
+    else:
+        allv.pop(slug, None)
+    db.kv_set(GIT_SOURCE, allv)
+
+
+def _auth_env(repo, token):
+    """Jeton passé à git par l'environnement (jamais sur la ligne de commande, visible par ps)."""
+    if not token or not repo.startswith("https://"):
+        return {}
+    import base64
+    user = "oauth2" if "gitlab" in repo.split("/")[2] else "x-access-token"
+    return {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.extraHeader",
+            "GIT_CONFIG_VALUE_0": "Authorization: Basic " + base64.b64encode(f"{user}:{token}".encode()).decode()}
+
+
+def clone_script(repo, ref, dest, token=""):
+    """Script bash (lu sur l'entrée standard) : copie superficielle d'une branche, d'un tag ou d'un commit dans dest."""
+    import shlex
+    env = {"GIT_TERMINAL_PROMPT": "0", "GIT_LFS_SKIP_SMUDGE": "1", **_auth_env(repo, token)}
+    q = shlex.quote
+    return "\n".join(["set -e", *[f"export {k}={q(v)}" for k, v in env.items()],
+                      "command -v git >/dev/null || { apt-get -q -y install git >/dev/null; }",
+                      f"rm -rf {q(dest)}", f"mkdir -p {q(dest)}", f"cd {q(dest)}", "git init -q",
+                      f"git remote add origin {q(repo)}",
+                      f"git fetch -q --depth 1 --no-tags origin {q(ref)} 2>&1 || git fetch -q --depth 1 origin {q('refs/tags/' + ref)} 2>&1",
+                      "git checkout -q FETCH_HEAD", "git rev-parse HEAD", ""])
+
+
+def _clone_error(out):
+    if re.search(r"could not read Username|Authentication failed|terminal prompts disabled|Permission denied|"
+                 r"not found|Repository not found|403", out or "", re.I):
+        return "dépôt introuvable, ou privé : renseigne un jeton de lecture (Réglages de l'appli)"
+    if re.search(r"couldn't find remote ref|unknown revision|not our ref", out or "", re.I):
+        return "branche, tag ou commit introuvable dans le dépôt"
+    last = (out or "").strip().splitlines()
+    return "lecture du dépôt impossible" + (" : " + last[-1][:200] if last else "")
+
+
+def fetch(repo, ref, dest, token=""):
+    """Copie superficielle sur la console (dossier jetable), pour lire le dépôt. Retourne le commit."""
+    p = subprocess.run(["bash", "-s"], input=clone_script(repo, ref, dest, token), capture_output=True, text=True, timeout=300)
+    if p.returncode:
+        raise RuntimeError(_clone_error(p.stdout + p.stderr))
+    return (p.stdout.strip().splitlines() or [""])[-1][:40]
+
+
+def checkout(a, version):
+    """Copie du dépôt sur la machine de l'appli (<dossier de l'appli>/src), d'où Docker construit."""
+    from . import platform as P
+    rc, out = P.nsh(a.get("node"), "bash -s", timeout=900,
+                    input=clone_script(a["image"], version, src_dir(a["slug"]), source(a["slug"])["token"]))
     if rc:
-        if re.search(r"could not read Username|Authentication failed|Permission denied|not found", out, re.I):
-            raise RuntimeError("dépôt introuvable ou privé (seuls les dépôts publics sont lus sans Dockerfile)")
-        raise RuntimeError("lecture du dépôt impossible : " + out.splitlines()[-1][:200] if out else "lecture du dépôt impossible")
+        raise RuntimeError(_clone_error(out))
+
+
+def src_dir(slug):
+    from . import platform as P
+    return f"{P.app_dir(slug)}/src"
+
+
+def context(slug):
+    """Dossier construit par Docker sur la machine de l'appli (sous-dossier compris)."""
+    d = source(slug)["dir"]
+    return src_dir(slug) + (f"/{d}" if d else "")
+
+
+def analyse(repo, ref, folder="", token=""):
+    """Ce que Hangar construirait pour ce dépôt, sans rien garder. Lève RuntimeError si impossible."""
+    work = tempfile.mkdtemp(prefix="hangar-detect-")
+    try:
+        src = os.path.join(work, "src")
+        sha = fetch(repo, ref, src, token)
+        root = os.path.join(src, folder) if folder else src
+        if folder and (os.path.islink(root) or not os.path.isdir(root)
+                       or not os.path.realpath(root).startswith(os.path.realpath(src) + os.sep)):
+            raise RuntimeError(f"dossier {folder} absent du dépôt")
+        try:
+            d = detect(root)
+        except Unsupported as e:
+            raise RuntimeError(str(e))
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    return {"own": True, "sha": sha} if d is None else {**d, "own": False, "sha": sha}
 
 
 def of(slug):
@@ -343,28 +435,18 @@ def of(slug):
 
 
 def forget(slug):
-    allv = db.kv_get("autobuild") or {}
-    if allv.pop(slug, None) is not None:
-        db.kv_set("autobuild", allv)
+    for key in ("autobuild", GIT_SOURCE, "autobuild_secrets"):
+        allv = db.kv_get(key) or {}
+        if allv.pop(slug, None) is not None:
+            db.kv_set(key, allv)
 
 
 def refresh(a, version):
     """Lit le dépôt de l'appli à cette version et garde ce qu'il faut construire. Lève RuntimeError si impossible."""
-    work = tempfile.mkdtemp(prefix="hangar-detect-")
-    try:
-        src = os.path.join(work, "src")
-        fetch(a["image"], version, src)
-        try:
-            d = detect(src)
-        except Unsupported as e:
-            raise RuntimeError(str(e))
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
+    src = source(a["slug"])
+    d = analyse(a["image"], version, src["dir"], src["token"])
     allv = db.kv_get("autobuild") or {}
-    if d is None:
-        allv[a["slug"]] = {"own": True, "version": version, "ts": time.time()}
-    else:
-        allv[a["slug"]] = {**d, "own": False, "version": version, "ts": time.time()}
+    allv[a["slug"]] = {**d, "version": version, "ts": time.time()}
     db.kv_set("autobuild", allv)
     return allv[a["slug"]]
 
@@ -380,11 +462,11 @@ def inline(slug):
 WATCH_EVERY = 120
 
 
-def head(repo, branch):
+def head(repo, branch, token=""):
     """Dernier commit d'une branche (git ls-remote, sans rien télécharger), ou None."""
     try:
         p = subprocess.run(["git", "ls-remote", "--", repo, f"refs/heads/{branch}"], capture_output=True, text=True,
-                           timeout=30, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+                           timeout=30, env={**os.environ, "GIT_TERMINAL_PROMPT": "0", **_auth_env(repo, token)})
     except (OSError, subprocess.TimeoutExpired):
         return None
     m = re.match(r"^([0-9a-f]{40})\s", p.stdout or "")
@@ -405,7 +487,7 @@ def watch_tick():
             continue
         if re.fullmatch(r"[0-9a-f]{7,40}", a["version"] or "") or not re.fullmatch(r"[A-Za-z0-9._/-]{1,120}", a["version"] or ""):
             continue   # commit figé : rien à suivre
-        sha = head(a["image"], a["version"])
+        sha = head(a["image"], a["version"], source(a["slug"])["token"])
         if not sha:
             continue
         last = seen.get(a["slug"])
@@ -420,3 +502,25 @@ def watch_tick():
         changed = True
     if changed:
         db.kv_set("git_watch", seen)
+
+
+# ---------------------------------------------------------------- variables attendues par certains frameworks
+
+def extra_env(slug):
+    """Variables données à l'appli selon sa technologie (une variable réglée dans la fiche l'emporte toujours)."""
+    ab = of(slug) or {}
+    if ab.get("framework") != "Django":
+        return {}
+    from . import domains as D
+    hosts = [h for h in (D.host_of(r) for r in D.routes(slug)) if h]
+    allv = db.kv_get("autobuild_secrets") or {}
+    if slug not in allv:
+        import secrets
+        allv[slug] = secrets.token_urlsafe(48)
+        db.kv_set("autobuild_secrets", allv)
+    names = ",".join(hosts + ["localhost", "127.0.0.1"])
+    origins = ",".join(f"https://{h}" for h in hosts)
+    env = {}
+    for pre in ("DJANGO_", ""):
+        env.update({f"{pre}ALLOWED_HOSTS": names, f"{pre}SECRET_KEY": allv[slug], f"{pre}CSRF_TRUSTED_ORIGINS": origins})
+    return env

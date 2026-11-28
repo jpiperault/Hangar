@@ -68,6 +68,16 @@
     </div>
     <div class="{{ 'row2' if new else '' }}">
       <div class="field {{ 'bad' if errors.image }}"><label for="image" id="imagelbl">Image</label><input id="image" name="image" value="{{ a.image }}" spellcheck="false" placeholder="ghcr.io/moi/courses-api">{{ err('image') }}</div>
+      <div class="githint gitbox" hidden>
+        <div class="field {{ 'bad' if errors.git_dir }}"><label for="git_dir">Dossier de l'appli dans le dépôt (facultatif)</label><input id="git_dir" name="git_dir" value="{{ (gsrc or {}).dir or '' }}" spellcheck="false" placeholder="racine du dépôt, ou apps/api">{{ err('git_dir') }}</div>
+        <div class="field {{ 'bad' if errors.git_token }}"><label for="git_token">Jeton de lecture (dépôt privé)</label><input id="git_token" name="git_token" type="password" autocomplete="new-password" spellcheck="false" placeholder="{{ 'enregistré : laisser vide pour le garder' if (gsrc or {}).token else 'dépôt public : rien à saisir' }}">{{ err('git_token') }}
+          {% if (gsrc or {}).token %}<label class="check"><input type="checkbox" name="git_token_drop"><span>Retirer le jeton enregistré</span></label>{% endif %}</div>
+        <div style="grid-column:1/-1;display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+          <button type="button" class="btn sm analyse">Analyser le dépôt</button>
+          <div class="hint analyse-out" aria-live="polite" style="flex:1;min-width:240px"></div>
+        </div>
+        <span class="hint" style="grid-column:1/-1">Jeton : GitHub, « fine-grained token » avec Contents en lecture seule sur ce dépôt ; GitLab ou Gitea, jeton avec read_repository.</span>
+      </div>
       <span class="hint githint" hidden>Avec ou sans Dockerfile : sans, Hangar reconnaît Node.js, Python, PHP, Go et les sites statiques, et écrit le Dockerfile lui-même. L'appli doit écouter sur le port 8080 (variable PORT, déjà fournie). Dépôt public, ou accessible depuis cette machine.</span>
       {% if new %}
       <div class="field {{ 'bad' if errors.version }}"><label for="version" id="versionlbl">Version (tag)</label><input id="version" name="version" value="{{ a.version }}" spellcheck="false" placeholder="latest">{{ err('version') }}</div>
@@ -243,6 +253,7 @@
     {% if ab and not ab.own %}<details><summary class="hint">Dockerfile écrit par Hangar (le dépôt n'en a pas)</summary>
       <pre class="log" style="max-height:320px">{{ ab.dockerfile }}</pre>
       <span class="hint">Pour le changer, ajoute un Dockerfile au dépôt (celui-ci peut servir de point de départ), ou un Procfile « web: … » pour la seule commande de démarrage.</span></details>{% endif %}
+    {% if ab and not ab.own %}{% for n in ab.notes or [] %}<p class="hint lv-warn" style="margin:0">{{ n }}</p>{% endfor %}{% endif %}
     {% if img_update and not a.latest_version and a.status != 'deploying' %}
     <form {% if can_deploy %}class="ro-ok" {% endif %}method="post" action="/apps/{{ a.slug }}/version"><input type="hidden" name="version" value="{{ a.version }}">
       <button class="btn primary sm">Mettre à jour ({{ a.version }})</button></form>
@@ -388,6 +399,16 @@
     </div>
     <div class="{{ 'row2' if new else '' }}">
       <div class="field {{ 'bad' if errors.image }}"><label for="image" id="imagelbl">Image</label><input id="image" name="image" value="{{ a.image }}" spellcheck="false" placeholder="ghcr.io/moi/courses-api">{{ err('image') }}</div>
+      <div class="githint gitbox" hidden>
+        <div class="field {{ 'bad' if errors.git_dir }}"><label for="git_dir">Dossier de l'appli dans le dépôt (facultatif)</label><input id="git_dir" name="git_dir" value="{{ (gsrc or {}).dir or '' }}" spellcheck="false" placeholder="racine du dépôt, ou apps/api">{{ err('git_dir') }}</div>
+        <div class="field {{ 'bad' if errors.git_token }}"><label for="git_token">Jeton de lecture (dépôt privé)</label><input id="git_token" name="git_token" type="password" autocomplete="new-password" spellcheck="false" placeholder="{{ 'enregistré : laisser vide pour le garder' if (gsrc or {}).token else 'dépôt public : rien à saisir' }}">{{ err('git_token') }}
+          {% if (gsrc or {}).token %}<label class="check"><input type="checkbox" name="git_token_drop"><span>Retirer le jeton enregistré</span></label>{% endif %}</div>
+        <div style="grid-column:1/-1;display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+          <button type="button" class="btn sm analyse">Analyser le dépôt</button>
+          <div class="hint analyse-out" aria-live="polite" style="flex:1;min-width:240px"></div>
+        </div>
+        <span class="hint" style="grid-column:1/-1">Jeton : GitHub, « fine-grained token » avec Contents en lecture seule sur ce dépôt ; GitLab ou Gitea, jeton avec read_repository.</span>
+      </div>
       <span class="hint githint" hidden>Avec ou sans Dockerfile : sans, Hangar reconnaît Node.js, Python, PHP, Go et les sites statiques, et écrit le Dockerfile lui-même. L'appli doit écouter sur le port 8080 (variable PORT, déjà fournie). Dépôt public, ou accessible depuis cette machine.</span>
       {% if new %}
       <div class="field {{ 'bad' if errors.version }}"><label for="version" id="versionlbl">Version (tag)</label><input id="version" name="version" value="{{ a.version }}" spellcheck="false" placeholder="latest">{{ err('version') }}</div>
@@ -960,6 +981,33 @@ try { /* … */ } catch (e) { hangar.report(e); }</pre>{% endif %}
 })();
 </script>
 {% endif %}
+<script nonce="{{ csp_nonce }}">
+(function () {   // « Analyser le dépôt » : ce que Hangar construira, avant de déployer
+  document.querySelectorAll('.analyse').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var f = b.form, out = b.parentNode.querySelector('.analyse-out'), fd = new FormData();
+      fd.append('repo', (f.elements.image.value || '').trim());
+      fd.append('ref', (f.elements.version ? f.elements.version.value : '').trim() || {{ (a.version or 'main') | tojson }});
+      fd.append('git_dir', f.elements.git_dir.value);
+      fd.append('git_token', f.elements.git_token.value);
+      fd.append('slug', {{ ('' if new else a.slug) | tojson }});
+      out.className = 'hint analyse-out'; out.textContent = 'Lecture du dépôt…'; b.disabled = true;
+      fetch('/depot/analyse', {method: 'POST', body: fd, credentials: 'same-origin'}).then(function (r) { return r.json(); })
+        .then(function (d) {
+          out.textContent = '';
+          if (!d.ok) { out.className = 'hint analyse-out lv-warn'; out.textContent = d.error; return; }
+          var t = document.createElement('strong');
+          t.textContent = d.own ? 'Dockerfile du dépôt : utilisé tel quel.' : d.label;
+          out.appendChild(t);
+          if (!d.own) out.appendChild(document.createTextNode(' · démarrage : ' + d.start));
+          if (d.sha) out.appendChild(document.createTextNode(' (commit ' + d.sha + ')'));
+          (d.notes || []).forEach(function (n) { var p = document.createElement('div'); p.textContent = n; out.appendChild(p); });
+        }).catch(function () { out.className = 'hint analyse-out lv-warn'; out.textContent = 'Analyse impossible (connexion à la console).'; })
+        .finally(function () { b.disabled = false; });
+    });
+  });
+})();
+</script>
 <script nonce="{{ csp_nonce }}">
 (function () {   // champs affichés selon le type d'appli (création : cartes ; fiche : liste)
   document.querySelectorAll('form').forEach(function (f) {
