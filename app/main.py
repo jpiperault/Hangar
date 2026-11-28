@@ -58,7 +58,8 @@ def _readonly_refused(request, user):
     p = request.url.path
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return "Compte en lecture seule : téléchargement réservé aux administrateurs." if p.endswith(AUDIT_GET) else None
-    if p in READONLY_OK or p in (f"/users/{user}/password", f"/users/{user}/lang", f"/users/{user}/onglets") or p.startswith(f"/users/{user}/2fa/"):
+    if p in READONLY_OK or p in (f"/users/{user}/password", f"/users/{user}/lang", f"/users/{user}/onglets", f"/users/{user}/api") \
+            or p.startswith(f"/users/{user}/api/") or p.startswith(f"/users/{user}/2fa/"):
         return None
     return "Compte en lecture seule : cette action est réservée aux administrateurs."
 
@@ -71,6 +72,27 @@ def _audit(request, user, ip, status, detail=None):
         pass
 
 
+async def _api(request, call_next, ip):
+    """API à jetons : ni session ni cookie, donc pas de contrôle d'origine ; jeton Bearer obligatoire (apitokens.py)."""
+    from fastapi.responses import JSONResponse
+    from . import apitokens
+    tok = await asyncio.to_thread(apitokens.check, request.headers.get("authorization"), ip)
+    if not tok:
+        _audit(request, None, ip, 401, "API : jeton manquant ou invalide")
+        return JSONResponse({"error": "jeton manquant ou invalide (Authorization: Bearer hgr_…)"}, status_code=401,
+                            headers={"WWW-Authenticate": "Bearer"})
+    request.state.api, request.state.role, request.state.lang = tok, tok["role"], i18n.DEFAULT
+    if request.method not in ("GET", "HEAD") and (tok["scope"] != "deploy" or tok["role"] == "lecture"):
+        response = JSONResponse({"error": "jeton en lecture seule"}, status_code=403)
+    else:
+        response = await call_next(request)
+    if request.method not in ("GET", "HEAD"):
+        _audit(request, f"api:{tok['user']}/{tok['name']}", ip, response.status_code)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.middleware("http")
 async def guard(request: Request, call_next):
     ip = request.client.host if request.client else ""
@@ -81,6 +103,8 @@ async def guard(request: Request, call_next):
         allowed = False
     if not allowed:
         return PlainTextResponse("Console réservée au réseau local.", status_code=403)
+    if request.url.path == "/api/v1" or request.url.path.startswith("/api/v1/"):
+        return await _api(request, call_next, ip)
     if request.method not in ("GET", "HEAD", "OPTIONS"):
         # formulaires : refusés s'ils viennent d'un autre site (en plus du cookie SameSite=Strict)
         # Sec-Fetch-Site d'abord (envoyé par tous les navigateurs récents) ; sinon l'en-tête Origin.
@@ -154,9 +178,9 @@ app.add_middleware(_Gzip)
 
 
 # routes, dans l'ordre (les plus précises avant /apps/{slug}/{action})
-from .routes import (appdata, apps, auth, backups, domains, features, ha, monitoring, nodes,  # noqa: E402
+from .routes import (api, appdata, apps, auth, backups, domains, features, ha, monitoring, nodes,  # noqa: E402
                      pages, settings, sitepub, system, wsterm)
 from .routes.auth import LOGIN_MAX_IP, _fails  # noqa: E402,F401  (pour les essais)
 
-for _r in (auth, ha, features, sitepub, wsterm, apps, domains, settings, pages, backups, system, appdata, monitoring, nodes):
+for _r in (api, auth, ha, features, sitepub, wsterm, apps, domains, settings, pages, backups, system, appdata, monitoring, nodes):
     app.include_router(_r.router)

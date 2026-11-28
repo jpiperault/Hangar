@@ -1,0 +1,30 @@
+<section class="panel" id="api" style="display:flex;flex-direction:column;gap:10px">
+  <h2 style="margin:0">Jetons d'API</h2>
+  <p class="hint" style="margin:0">Pour piloter Hangar depuis un script, une CI ou Claude (serveur MCP) : lire l'état des applis, leurs logs et leur trafic ; avec la portée « déploiement », déployer, démarrer, arrêter. Jamais plus que les droits de ce compte, et seulement depuis le réseau local. Documentation : <code>docs/api.md</code>.</p>
+  {% if api_new %}
+  <div class="flash ok" role="status" style="display:flex;flex-direction:column;gap:6px">
+    <strong>Jeton « {{ api_new.name }} » créé : copie-le maintenant, il ne sera plus affiché.</strong>
+    <input readonly value="{{ api_new.token }}" class="mono" aria-label="Nouveau jeton" style="width:100%">
+  </div>
+  {% endif %}
+  {% for t in api_tokens %}
+  <form class="cert ro-ok" method="post" action="/users/{{ user }}/api/{{ t.id }}/revoke" style="flex-wrap:wrap;gap:8px">
+    <span><strong>{{ t.name }}</strong> <span class="hint">· {{ api_scopes[t.scope] | tr }} · créé {{ t.created | ago }}{% if t.last_used %} · utilisé {{ t.last_used | ago }}{% else %} · jamais utilisé{% endif %}</span></span>
+    <button class="btn sm" data-confirm="Retirer ce jeton ? Ce qui l'utilise ne pourra plus se connecter.">Retirer</button>
+  </form>
+  {% endfor %}
+  <details><summary class="hint">Brancher Claude (serveur MCP)</summary>
+    <ol class="hint" style="padding-left:20px;display:flex;flex-direction:column;gap:6px">
+      <li>Télécharge <a href="/outils/hangar-mcp" download>hangar-mcp</a> (un fichier Python, sans dépendance) sur l'ordinateur où tourne Claude Code.</li>
+      <li>Crée un jeton ci-dessous (« lecture » pour diagnostiquer, « déploiement » pour aussi déployer).</li>
+      <li>Puis, dans un terminal :</li>
+    </ol>
+    <pre class="log" style="white-space:pre-wrap">claude mcp add hangar -e HANGAR_URL={{ api_url }} -e HANGAR_TOKEN=hgr_… -e HANGAR_FINGERPRINT={{ api_fp or '…' }} -- python3 /chemin/vers/hangar-mcp</pre>
+    <span class="hint">L'empreinte épingle le certificat auto-signé de la console : une autre machine se faisant passer pour elle est refusée. Le serveur demande à Claude de te confirmer tout déploiement ou arrêt avant de le lancer.</span>
+  </details>
+  <form class="ro-ok" method="post" action="/users/{{ user }}/api" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end" autocomplete="off">
+    <div class="field" style="flex:1;min-width:160px"><label for="apiname">Nom</label><input id="apiname" name="name" maxlength="60" placeholder="Claude, CI GitHub…" required></div>
+    <div class="field"><label for="apiscope">Portée</label><select id="apiscope" name="scope">{% for k, v in api_scopes.items() %}<option value="{{ k }}">{{ v | tr }}</option>{% endfor %}</select></div>
+    <button class="btn sm primary" style="margin-bottom:4px">Créer un jeton</button>
+  </form>
+</section>

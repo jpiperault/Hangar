@@ -17,7 +17,7 @@ router = APIRouter()
 
 @router.get("/settings")
 async def settings_page(request: Request):
-    return render(request, "settings.html", title="Réglages", nav="settings", acc=access.current(),
+    return render(request, "settings.html", title="Réglages", nav="settings", acc=access.current(), **_api_ctx(request),
                   ips=access.local_ips(), pending=access.pending(), client=request.client.host,
                   users=db.q("SELECT username, role, totp_secret IS NOT NULL AS totp FROM users ORDER BY username"),
                   registries=P.registry_logins(), totp_setup=_setup_ctx(request), totp_codes=request.session.pop("totp_codes", None),
@@ -141,10 +141,68 @@ async def users_remove(request: Request, name: str):
     else:
         db.x("DELETE FROM users WHERE username = ?", (name,))
         perms.forget_user(name)
+        from .. import apitokens
+        apitokens.forget_user(name)
         db.x("DELETE FROM sessions WHERE username = ?", (name,))
         P.log("info", "console", f"compte {name} supprimé par {me}")
         flash(request, f"Compte {name} supprimé, ses sessions sont fermées.")
     return go("/settings#comptes")
+
+
+CONSOLE_CERT = "/srv/platform/tls/hangar.crt"
+
+
+def console_fingerprint():
+    """Empreinte SHA-256 du certificat (auto-signé) de la console : à épingler dans le serveur MCP."""
+    import hashlib
+    import ssl
+    try:
+        return hashlib.sha256(ssl.PEM_cert_to_DER_cert(open(CONSOLE_CERT).read())).hexdigest()
+    except (OSError, ValueError):
+        return ""
+
+
+def _api_ctx(request):
+    from .. import apitokens
+    return {"api_tokens": apitokens.of_user(request.session.get("user") or ""), "api_scopes": apitokens.SCOPES,
+            "api_new": request.session.pop("api_new", None), "api_fp": console_fingerprint(),
+            "api_url": f"https://{request.url.netloc}"}
+
+
+@router.get("/outils/hangar-mcp")
+async def mcp_download(request: Request):
+    """Serveur MCP (un fichier Python) à copier sur l'ordinateur où tourne Claude."""
+    import os
+    from fastapi.responses import FileResponse
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "deploy", "bin", "hangar-mcp")
+    return FileResponse(path, media_type="text/x-python", filename="hangar-mcp")
+
+
+@router.post("/users/{name}/api")
+async def api_token_create(request: Request, name: str):
+    """Jeton d'API pour son propre compte ; affiché une seule fois (session), jamais gardé en clair."""
+    from .. import apitokens
+    me = request.session.get("user")
+    f = await request.form()
+    if name == me:
+        scope = f.get("scope") if getattr(request.state, "role", "admin") != "lecture" else "read"
+        try:
+            _, tok = apitokens.create(me, f.get("name"), scope)
+            request.session["api_new"] = {"name": (f.get("name") or "").strip(), "token": tok}
+            P.log("info", "console", f"jeton d'API « {(f.get('name') or '').strip()} » ({scope}) créé par {me}")
+        except ValueError as e:
+            flash(request, f"Refusé : {e}", "error")
+    return go(_mine(request) + "#api")
+
+
+@router.post("/users/{name}/api/{tid}/revoke")
+async def api_token_revoke(request: Request, name: str, tid: str):
+    from .. import apitokens
+    me = request.session.get("user")
+    if name == me and apitokens.revoke(tid, me):
+        P.log("info", "console", f"jeton d'API retiré par {me}")
+        flash(request, "Jeton retiré.")
+    return go(_mine(request) + "#api")
 
 
 def _mine(request):
@@ -157,7 +215,7 @@ async def my_account(request: Request):
     if getattr(request.state, "role", "admin") != perms.ROLE:
         return go("/settings#2fa")
     me = request.session.get("user")
-    return render(request, "compte.html", title="Mon compte", nav="compte", my_scopes=perms.scopes(me),
+    return render(request, "compte.html", title="Mon compte", nav="compte", my_scopes=perms.scopes(me), **_api_ctx(request),
                   names={a["slug"]: a["name"] for a in db.apps()}, levels=perms.LEVELS,
                   users=db.q("SELECT username, role, totp_secret IS NOT NULL AS totp FROM users WHERE username = ?", (me,)),
                   totp_setup=_setup_ctx(request), totp_codes=request.session.pop("totp_codes", None),
