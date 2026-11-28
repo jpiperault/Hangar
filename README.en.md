@@ -88,9 +88,17 @@ tests/               automated tests (pytest), run on every push by GitHub Actio
 
 ## Installation (Debian 13)
 
+On a fresh Debian 13, in one command, with no mandatory question:
+
 ```bash
-./install.sh                     # questions: IP, local network, domain, mode
-./install.sh --domain exemple.fr --mode tunnel --tunnel-token <jeton> --restore archive.tar.gz --yes
+curl -fsSL https://raw.githubusercontent.com/jpiperault/Hangar/main/get.sh | sudo bash
+```
+
+At the end, the script shows the console address and the password. In the console, the **Quick start** page asks for your domain and a Cloudflare API token: Hangar creates the tunnel, connects it and manages the public names; a button publishes an example app. From a copy of the repository:
+
+```bash
+./install.sh                     # IP and network detected, domain set later in the console
+./install.sh --domain example.com --mode tunnel --tunnel-token <token> --restore archive.tar.gz --yes
 ```
 
 The script installs Docker, Caddy, cloudflared, restic and rclone, then PostgreSQL, the console, the firewall and the services. It generates the secrets and the administrator account, and can restore an archive right away. It is idempotent: running it again replaces no existing secret or setting.

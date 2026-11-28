@@ -2,8 +2,10 @@
 # Installation de Hangar sur Debian 13 (conteneur LXC Proxmox, VM ou serveur dédié).
 # Idempotent : peut être relancé ; les secrets et réglages existants ne sont jamais remplacés.
 #
-#   ./install.sh                                  installation interactive
+#   ./install.sh                                  installation : aucune question obligatoire (domaine réglé ensuite
+#                                                 dans la console, page Démarrage rapide)
 #   ./install.sh --domain exemple.fr --mode tunnel --tunnel-token <jeton> --restore hangar-….tar.gz --yes
+#   curl -fsSL <adresse brute de get.sh> | sudo bash   (tout en une commande : voir get.sh)
 #
 # À lancer en root depuis une copie du dépôt (git clone ou archive du dépôt).
 set -euo pipefail
@@ -15,7 +17,7 @@ DEST=/opt/hangar
 usage() {
   cat <<EOF
 Usage : $0 [options]
-  --domain DOMAINE      domaine de base (ex. exemple.fr)
+  --domain DOMAINE      domaine de base (ex. exemple.fr) ; facultatif : sinon, dans la console (Démarrage rapide)
   --hub NOM             hôte des routes par chemin (défaut : apps → apps.DOMAINE)
   --mode tunnel|direct  tunnel Cloudflare (défaut) ou direct (ports 80/443, Let's Encrypt)
   --ip IP               IP locale de la console (défaut : IP de l'interface principale)
@@ -70,29 +72,33 @@ fi
 
 DEFIF=$(ip -4 route show default | awk '{print $5; exit}')
 DEFIP=$(ip -4 -o addr show dev "${DEFIF:-eth0}" 2>/dev/null | awk '{print $4; exit}')
-ask IP "IP locale de la console" "${DEFIP%/*}"
+# IP et réseau détectés : plus de question (--ip, --lan pour les changer, puis réglables dans la console)
+IP="${IP:-${DEFIP%/*}}"
 if [ -z "$LAN" ] && [ -n "$DEFIP" ]; then
   LAN=$(python3 -c "import ipaddress,sys;print(ipaddress.ip_interface(sys.argv[1]).network)" "$DEFIP")
 fi
-ask LAN "Réseau local autorisé" "${LAN:-192.168.1.0/24}"
+LAN="${LAN:-192.168.1.0/24}"
 
 if [ -f /srv/platform/.env ]; then
   info "Configuration existante trouvée (/srv/platform/.env) : domaine et mode conservés."
   . /srv/platform/.env
   DOMAIN="${DOMAIN:-$BASE_DOMAIN}"; MODE="${MODE:-$EXPOSURE_MODE}"
 fi
-ask DOMAIN "Domaine de base (ex. exemple.fr)" ""
-printf %s "$DOMAIN" | grep -Eq '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$' \
-  || die "domaine invalide ou manquant : --domain exemple.fr (un domaine que tu gères chez Cloudflare ou ailleurs)"
-ask MODE "Mode d'exposition (tunnel ou direct)" "tunnel"
+if [ -n "$DOMAIN" ]; then
+  printf %s "$DOMAIN" | grep -Eq '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$' \
+    || die "domaine invalide : --domain exemple.fr (un domaine que tu gères chez Cloudflare ou ailleurs)"
+fi
+MODE="${MODE:-tunnel}"
 case "$MODE" in tunnel|direct) ;; *) die "mode invalide : $MODE";; esac
 python3 -c "import ipaddress,sys;ipaddress.ip_address(sys.argv[1]);ipaddress.ip_network(sys.argv[2])" "$IP" "$LAN" \
   || die "IP ou réseau invalide : $IP / $LAN"
 
 echo
-info "Console : https://$IP:8443 (réseau $LAN)   Domaine : $HUB.$DOMAIN   Mode : $MODE"
+info "Console : https://$IP:8443 (réseau $LAN)   Domaine : ${DOMAIN:+$HUB.$DOMAIN ($MODE)}${DOMAIN:-à régler dans la console}"
 [ -n "$RESTORE" ] && info "Restauration de : $RESTORE"
-if [ "$YES" != 1 ]; then read -r -p "    Continuer ? [O/n] " r </dev/tty || true; case "${r:-o}" in [oOyY]*) ;; *) exit 1;; esac; fi
+if [ "$YES" != 1 ] && [ -r /dev/tty ]; then
+  read -r -p "    Continuer ? [O/n] " r </dev/tty || true; case "${r:-o}" in [oOyY]*) ;; *) exit 1;; esac
+fi
 
 export DEBIAN_FRONTEND=noninteractive
 # --no-upgrade : un paquet déjà présent n'est jamais mis à jour ici (les mises à jour passent par la console)
@@ -227,11 +233,9 @@ systemctl enable --now platform-backup.timer >/dev/null 2>&1
 systemctl enable hangar.service >/dev/null 2>&1
 systemctl restart hangar.service
 
-if [ "$MODE" = tunnel ] && [ -n "$TOKEN" ]; then
-  step "Tunnel Cloudflare"
-  install -d -m 0755 /etc/cloudflared
-  umask 077; printf '%s\n' "$TOKEN" > /etc/cloudflared/token; umask 022
-  cat > /etc/systemd/system/cloudflared.service <<'EOF'
+step "Tunnel Cloudflare"
+install -d -m 0755 /etc/cloudflared
+cat > /etc/systemd/system/cloudflared.service <<'EOF'
 [Unit]
 Description=Cloudflare Tunnel client
 After=network-online.target
@@ -246,10 +250,16 @@ RestartSec=5s
 [Install]
 WantedBy=multi-user.target
 EOF
-  systemctl daemon-reload
+systemctl daemon-reload
+if [ "$MODE" = tunnel ] && [ -n "$TOKEN" ]; then
+  umask 077; printf '%s\n' "$TOKEN" > /etc/cloudflared/token; umask 022
+fi
+if [ -s /etc/cloudflared/token ]; then
   systemctl enable --now cloudflared >/dev/null 2>&1
   systemctl restart cloudflared
   info "cloudflared lancé"
+else
+  info "service prêt : la console le relie (Démarrage rapide : domaine + jeton Cloudflare)"
 fi
 
 step "Compte administrateur"
@@ -276,8 +286,13 @@ hangar segment | sed 's/^/    /' || echo "    Cloisonnement incomplet : relance 
 
 step "Terminé"
 info "Console : https://$IP:8443  (réseau local uniquement, certificat auto-signé)"
-[ "$NEWPW" = 1 ] && info "Identifiants : cat /root/hangar-mot-de-passe.txt   (à changer avec : hangar passwd)"
-if [ "$MODE" = tunnel ]; then
+if [ "$NEWPW" = 1 ]; then
+  info "Identifiant : $(sed -n 's/^identifiant *: *//p' /root/hangar-mot-de-passe.txt)   Mot de passe : $(sed -n 's/^mot de passe *: *//p' /root/hangar-mot-de-passe.txt)"
+  info "(gardé dans /root/hangar-mot-de-passe.txt ; à changer dans la console, Mon compte)"
+fi
+if [ -z "$DOMAIN" ]; then
+  info "Ensuite : ouvre la console, page « Démarrage rapide » : ton domaine et un jeton Cloudflare, et c'est en ligne."
+elif [ "$MODE" = tunnel ]; then
   if ! systemctl is-active -q cloudflared; then
     info "Tunnel : cloudflared n'est pas relié. Relance avec --tunnel-token <jeton> (Zero Trust › Tunnels)."
   fi

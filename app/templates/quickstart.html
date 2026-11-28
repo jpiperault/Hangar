@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="bar">
+  <div><div class="crumb"><a href="/">Applications</a> /</div><h1>Démarrage rapide</h1></div>
+  <a class="btn sm link" href="/bienvenue">Toute la liste des réglages</a>
+</div>
+<p class="hint" style="margin:6px 0 16px">Deux étapes pour mettre une première appli en ligne sur ton domaine, sans rien ouvrir sur ta box. Le reste (sauvegardes, alertes, autres machines) se règle ensuite.</p>
+
+<section class="panel" id="domaine" style="display:flex;flex-direction:column;gap:12px">
+  <div class="bar" style="margin:0"><h2 style="margin:0">1. Ton domaine</h2>
+    {% if st.domain and st.tunnel %}<span class="pill s-running">fait</span>{% endif %}</div>
+  {% if st.domain and st.tunnel %}
+    <p style="margin:0"><strong>{{ st.domain }}</strong> est publié par le tunnel Cloudflare{% if st.cf %}, et Hangar crée tout seul les noms de tes applis{% endif %}.</p>
+    <a class="btn sm" href="/domains" style="align-self:flex-start">Gérer les domaines</a>
+  {% else %}
+  <p class="hint" style="margin:0">Il faut un domaine géré par Cloudflare (gratuit) et un jeton d'API. Hangar crée le tunnel <code>{{ st.tunnel_name }}</code>, le relie, puis crée et retire lui-même les noms de tes applis.</p>
+  <ol class="hint" style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px">
+    <li>Dans Cloudflare : <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener">Mon profil › Jetons d'API</a> › Créer un jeton › Modèle personnalisé.</li>
+    <li>Autorisations : <strong>Compte › Cloudflare Tunnel › Modifier</strong>, <strong>Zone › DNS › Modifier</strong>, <strong>Zone › Zone › Lire</strong>.</li>
+    <li>Ressources de zone : ton domaine (ou toutes les zones). Crée le jeton et copie-le : il ne s'affiche qu'une fois.</li>
+  </ol>
+  <form method="post" action="/demarrage/domaine" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end" autocomplete="off">
+    <div class="field" style="flex:1;min-width:200px"><label for="qsdomain">Domaine</label><input id="qsdomain" name="domain" value="{{ form.domain or '' }}" placeholder="exemple.fr" spellcheck="false" required></div>
+    <div class="field" style="flex:2;min-width:240px"><label for="qstoken">Jeton d'API Cloudflare</label><input id="qstoken" name="token" type="password" autocomplete="new-password" spellcheck="false" required></div>
+    <button class="btn primary" style="margin-bottom:4px">Relier</button>
+  </form>
+  <span class="hint">Le jeton reste sur cette machine (lisible par root seulement) et n'est jamais réaffiché. Tu préfères tout régler à la main, ou exposer en direct (ports 80 et 443) ? Page <a href="/domains">Domaines</a>.</span>
+  {% endif %}
+</section>
+
+<section class="panel" id="appli" style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
+  <div class="bar" style="margin:0"><h2 style="margin:0">2. Ta première appli</h2>
+    {% if st.app %}<span class="pill s-running">fait</span>{% endif %}</div>
+  {% if st.app %}
+    <p style="margin:0"><a href="/apps/{{ st.app.slug }}"><strong>{{ st.app.name }}</strong></a>{% if app_url %} répond sur <a href="{{ app_url }}" target="_blank" rel="noopener">{{ app_url }}</a>{% endif %}.</p>
+  {% elif not st.domain %}
+    <p class="hint" style="margin:0">Après l'étape 1.</p>
+  {% else %}
+    <p class="hint" style="margin:0">Trois façons, de la plus rapide à la plus personnelle :</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px">
+      {% if example %}
+      <form class="cert" method="post" action="/catalogue/install" style="flex-direction:column;align-items:flex-start;gap:8px">
+        <strong>Un exemple en un clic</strong>
+        <span class="hint">{{ example.name }}, une boîte à outils web, sur <code>outils.{{ st.domain }}</code>.</span>
+        <input type="hidden" name="app" value="it-tools"><input type="hidden" name="slug" value="outils">
+        <input type="hidden" name="name" value="{{ example.name }}"><input type="hidden" name="sub" value="outils">
+        <input type="hidden" name="domain" value="{{ st.domain }}"><input type="hidden" name="node" value="local">
+        <button class="btn sm primary">Publier l'exemple</button>
+      </form>
+      {% endif %}
+      <a class="cert" href="/apps/new" style="flex-direction:column;align-items:flex-start;gap:8px;text-decoration:none;color:inherit">
+        <strong>Ton code, depuis GitHub</strong>
+        <span class="hint">Colle l'adresse du dépôt : Hangar reconnaît Node.js, Python, PHP ou Go et construit sans Dockerfile.</span>
+        <span class="btn sm">Nouvelle appli</span></a>
+      <a class="cert" href="/catalogue" style="flex-direction:column;align-items:flex-start;gap:8px;text-decoration:none;color:inherit">
+        <strong>Une appli prête</strong>
+        <span class="hint">Nextcloud, Vaultwarden, Uptime Kuma, WordPress… configurées pour Hangar.</span>
+        <span class="btn sm">Catalogue</span></a>
+    </div>
+  {% endif %}
+</section>
+
+<section class="panel" style="display:flex;flex-direction:column;gap:8px;margin-top:16px">
+  <h2 style="margin:0">Ensuite, pour dormir tranquille</h2>
+  <a class="cert" href="/backups" style="text-decoration:none;color:inherit"><span><strong>Sauvegardes</strong> <span class="hint">· chaque nuit, chiffrées, vers Google Drive ou un NAS</span></span><span class="btn sm">Régler</span></a>
+  <a class="cert" href="/system#alertes" style="text-decoration:none;color:inherit"><span><strong>Alertes</strong> <span class="hint">· sur ton téléphone si une appli tombe</span></span><span class="btn sm">Régler</span></a>
+</section>
+{% endblock %}

@@ -27,7 +27,7 @@ jobs:
         run: ruff check app tests
       - name: Scripts shell
         run: |
-          for f in install.sh deploy/node/*.sh deploy/bin/hangar; do bash -n "$f"; done
-          shellcheck -S error install.sh deploy/node/*.sh deploy/bin/hangar
+          for f in install.sh get.sh deploy/node/*.sh deploy/bin/hangar; do bash -n "$f"; done
+          shellcheck -S error install.sh get.sh deploy/node/*.sh deploy/bin/hangar
       - name: Tests (pare-feu vérifiés par nft via sudo)
         run: pytest

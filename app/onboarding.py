@@ -15,11 +15,12 @@ def steps():
     s = db.settings()
     out = [
         {"key": "domain", "done": bool(doms), "essential": True, "title": "Ajouter un domaine",
-         "text": "Le nom sous lequel tes applis seront publiées (exemple.fr → appli.exemple.fr).", "href": "/domains"},
+         "text": "Le nom sous lequel tes applis seront publiées (exemple.fr → appli.exemple.fr) : un domaine et un jeton "
+                 "Cloudflare, Hangar fait le reste.", "href": "/demarrage"},
         {"key": "tunnel", "done": bool(doms) and (not tunnel or os.path.exists(P.TUNNEL_TOKEN)), "essential": True,
          "title": "Relier le tunnel Cloudflare" if tunnel or not doms else "Exposition directe",
          "text": "Jeton du tunnel (Cloudflare Zero Trust → Networks → Tunnels) : rien à ouvrir sur ta box. "
-                 "En mode direct, les ports 80 et 443 doivent arriver sur la machine d'entrée.", "href": "/domains#tunnel"},
+                 "En mode direct, les ports 80 et 443 doivent arriver sur la machine d'entrée.", "href": "/demarrage" if tunnel else "/domains#tunnel"},
         {"key": "dns", "done": bool(cloudflare.token()) or not tunnel, "essential": False,
          "title": "Laisser Hangar créer les DNS",
          "text": "Un jeton d'API Cloudflare (droit DNS) : chaque nouvelle adresse est créée et retirée toute seule.",

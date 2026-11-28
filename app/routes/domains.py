@@ -145,3 +145,32 @@ async def save_tunnel_token(request: Request):
     P.spawn(cloudflare.sync_quiet)
     flash(request, f"Jeton enregistré. cloudflared est connecté au tunnel {tid}.")
     return go("/domains#tunnel")
+
+
+# ---------------------------------------------------------------- démarrage rapide
+
+@router.get("/demarrage")
+async def quickstart_page(request: Request):
+    from .. import catalog, quickstart
+    st = await asyncio.to_thread(quickstart.state)
+    example = catalog.get("it-tools")
+    app_url = D.primary_url(st["app"]["slug"]) if st["app"] else None
+    return render(request, "quickstart.html", title="Démarrage rapide", nav="apps", st=st, example=example, app_url=app_url,
+                  form=request.session.pop("qsform", {}))
+
+
+@router.post("/demarrage/domaine")
+async def quickstart_connect(request: Request):
+    from .. import quickstart
+    if getattr(request.state, "role", "admin") != "admin":
+        flash(request, "Réservé aux administrateurs.", "error")
+        return go("/demarrage")
+    f = await request.form()
+    try:
+        name = await asyncio.to_thread(quickstart.connect, f.get("domain"), f.get("token"))
+    except (ValueError, RuntimeError) as e:
+        request.session["qsform"] = {"domain": f.get("domain") or ""}
+        flash(request, str(e), "error")
+        return go("/demarrage#domaine")
+    flash(request, f"{name} est relié : le tunnel Cloudflare est connecté et Hangar gère ses noms publics.")
+    return go("/demarrage#appli")

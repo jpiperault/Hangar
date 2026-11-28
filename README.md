@@ -90,8 +90,16 @@ tests/               tests automatiques (pytest), lancés à chaque push par Git
 
 ## Installation (Debian 13)
 
+Sur un Debian 13 neuf, en une commande, sans question obligatoire :
+
 ```bash
-./install.sh                     # questions : IP, réseau local, domaine, mode
+curl -fsSL https://raw.githubusercontent.com/jpiperault/Hangar/main/get.sh | sudo bash
+```
+
+À la fin, le script affiche l'adresse de la console et le mot de passe. Dans la console, la page **Démarrage rapide** demande ton domaine et un jeton d'API Cloudflare : Hangar crée le tunnel, le relie et gère les noms publics ; un bouton publie une appli d'exemple. Depuis une copie du dépôt :
+
+```bash
+./install.sh                     # IP et réseau détectés, domaine réglé ensuite dans la console
 ./install.sh --domain exemple.fr --mode tunnel --tunnel-token <jeton> --restore archive.tar.gz --yes
 ```
 
